@@ -40,6 +40,7 @@ function committeeState(): GameState {
   state.project!.mode = 'committee'
   state.project!.investment_percent = 10
   state.project!.committee_pressure = 0
+  state.project!.total_investment = state.project!.offer.contract_budget * 2
   state.project!.finance.investment_paid = 1_000_000
   state.company.finance.investment_paid = 1_000_000
   state.company.funds = 6_000_000
@@ -881,9 +882,7 @@ describe('M2 契约扩展第二批：企划槽位、委员会渠道、成本类�
     state.pending_proposal = slotOffer('v3_proposal', 'proposal')
     return state
   }
-  const member = (id: string, share: number, channels: unknown[]) => ({
-    id, name: `成员${id}`, share_percent: share, channels: channels as CommitteeMember['channels'],
-  })
+  const member = (id: string, channel: CommitteeMember['channel']) => ({ id, name: `成员${id}`, channel })
   const baseOffer = () => structuredClone(v3IdleState().offers[2])
 
   it('自定与提案槽独立于市场四企划；缺省可选字段保持兼容', () => {
@@ -977,16 +976,16 @@ describe('M2 契约扩展第二批：企划槽位、委员会渠道、成本类�
     expect(isProjectOffer({ ...offer, required_works: [{ rating: 'S' }, { rating: 'S', source: 'manga' }] })).toBe(true)
   })
 
-  it('委员会阵容立项固定：持股与投资比例合计恰为 100；承制必须为 null', () => {
+  it('委员会阵容立项固定：成员只绑定一个渠道，承制必须为 null', () => {
     const committee = committeeState()
-    committee.project!.committee = [member('m1', 60, ['toy']), member('m2', 30, ['music'])]
+    committee.project!.committee = [member('m1', 'toy'), member('m2', 'music')]
     expect(isGameState(committee)).toBe(true)
-    expect(isGameState(changed(committee, 'project.committee.0.share_percent', 50))).toBe(false)
+    expect(isGameState(changed(committee, 'project.committee.0.channel', 'bd'))).toBe(false)
     expect(isGameState(changed(committee, 'project.committee', null))).toBe(false)
     expect(isGameState(changed(committee, 'project.committee', undefined, true))).toBe(true)
     const contract = v3ProducingState()
     expect(isGameState(changed(contract, 'project.committee', null))).toBe(true)
-    expect(isGameState(changed(contract, 'project.committee', [member('m1', 90, ['toy'])]))).toBe(false)
+    expect(isGameState(changed(contract, 'project.committee', [member('m1', 'toy')]))).toBe(false)
   })
 
   it('buy_tv_service 仅委员会在制项目且未购买时可用；服务记录要求正花费与合法周', () => {
