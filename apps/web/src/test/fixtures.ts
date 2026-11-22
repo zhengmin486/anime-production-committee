@@ -72,8 +72,7 @@ const v3Team = (staff: V3Staff[]): V3TeamSnapshot[] => staff.map((person) => ({
 
 export function v3IdleState(): V3GameState {
   const offer: V3GameState['offers'][number] = {
-    id: 'v3_ova', name: '放学后的第七帧', source: 'manga', scale: 'ova', total_investment: 10_000_000,
-    contract_budget: 2_000_000, duration_weeks: 5, target_quality: 60, audience_base: 60,
+    id: 'v3_ova', name: '放学后的第七帧', source: 'manga', scale: 'ova', contract_budget: 2_000_000, duration_weeks: 5, target_quality: 60, audience_base: 60,
     commercial_potential: 65, risk: 'low', allowed_modes: ['contract', 'committee'],
     workloads: { script: 100, storyboard: 100, key_animation: 100, animation_check: 100, postproduction: 100 }, previous_work_id: null,
   }
@@ -85,9 +84,9 @@ export function v3IdleState(): V3GameState {
     },
     offers: [
       offer,
-      { ...structuredClone(offer), id: 'v3_short', name: '纸飞机电台', source: 'light_novel', scale: 'short', total_investment: 6_000_000, contract_budget: 1_200_000, duration_weeks: 8, target_quality: 55, audience_base: 40, commercial_potential: 50 },
-      { ...structuredClone(offer), id: 'v3_tv', name: '星轨列车', source: 'game', scale: 'tv', total_investment: 30_000_000, contract_budget: 6_000_000, duration_weeks: 24, target_quality: 75, audience_base: 80, risk: 'medium' },
-      { ...structuredClone(offer), id: 'v3_movie', name: '未寄出的夏天', source: 'original', scale: 'movie', total_investment: 50_000_000, contract_budget: 10_000_000, duration_weeks: 40, target_quality: 85, audience_base: 0, commercial_potential: 90, risk: 'high', allowed_modes: ['committee'] },
+      { ...structuredClone(offer), id: 'v3_short', name: '纸飞机电台', source: 'light_novel', scale: 'short', contract_budget: 1_200_000, duration_weeks: 8, target_quality: 55, audience_base: 40, commercial_potential: 50 },
+      { ...structuredClone(offer), id: 'v3_tv', name: '星轨列车', source: 'game', scale: 'tv', contract_budget: 6_000_000, duration_weeks: 24, target_quality: 75, audience_base: 80, risk: 'medium' },
+      { ...structuredClone(offer), id: 'v3_movie', name: '未寄出的夏天', source: 'original', scale: 'movie', contract_budget: 10_000_000, duration_weeks: 40, target_quality: 85, audience_base: 0, commercial_potential: 90, risk: 'high', allowed_modes: ['committee'] },
     ],
     recruitment_pool: [],
     suppliers: [{ id: 'v3_supplier', name: '青叶协力工作室', specialties: ['direction', 'drawing'], capacity: 100, quality: 68, speed: 20, unit_price: 1_500, reliability: 80, unlocked: true }],
