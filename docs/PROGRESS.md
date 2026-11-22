@@ -170,3 +170,12 @@ V1.0 的核心方向和主要跨系统规则已形成明确口径；M1 的 C++/W
 - 只有委员会模式允许拉入委员会成员开放额外渠道；承制模式不拉委员会成员。一个成员对应一个渠道，加入即开放。
 - BD可用“毛收入−50%综合成本”或“毛收入×0.5”实现；公司最终只取得毛收入50%，不得重复扣除成本。
 - 已同步更新 GAME_DESIGN、GAME_RULES、DATA_MODEL、API、PROGRESS、INDUSTRY_RESEARCH、TEAM_PLAN 的目标规则口径。仍需 #6 同步报价生成、TypeScript/C++字段约束、核心校验与测试；文档更新不代表实现完成。
+
+
+## 14. 合同预算与委员会成员契约迁移（2026-11-23）
+
+- 已在独立分支 `contract-committee-contract-alignment` 对齐 C++ 与 TypeScript 的字段归属：`ProjectOffer.contract_budget` 是唯一制作预算字段，报价对象不再携带 `total_investment`；固定企划目录保留原先按旧规则算出的合同预算金额，不再运行时从投资规模反推。
+- C++ 的 `Project` 校验要求承制模式不含 `total_investment`；委员会模式要求 `total_investment = contract_budget × 2`。委员会实际开工/投资结算行为仍未接入，不能据此视为委员会玩法已实现。
+- 委员会成员的 C++/TypeScript 结构统一为 `{id, name, channel}`，并拒绝旧的 `share_percent`、`channels[]` 字段；移除了成员投资比例求和校验。
+- 已同步调整 C++ 与 TypeScript 对应测试，以及前端测试夹具。**本次尚未运行本地测试、WASM 构建或浏览器验收**；合并前必须由 CI/执行环境验证。
+- 本次只处理两个 P0 契约冲突，不包含初始声望100、development/distribution 初始化等其他审查项。
