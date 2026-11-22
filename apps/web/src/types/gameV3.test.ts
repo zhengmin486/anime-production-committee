@@ -981,6 +981,7 @@ describe('M2 契约扩展第二批：企划槽位、委员会渠道、成本类�
     committee.project!.committee = [member('m1', 'toy'), member('m2', 'music')]
     expect(isGameState(committee)).toBe(true)
     expect(isGameState(changed(committee, 'project.committee.0.channel', 'bd'))).toBe(false)
+    expect(isGameState(changed(committee, 'project.committee.0.share_percent', 50))).toBe(false)
     expect(isGameState(changed(committee, 'project.committee', null))).toBe(false)
     expect(isGameState(changed(committee, 'project.committee', undefined, true))).toBe(true)
     const contract = v3ProducingState()
