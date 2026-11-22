@@ -28,8 +28,7 @@ export type WorkRating = 'S' | 'A' | 'B' | 'C' | 'D'
 export interface CommitteeMember {
   id: string
   name: string
-  share_percent: number
-  channels: MemberChannel[]
+  channel: MemberChannel
 }
 
 export interface ChannelPotentials {
@@ -184,6 +183,7 @@ export interface OutsourceTask {
 export interface Project {
   offer: ProjectOffer
   mode: CooperationMode
+  total_investment?: number
   investment_percent: number
   opening_funds: number
   start_week: number
@@ -409,10 +409,8 @@ const styleOriginRule = (value: Record<string, unknown>) => {
 }
 
 // M2 渠道框架结构守卫（DATA_MODEL V3.7）：BD 是基础渠道，股东只带其余四类。
-export const isCommitteeMember = (value: unknown): value is CommitteeMember => isRecord(value) && isText(value.id) && isText(value.name)
-  && integer(value.share_percent, 1, 100) && arrayOf(value.channels, isMemberChannel) && value.channels.length > 0 && unique(value.channels)
+export const isCommitteeMember = (value: unknown): value is CommitteeMember => isRecord(value) && isText(value.id) && isText(value.name) && isMemberChannel(value.channel)
 const isCommitteeMembers = (value: unknown): value is CommitteeMember[] => arrayOf(value, isCommitteeMember) && value.length > 0 && uniqueIds(value)
-const shareSum = (members: CommitteeMember[]) => members.reduce((sum, member) => sum + member.share_percent, 0)
 const isChannelPotentials = (value: unknown): value is ChannelPotentials => isRecord(value) && score(value.bd)
   && (value.publisher === undefined || score(value.publisher)) && (value.toy === undefined || score(value.toy))
   && (value.music === undefined || score(value.music)) && (value.tv_broadcast === undefined || score(value.tv_broadcast))
@@ -432,7 +430,7 @@ const isChannelBreakdown = (value: unknown, revenue: number, companyReceived: nu
 
 export function isProjectOffer(value: unknown): value is ProjectOffer {
   return isRecord(value) && isText(value.id) && isText(value.name) && isSource(value.source) && isScale(value.scale)
-    && integer(value.total_investment) && integer(value.contract_budget) && integer(value.duration_weeks, 1)
+    && integer(value.contract_budget) && integer(value.duration_weeks, 1)
     && score(value.target_quality) && score(value.audience_base) && score(value.commercial_potential)
     && choice(value.risk, ['low', 'medium', 'high']) && arrayOf(value.allowed_modes, isCooperationMode)
     && value.allowed_modes.length > 0 && unique(value.allowed_modes)
@@ -524,11 +522,11 @@ export function isProject(value: unknown): value is Project {
     || !arrayOf(value.temporary_staff, isStaff) || !uniqueIds(value.temporary_staff) || !value.temporary_staff.every((staff) => staff.employment === 'temporary')
     || !arrayOf(value.outsourcing, isOutsourceTask) || !uniqueIds(value.outsourcing)
     || !(value.committee === undefined || (value.mode === 'committee'
-      ? value.committee !== null && isCommitteeMembers(value.committee) && shareSum(value.committee) + value.investment_percent === 100
+      ? value.committee !== null && isCommitteeMembers(value.committee)
       : value.committee === null))
     || !(value.tv_service === undefined || value.tv_service === null || isTvService(value.tv_service))
     || !(value.delivery_reason === null || isDeliveryReason(value.delivery_reason))) return false
-  if (value.mode === 'contract' ? value.committee_pressure !== null || value.extension_count !== 0 : !score(value.committee_pressure)) return false
+  if (value.mode === 'contract' ? value.committee_pressure !== null || value.extension_count !== 0 || value.total_investment !== undefined : !score(value.committee_pressure) || !integer(value.total_investment) || value.total_investment !== value.offer.contract_budget * 2) return false
   if (!orderedStages(value.stages) || value.current_stage !== firstUnfinished(value.stages)) return false
   if (value.current_stage === null ? value.delivery_reason !== 'completed' : value.delivery_reason === 'completed') return false
   const { stages, offer } = value
