@@ -847,6 +847,7 @@ TEST(ValidatorCompatibility, OptionalOfferCompanyAndCostFields) {
         [](Json& s) { s["custom_offer"]["allowed_modes"] = Json::array({"contract"}); },
         [](Json& s) { s["custom_offer"]["committee_members"][1]["id"] = "publisher_a"; },
         [](Json& s) { s["custom_offer"]["committee_members"][0]["channel"] = "bd"; },
+        [](Json& s) { s["custom_offer"]["committee_members"][0]["share_percent"] = 50; },
         [](Json& s) { s["custom_offer"]["channel_potentials"].erase("bd"); },
         [](Json& s) { s["custom_offer"]["channel_potentials"]["toy"] = 101; },
         [](Json& s) { s["custom_offer"]["required_works"] = Json::array(); },
@@ -940,6 +941,7 @@ TEST(ValidatorCompatibility, CommitteeOmissionAndMemberChannelRules) {
     expect_invalid_mutations(state, {
         [](Json& s) { s["project"]["committee"] = nullptr; },
         [](Json& s) { s["project"]["committee"][0]["channel"] = "bd"; },
+        [](Json& s) { s["project"]["committee"][0]["channels"] = Json::array({"music"}); },
         [](Json& s) { s["project"]["committee"][1]["id"] = "partner_a"; },
         [](Json& s) { s["project"]["investment_percent"] = 9; },
         [](Json& s) { s["project"]["investment_percent"] = 101; },
