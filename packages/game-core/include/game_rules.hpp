@@ -16,7 +16,6 @@ inline constexpr std::int64_t initial_funds = 2000000;
 inline constexpr std::int64_t operations_weekly = 30000;
 inline constexpr std::int64_t stage_cost = 30000;
 inline constexpr std::int64_t overtime_cost = 25000;
-inline constexpr std::int64_t contract_share_permille = 200;   // 合同预算 = floor(total × 20%)
 inline constexpr std::int64_t deadline_penalty_permille = 200;  // 违约交付扣合同额 20%
 inline constexpr std::int64_t closed_penalty_permille = 100;    // 公司关闭中断扣合同额 10%
 inline constexpr int success_reputation = 10;
@@ -77,26 +76,25 @@ inline constexpr std::array<StaffSpec, 4> staff{{
 
 struct OfferSpec {
     const char* id; const char* name; const char* source; const char* scale;
-    std::int64_t total_investment; int duration_weeks; int target_quality;
+    std::int64_t contract_budget; int duration_weeks; int target_quality;
     int audience_base; int commercial_potential; const char* risk;
     std::array<int, 5> workloads;
 };
 // M1 固定企划目录；正式生成规则属 #6。original 源不参与 M1。
 inline constexpr std::array<OfferSpec, 12> offers{{
-    {"proj_ova_01", u8"放学后的第七帧", "manga", "ova", 20000000, 14, 60, 55, 60, "low", {30, 30, 30, 30, 30}},
-    {"proj_short_01", u8"纸飞机电台", "light_novel", "short", 12000000, 9, 50, 40, 45, "low", {20, 20, 20, 20, 20}},
-    {"proj_tv_01", u8"星轨列车", "game", "tv", 30000000, 24, 68, 75, 70, "medium", {55, 55, 55, 55, 55}},
-    {"proj_ova_02", u8"海雾信号站", "light_novel", "ova", 22000000, 15, 62, 50, 65, "medium", {34, 34, 34, 34, 34}},
-    {"proj_short_02", u8"便利贴宇宙", "manga", "short", 14000000, 10, 55, 45, 50, "low", {24, 24, 24, 24, 24}},
-    {"proj_tv_02", u8"霓虹食单", "light_novel", "tv", 36000000, 28, 70, 80, 75, "medium", {65, 65, 65, 65, 65}},
-    {"proj_ova_03", u8"夜行校线", "game", "ova", 24000000, 16, 65, 60, 70, "medium", {38, 38, 38, 38, 38}},
-    {"proj_movie_01", u8"云端灯塔", "game", "movie", 80000000, 40, 80, 90, 95, "high", {110, 110, 110, 110, 110}},
-    {"proj_short_03", u8"便利屋手记", "light_novel", "short", 16000000, 11, 58, 50, 55, "low", {26, 26, 26, 26, 26}},
-    {"proj_tv_03", u8"潮汐图书馆", "manga", "tv", 40000000, 30, 72, 85, 78, "high", {70, 70, 70, 70, 70}},
-    {"proj_ova_04", u8"雨日放映室", "manga", "ova", 18000000, 13, 58, 48, 55, "low", {28, 28, 28, 28, 28}},
-    {"proj_movie_02", u8"群山回响", "light_novel", "movie", 90000000, 45, 82, 92, 96, "high", {125, 125, 125, 125, 125}}
+    {"proj_ova_01", u8"放学后的第七帧", "manga", "ova", 4000000, 14, 60, 55, 60, "low", {30, 30, 30, 30, 30}},
+    {"proj_short_01", u8"纸飞机电台", "light_novel", "short", 2400000, 9, 50, 40, 45, "low", {20, 20, 20, 20, 20}},
+    {"proj_tv_01", u8"星轨列车", "game", "tv", 6000000, 24, 68, 75, 70, "medium", {55, 55, 55, 55, 55}},
+    {"proj_ova_02", u8"海雾信号站", "light_novel", "ova", 4400000, 15, 62, 50, 65, "medium", {34, 34, 34, 34, 34}},
+    {"proj_short_02", u8"便利贴宇宙", "manga", "short", 2800000, 10, 55, 45, 50, "low", {24, 24, 24, 24, 24}},
+    {"proj_tv_02", u8"霓虹食单", "light_novel", "tv", 7200000, 28, 70, 80, 75, "medium", {65, 65, 65, 65, 65}},
+    {"proj_ova_03", u8"夜行校线", "game", "ova", 4800000, 16, 65, 60, 70, "medium", {38, 38, 38, 38, 38}},
+    {"proj_movie_01", u8"云端灯塔", "game", "movie", 16000000, 40, 80, 90, 95, "high", {110, 110, 110, 110, 110}},
+    {"proj_short_03", u8"便利屋手记", "light_novel", "short", 3200000, 11, 58, 50, 55, "low", {26, 26, 26, 26, 26}},
+    {"proj_tv_03", u8"潮汐图书馆", "manga", "tv", 8000000, 30, 72, 85, 78, "high", {70, 70, 70, 70, 70}},
+    {"proj_ova_04", u8"雨日放映室", "manga", "ova", 3600000, 13, 58, 48, 55, "low", {28, 28, 28, 28, 28}},
+    {"proj_movie_02", u8"群山回响", "light_novel", "movie", 18000000, 45, 82, 92, 96, "high", {125, 125, 125, 125, 125}}
 }};
 
-inline std::int64_t contract_budget(std::int64_t total_investment) { return total_investment * contract_share_permille / 1000; }
 
 }  // namespace apc::rules
