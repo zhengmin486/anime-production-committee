@@ -141,7 +141,6 @@ Json dynamic_offer(const std::string& id) {
     offer["name"] = "Independent adaptation " + id;
     offer["source"] = "game";
     offer["scale"] = "short";
-    offer["total_investment"] = 12345679;
     offer["contract_budget"] = 2469135;
     offer["duration_weeks"] = 19;
     offer["target_quality"] = 1;
@@ -159,8 +158,8 @@ Json outsource_task() {
     return {{"id", "task_dynamic"}, {"supplier_id", "supplier_dynamic"}, {"stage", "script"}, {"ability", "planning"},
         {"work_total", 10}, {"work_done", 0}, {"mode", "normal"}, {"fee_paid", 1230}, {"due_week", 1000}, {"status", "active"}};
 }
-Json committee_member(const std::string& id, int share) {
-    return {{"id", id}, {"name", "Partner " + id}, {"share_percent", share}, {"channels", {"publisher", "music"}}};
+Json committee_member(const std::string& id, const std::string& channel = "publisher") {
+    return {{"id", id}, {"name", "Partner " + id}, {"channel", channel}};
 }
 void make_committee(Json& state, int investment = 30) {
     auto& project = state["project"];
@@ -168,6 +167,7 @@ void make_committee(Json& state, int investment = 30) {
     project["mode"] = "committee";
     project["investment_percent"] = investment;
     project["committee_pressure"] = 40;
+    project["total_investment"] = project.at("offer").at("contract_budget").get<std::int64_t>() * 2;
     project["finance"]["contract_received"] = 0;
     project["finance"]["investment_paid"] = 1000000;
     project.erase("committee");
@@ -622,7 +622,7 @@ TEST(Validation, NumericBoundsAndSchema) {
         [](Json& s) { s["offers"][0]["allowed_modes"] = Json::array({"contract", "contract"}); },
         [](Json& s) { s["offers"][1]["id"] = s["offers"][0]["id"]; },
         [](Json& s) { s["offers"].erase(0); },
-        [](Json& s) { s["offers"][2]["total_investment"] = 1; },
+        [](Json& s) { s["offers"][2]["contract_budget"] = 1; },
         [](Json& s) { s["preview"]["total_cost"] = 99999; }
     };
     for (const auto& mutate : idle_mutations) {
@@ -798,7 +798,7 @@ TEST(ValidatorCompatibility, DynamicOffersAndTheirOwnFields) {
         [](Json& s) { s["offers"][0]["audience_base"] = -1; },
         [](Json& s) { s["offers"][0]["commercial_potential"] = 101; },
         [](Json& s) { s["offers"][0]["contract_budget"] = 2469136; },
-        [](Json& s) { s["offers"][0]["total_investment"] = -1; },
+        [](Json& s) { s["offers"][0]["contract_budget"] = -1; },
         [](Json& s) { s["offers"][0]["workloads"]["animation_check"] = 0; },
         [](Json& s) { s["offers"][0]["workloads"].erase("postproduction"); },
         [](Json& s) { s["offers"][0]["allowed_modes"] = Json::array(); },
@@ -811,8 +811,7 @@ TEST(ValidatorCompatibility, DynamicOffersAndTheirOwnFields) {
     });
     for (std::int64_t total : {std::int64_t{0}, std::int64_t{4}, std::int64_t{5}, max_i}) {
         auto bounded = state;
-        bounded["offers"][0]["total_investment"] = total;
-        bounded["offers"][0]["contract_budget"] = total / 5;
+        bounded["offers"][0]["contract_budget"] = total;
         expect_validation(bounded, true);
     }
 }
@@ -826,7 +825,7 @@ TEST(ValidatorCompatibility, OptionalOfferCompanyAndCostFields) {
     offer["style"] = "meme";
     offer["min_reputation"] = 0;
     offer["allowed_modes"] = Json::array({"contract", "committee"});
-    offer["committee_members"] = Json::array({committee_member("publisher_a", 40), committee_member("publisher_b", 60)});
+    offer["committee_members"] = Json::array({committee_member("publisher_a", "publisher"), committee_member("publisher_b", "music")});
     offer["channel_potentials"] = {{"bd", 0}, {"publisher", 100}, {"toy", 20}, {"music", 30}, {"tv_broadcast", 40}};
     offer["required_works"] = Json::array({{{"rating", "A"}}, {{"rating", "A"}, {"source", "game"}}});
     state["offers"][2]["min_reputation"] = 100;
@@ -846,12 +845,8 @@ TEST(ValidatorCompatibility, OptionalOfferCompanyAndCostFields) {
         [](Json& s) { s["offers"][1]["min_reputation"] = 1; },
         [](Json& s) { s["custom_offer"]["committee_members"] = Json::array(); },
         [](Json& s) { s["custom_offer"]["allowed_modes"] = Json::array({"contract"}); },
-        [](Json& s) { s["custom_offer"]["committee_members"][0]["share_percent"] = 0; },
-        [](Json& s) { s["custom_offer"]["committee_members"][0]["share_percent"] = 101; },
         [](Json& s) { s["custom_offer"]["committee_members"][1]["id"] = "publisher_a"; },
-        [](Json& s) { s["custom_offer"]["committee_members"][0]["channels"] = Json::array({"bd"}); },
-        [](Json& s) { s["custom_offer"]["committee_members"][0]["channels"] = Json::array({"music", "music"}); },
-        [](Json& s) { s["custom_offer"]["committee_members"][0]["channels"] = Json::array(); },
+        [](Json& s) { s["custom_offer"]["committee_members"][0]["channel"] = "bd"; },
         [](Json& s) { s["custom_offer"]["channel_potentials"].erase("bd"); },
         [](Json& s) { s["custom_offer"]["channel_potentials"]["toy"] = 101; },
         [](Json& s) { s["custom_offer"]["required_works"] = Json::array(); },
@@ -929,24 +924,22 @@ TEST(ValidatorCompatibility, SuppliersAndTasksValidateFieldsAndReferences) {
     expect_validation(state, true);
 }
 
-TEST(ValidatorCompatibility, CommitteeOmissionEmptyAndMemberShareRules) {
+TEST(ValidatorCompatibility, CommitteeOmissionAndMemberChannelRules) {
     for (int investment : {10, 30, 100}) {
         auto state = start();
         make_committee(state, investment);
         expect_validation(state, true);
         state["project"]["committee"] = Json::array();
-        if (investment == 100) expect_validation(state, true);
-        else expect_invalid_state(state);
+        expect_invalid_state(state);
     }
     auto state = start();
     make_committee(state);
-    state["project"]["committee"] = Json::array({committee_member("partner_a", 20), committee_member("partner_b", 50)});
+    state["project"]["committee"] = Json::array({committee_member("partner_a", "publisher"), committee_member("partner_b", "music")});
     state["project"]["tv_service"] = {{"purchased_week", 0}, {"cost", 12345}};
     state["project"]["finance"]["costs"]["distribution"] = 12345;
     expect_invalid_mutations(state, {
         [](Json& s) { s["project"]["committee"] = nullptr; },
-        [](Json& s) { s["project"]["committee"][0]["share_percent"] = 19; },
-        [](Json& s) { s["project"]["committee"][0]["share_percent"] = 21; },
+        [](Json& s) { s["project"]["committee"][0]["channel"] = "bd"; },
         [](Json& s) { s["project"]["committee"][1]["id"] = "partner_a"; },
         [](Json& s) { s["project"]["investment_percent"] = 9; },
         [](Json& s) { s["project"]["investment_percent"] = 101; },
@@ -972,7 +965,7 @@ TEST(ValidatorCompatibility, CommitteeOmissionEmptyAndMemberShareRules) {
         }
         expect_invalid_mutations(contract, {
             [](Json& s) { s["project"]["committee"] = Json::array(); },
-            [](Json& s) { s["project"]["committee"] = Json::array({committee_member("partner", 100)}); },
+            [](Json& s) { s["project"]["committee"] = Json::array({committee_member("partner", "toy")}); },
             [](Json& s) { s["project"]["tv_service"] = {{"purchased_week", 0}, {"cost", 1}}; }
         });
     }
