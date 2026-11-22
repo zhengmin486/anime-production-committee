@@ -100,7 +100,6 @@ export interface ProjectOffer {
   name: string
   source: Source
   scale: Scale
-  total_investment: number
   contract_budget: number
   duration_weeks: number
   target_quality: number
@@ -409,7 +408,7 @@ const styleOriginRule = (value: Record<string, unknown>) => {
 }
 
 // M2 渠道框架结构守卫（DATA_MODEL V3.7）：BD 是基础渠道，股东只带其余四类。
-export const isCommitteeMember = (value: unknown): value is CommitteeMember => isRecord(value) && isText(value.id) && isText(value.name) && isMemberChannel(value.channel)
+export const isCommitteeMember = (value: unknown): value is CommitteeMember => isRecord(value) && isText(value.id) && isText(value.name) && isMemberChannel(value.channel) && !("share_percent" in value) && !("channels" in value)
 const isCommitteeMembers = (value: unknown): value is CommitteeMember[] => arrayOf(value, isCommitteeMember) && value.length > 0 && uniqueIds(value)
 const isChannelPotentials = (value: unknown): value is ChannelPotentials => isRecord(value) && score(value.bd)
   && (value.publisher === undefined || score(value.publisher)) && (value.toy === undefined || score(value.toy))
@@ -430,7 +429,7 @@ const isChannelBreakdown = (value: unknown, revenue: number, companyReceived: nu
 
 export function isProjectOffer(value: unknown): value is ProjectOffer {
   return isRecord(value) && isText(value.id) && isText(value.name) && isSource(value.source) && isScale(value.scale)
-    && integer(value.contract_budget) && integer(value.duration_weeks, 1)
+    && value.total_investment === undefined && integer(value.contract_budget) && integer(value.duration_weeks, 1)
     && score(value.target_quality) && score(value.audience_base) && score(value.commercial_potential)
     && choice(value.risk, ['low', 'medium', 'high']) && arrayOf(value.allowed_modes, isCooperationMode)
     && value.allowed_modes.length > 0 && unique(value.allowed_modes)
