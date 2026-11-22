@@ -86,24 +86,15 @@ void check_style_origin(const Json& item) {
     if (style != "normal") require(offer_origin(item) == "custom");
     if (style == "meme") require(item.at("scale") == "short");
 }
-Integer check_committee(const Json& members) {
-    require(members.is_array());
+void check_committee(const Json& members) {
+    require(members.is_array() && !members.empty());
     std::set<std::string> ids;
-    Integer shares = 0;
     for (const auto& member : members) {
         require(member.is_object());
         require(ids.insert(nonempty_text(member.at("id"))).second);
         nonempty_text(member.at("name"));
-        shares = add(shares, number(member.at("share_percent"), 100, 1));
-        require(member.at("channels").is_array() && !member.at("channels").empty());
-        std::set<std::string> channels;
-        for (const auto& channel : member.at("channels")) {
-            require(one_of(channel, {"publisher", "toy", "music", "tv_broadcast"}));
-            require(channels.insert(text(channel)).second);
-        }
+        require(one_of(member.at("channel"), {"publisher", "toy", "music", "tv_broadcast"}));
     }
-    require(shares <= 100);
-    return shares;
 }
 template<class State> auto find_current_staff(State& state, const std::string& id)
     -> decltype(&state.at("company").at("staff").at(0)) {
@@ -172,7 +163,7 @@ Json make_offer(const rules::OfferSpec& spec) {
     for (std::size_t i = 0; i < rules::stages.size(); ++i) workloads[rules::stages[i]] = spec.workloads[i];
     return {
         {"id", spec.id}, {"name", spec.name}, {"source", spec.source}, {"scale", spec.scale},
-        {"total_investment", spec.total_investment}, {"contract_budget", rules::contract_budget(spec.total_investment)},
+        {"contract_budget", spec.contract_budget},
         {"duration_weeks", spec.duration_weeks}, {"target_quality", spec.target_quality},
         {"audience_base", spec.audience_base}, {"commercial_potential", spec.commercial_potential},
         {"risk", spec.risk}, {"allowed_modes", Json::array({"contract"})}, {"workloads", workloads}, {"previous_work_id", nullptr}
@@ -190,7 +181,7 @@ void check_offer(const Json& item) {
     nonempty_text(item.at("name"));
     check_source(item.at("source"));
     require(one_of(item.at("scale"), {"ova", "short", "tv", "movie"}));
-    require(num(item, "contract_budget") == scale(num(item, "total_investment"), static_cast<int>(rules::contract_share_permille)));
+    number(item.at("contract_budget"));
     number(item.at("duration_weeks"), rules::max_integer, 1);
     number(item.at("target_quality"), 100); number(item.at("audience_base"), 100); number(item.at("commercial_potential"), 100);
     require(one_of(item.at("risk"), {"low", "medium", "high"}));
@@ -482,12 +473,14 @@ void check_project(const Json& project) {
     number(project.at("deadline_week"), rules::max_integer, start + 1);
     number(project.at("extension_count"), 1);
     if (project.at("mode") == "contract") {
+        require(!project.contains("total_investment"));
         require(num(project, "deadline_week") == add(start, num(project.at("offer"), "duration_weeks")));
         require(num(project, "extension_count") == 0 && project.at("committee_pressure").is_null());
         require(optional_slot(project, "committee").is_null() && optional_slot(project, "tv_service").is_null());
     } else {
         number(project.at("committee_pressure"), 100);
-        if (project.contains("committee")) require(check_committee(project.at("committee")) + num(project, "investment_percent") == 100);
+        require(project.contains("total_investment") && num(project, "total_investment") == scale(num(project.at("offer"), "contract_budget"), 2));
+        if (project.contains("committee")) check_committee(project.at("committee"));
     }
     const auto& tv = optional_slot(project, "tv_service");
     if (!tv.is_null()) {
