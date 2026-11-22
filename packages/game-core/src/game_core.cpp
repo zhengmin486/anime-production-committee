@@ -93,6 +93,7 @@ void check_committee(const Json& members) {
         require(member.is_object());
         require(ids.insert(nonempty_text(member.at("id"))).second);
         nonempty_text(member.at("name"));
+        require(!member.contains("share_percent") && !member.contains("channels"));
         require(one_of(member.at("channel"), {"publisher", "toy", "music", "tv_broadcast"}));
     }
 }
@@ -181,6 +182,7 @@ void check_offer(const Json& item) {
     nonempty_text(item.at("name"));
     check_source(item.at("source"));
     require(one_of(item.at("scale"), {"ova", "short", "tv", "movie"}));
+    require(!item.contains("total_investment"));
     number(item.at("contract_budget"));
     number(item.at("duration_weeks"), rules::max_integer, 1);
     number(item.at("target_quality"), 100); number(item.at("audience_base"), 100); number(item.at("commercial_potential"), 100);
