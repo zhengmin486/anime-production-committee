@@ -481,7 +481,7 @@ void check_project(const Json& project) {
         require(optional_slot(project, "committee").is_null() && optional_slot(project, "tv_service").is_null());
     } else {
         number(project.at("committee_pressure"), 100);
-        require(project.contains("total_investment") && num(project, "total_investment") == scale(num(project.at("offer"), "contract_budget"), 2));
+        require(project.contains("total_investment") && num(project, "total_investment") == add(num(project.at("offer"), "contract_budget"), num(project.at("offer"), "contract_budget")));
         if (project.contains("committee")) check_committee(project.at("committee"));
     }
     const auto& tv = optional_slot(project, "tv_service");
