@@ -36,7 +36,7 @@ class StochasticProductionTests(unittest.TestCase):
 
     def test_random_work_produces_multiple_outcomes(self):
         values = {
-            sim.run_once(self.people, "pair_specialist", 60, 14, "work_only", seed)["weeks"]
+            sim.run_once(self.people, "pair_specialist", 120, 4, "work_only", seed)["total_work"]
             for seed in range(100, 140)
         }
         self.assertGreater(len(values), 1)
