@@ -15,4 +15,4 @@ jobs:
         with:
           python-version: "3.12"
       - run: python -m unittest scripts.tests.test_staff_scheduling_simulator -v
-      - run: python scripts/staff_scheduling_simulator.py --deadline 14
+      - run: python scripts/staff_scheduling_simulator.py --deadline 14 --workloads 30,60,90,120
