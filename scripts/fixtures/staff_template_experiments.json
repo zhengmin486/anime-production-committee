@@ -1,0 +1,1578 @@
+{
+  "schema": "apc.staff_templates/0.1",
+  "issue": 13,
+  "date": "2026-11-23",
+  "status": "实验人物卡：保留原15人基准卡，不修改其数值；另含8种模板×3个样本=24人。所有实验数值均非正式规则。",
+  "conventions": {
+    "baseline_file": "scripts/fixtures/staff_templates.json (original 15 cards, unchanged)",
+    "template_source": "Sqks183 #7 2026-11-23 template proposal",
+    "ability_scale": "0-100; experimental bands only",
+    "rarity_bands": "N<240 / R 240-319 / SR 320-399 / SSR>=400 (proposal; six-ability sum)",
+    "salary_formula": "15000 + sum(abilities)*90; free veteran +10% (proposal; not approved)",
+    "potential_rule": "ordinary +20-30; late bloomer +35-45 (experimental)",
+    "traits_effects": "not simulated; traits are descriptive labels only",
+    "specialty_note": "meta.specialty is simulator-only content metadata; not a frozen TS Staff field"
+  },
+  "staff": [
+    {
+      "staff": {
+        "id": "exp_mass_production_01",
+        "name": "量产型杂鱼样本甲",
+        "role": "animator",
+        "employment": "core",
+        "abilities": {
+          "planning": 28,
+          "direction": 30,
+          "drawing": 32,
+          "animation": 34,
+          "management": 26,
+          "postproduction": 28
+        },
+        "experience": {
+          "planning": 0,
+          "direction": 0,
+          "drawing": 0,
+          "animation": 0,
+          "management": 0,
+          "postproduction": 0
+        },
+        "potential": {
+          "planning": 51,
+          "direction": 54,
+          "drawing": 57,
+          "animation": 60,
+          "management": 53,
+          "postproduction": 56
+        },
+        "revealed_potential": {
+          "planning": false,
+          "direction": false,
+          "drawing": false,
+          "animation": false,
+          "management": false,
+          "postproduction": false
+        },
+        "talent_type": "ordinary",
+        "clues": [
+          "简历经历以基础执行为主，能完成明确、重复的工序任务。"
+        ],
+        "traits": [
+          "新人"
+        ],
+        "weekly_salary": 31020,
+        "project_fee": 0,
+        "fatigue": 0,
+        "morale": 80,
+        "departure_warning": false
+      },
+      "meta": {
+        "specialty": "animation",
+        "template_id": "mass_production",
+        "template_name": "量产型杂鱼",
+        "variant": 1,
+        "source": "2026-11-23 calibration experiment; not production content",
+        "usage": "用于人物模板数值校准，不进入正式初始名册",
+        "resume_one_line": "简历经历以基础执行为主，能完成明确、重复的工序任务。",
+        "ability_sum": 178,
+        "rarity_band": "N",
+        "salary_formula": "15000 + sum(abilities)*90; free_veteran +10% (proposal only)",
+        "specialty_assignment_note": "按模板定位指定的主专业，仅供当前单专业适配模型做实验；不等于最终人物卡规则。"
+      }
+    },
+    {
+      "staff": {
+        "id": "exp_mass_production_02",
+        "name": "量产型杂鱼样本乙",
+        "role": "key_animator",
+        "employment": "core",
+        "abilities": {
+          "planning": 32,
+          "direction": 28,
+          "drawing": 36,
+          "animation": 30,
+          "management": 30,
+          "postproduction": 32
+        },
+        "experience": {
+          "planning": 0,
+          "direction": 0,
+          "drawing": 1,
+          "animation": 0,
+          "management": 0,
+          "postproduction": 0
+        },
+        "potential": {
+          "planning": 58,
+          "direction": 55,
+          "drawing": 64,
+          "animation": 59,
+          "management": 60,
+          "postproduction": 52
+        },
+        "revealed_potential": {
+          "planning": false,
+          "direction": false,
+          "drawing": false,
+          "animation": false,
+          "management": false,
+          "postproduction": false
+        },
+        "talent_type": "ordinary",
+        "clues": [
+          "简历经历以基础执行为主，能完成明确、重复的工序任务。"
+        ],
+        "traits": [
+          "新人"
+        ],
+        "weekly_salary": 31920,
+        "project_fee": 0,
+        "fatigue": 0,
+        "morale": 80,
+        "departure_warning": false
+      },
+      "meta": {
+        "specialty": "drawing",
+        "template_id": "mass_production",
+        "template_name": "量产型杂鱼",
+        "variant": 2,
+        "source": "2026-11-23 calibration experiment; not production content",
+        "usage": "用于人物模板数值校准，不进入正式初始名册",
+        "resume_one_line": "简历经历以基础执行为主，能完成明确、重复的工序任务。",
+        "ability_sum": 188,
+        "rarity_band": "N",
+        "salary_formula": "15000 + sum(abilities)*90; free_veteran +10% (proposal only)",
+        "specialty_assignment_note": "按模板定位指定的主专业，仅供当前单专业适配模型做实验；不等于最终人物卡规则。"
+      }
+    },
+    {
+      "staff": {
+        "id": "exp_mass_production_03",
+        "name": "量产型杂鱼样本丙",
+        "role": "animator",
+        "employment": "core",
+        "abilities": {
+          "planning": 35,
+          "direction": 34,
+          "drawing": 30,
+          "animation": 36,
+          "management": 28,
+          "postproduction": 34
+        },
+        "experience": {
+          "planning": 1,
+          "direction": 0,
+          "drawing": 0,
+          "animation": 1,
+          "management": 0,
+          "postproduction": 0
+        },
+        "potential": {
+          "planning": 64,
+          "direction": 64,
+          "drawing": 50,
+          "animation": 57,
+          "management": 50,
+          "postproduction": 57
+        },
+        "revealed_potential": {
+          "planning": false,
+          "direction": false,
+          "drawing": false,
+          "animation": false,
+          "management": false,
+          "postproduction": false
+        },
+        "talent_type": "ordinary",
+        "clues": [
+          "简历经历以基础执行为主，能完成明确、重复的工序任务。"
+        ],
+        "traits": [
+          "新人"
+        ],
+        "weekly_salary": 32730,
+        "project_fee": 0,
+        "fatigue": 0,
+        "morale": 80,
+        "departure_warning": false
+      },
+      "meta": {
+        "specialty": "animation",
+        "template_id": "mass_production",
+        "template_name": "量产型杂鱼",
+        "variant": 3,
+        "source": "2026-11-23 calibration experiment; not production content",
+        "usage": "用于人物模板数值校准，不进入正式初始名册",
+        "resume_one_line": "简历经历以基础执行为主，能完成明确、重复的工序任务。",
+        "ability_sum": 197,
+        "rarity_band": "N",
+        "salary_formula": "15000 + sum(abilities)*90; free_veteran +10% (proposal only)",
+        "specialty_assignment_note": "按模板定位指定的主专业，仅供当前单专业适配模型做实验；不等于最终人物卡规则。"
+      }
+    },
+    {
+      "staff": {
+        "id": "exp_junior_specialist_01",
+        "name": "新人专精样本甲",
+        "role": "key_animator",
+        "employment": "core",
+        "abilities": {
+          "planning": 35,
+          "direction": 38,
+          "drawing": 78,
+          "animation": 52,
+          "management": 32,
+          "postproduction": 35
+        },
+        "experience": {
+          "planning": 1,
+          "direction": 1,
+          "drawing": 9,
+          "animation": 4,
+          "management": 0,
+          "postproduction": 1
+        },
+        "potential": {
+          "planning": 58,
+          "direction": 62,
+          "drawing": 100,
+          "animation": 78,
+          "management": 59,
+          "postproduction": 63
+        },
+        "revealed_potential": {
+          "planning": false,
+          "direction": false,
+          "drawing": false,
+          "animation": false,
+          "management": false,
+          "postproduction": false
+        },
+        "talent_type": "uneven",
+        "clues": [
+          "某一专业能力明显高于其他项目，履历集中在单一工序。"
+        ],
+        "traits": [
+          "新人"
+        ],
+        "weekly_salary": 39300,
+        "project_fee": 0,
+        "fatigue": 0,
+        "morale": 80,
+        "departure_warning": false
+      },
+      "meta": {
+        "specialty": "drawing",
+        "template_id": "junior_specialist",
+        "template_name": "新人专精",
+        "variant": 1,
+        "source": "2026-11-23 calibration experiment; not production content",
+        "usage": "用于人物模板数值校准，不进入正式初始名册",
+        "resume_one_line": "某一专业能力明显高于其他项目，履历集中在单一工序。",
+        "ability_sum": 270,
+        "rarity_band": "R",
+        "salary_formula": "15000 + sum(abilities)*90; free_veteran +10% (proposal only)",
+        "specialty_assignment_note": "按模板定位指定的主专业，仅供当前单专业适配模型做实验；不等于最终人物卡规则。"
+      }
+    },
+    {
+      "staff": {
+        "id": "exp_junior_specialist_02",
+        "name": "新人专精样本乙",
+        "role": "director",
+        "employment": "core",
+        "abilities": {
+          "planning": 40,
+          "direction": 76,
+          "drawing": 48,
+          "animation": 38,
+          "management": 35,
+          "postproduction": 36
+        },
+        "experience": {
+          "planning": 1,
+          "direction": 10,
+          "drawing": 1,
+          "animation": 1,
+          "management": 1,
+          "postproduction": 1
+        },
+        "potential": {
+          "planning": 66,
+          "direction": 100,
+          "drawing": 76,
+          "animation": 67,
+          "management": 65,
+          "postproduction": 56
+        },
+        "revealed_potential": {
+          "planning": false,
+          "direction": false,
+          "drawing": false,
+          "animation": false,
+          "management": false,
+          "postproduction": false
+        },
+        "talent_type": "uneven",
+        "clues": [
+          "某一专业能力明显高于其他项目，履历集中在单一工序。"
+        ],
+        "traits": [
+          "新人"
+        ],
+        "weekly_salary": 39570,
+        "project_fee": 0,
+        "fatigue": 0,
+        "morale": 80,
+        "departure_warning": false
+      },
+      "meta": {
+        "specialty": "direction",
+        "template_id": "junior_specialist",
+        "template_name": "新人专精",
+        "variant": 2,
+        "source": "2026-11-23 calibration experiment; not production content",
+        "usage": "用于人物模板数值校准，不进入正式初始名册",
+        "resume_one_line": "某一专业能力明显高于其他项目，履历集中在单一工序。",
+        "ability_sum": 273,
+        "rarity_band": "R",
+        "salary_formula": "15000 + sum(abilities)*90; free_veteran +10% (proposal only)",
+        "specialty_assignment_note": "按模板定位指定的主专业，仅供当前单专业适配模型做实验；不等于最终人物卡规则。"
+      }
+    },
+    {
+      "staff": {
+        "id": "exp_junior_specialist_03",
+        "name": "新人专精样本丙",
+        "role": "key_animator",
+        "employment": "core",
+        "abilities": {
+          "planning": 50,
+          "direction": 48,
+          "drawing": 88,
+          "animation": 58,
+          "management": 42,
+          "postproduction": 45
+        },
+        "experience": {
+          "planning": 4,
+          "direction": 1,
+          "drawing": 11,
+          "animation": 4,
+          "management": 1,
+          "postproduction": 1
+        },
+        "potential": {
+          "planning": 79,
+          "direction": 78,
+          "drawing": 100,
+          "animation": 79,
+          "management": 64,
+          "postproduction": 68
+        },
+        "revealed_potential": {
+          "planning": false,
+          "direction": false,
+          "drawing": false,
+          "animation": false,
+          "management": false,
+          "postproduction": false
+        },
+        "talent_type": "uneven",
+        "clues": [
+          "某一专业能力明显高于其他项目，履历集中在单一工序。"
+        ],
+        "traits": [
+          "新人"
+        ],
+        "weekly_salary": 44790,
+        "project_fee": 0,
+        "fatigue": 0,
+        "morale": 80,
+        "departure_warning": false
+      },
+      "meta": {
+        "specialty": "drawing",
+        "template_id": "junior_specialist",
+        "template_name": "新人专精",
+        "variant": 3,
+        "source": "2026-11-23 calibration experiment; not production content",
+        "usage": "用于人物模板数值校准，不进入正式初始名册",
+        "resume_one_line": "某一专业能力明显高于其他项目，履历集中在单一工序。",
+        "ability_sum": 331,
+        "rarity_band": "SR",
+        "salary_formula": "15000 + sum(abilities)*90; free_veteran +10% (proposal only)",
+        "specialty_assignment_note": "按模板定位指定的主专业，仅供当前单专业适配模型做实验；不等于最终人物卡规则。"
+      }
+    },
+    {
+      "staff": {
+        "id": "exp_seasoned_generalist_01",
+        "name": "老练全能样本甲",
+        "role": "director",
+        "employment": "core",
+        "abilities": {
+          "planning": 55,
+          "direction": 54,
+          "drawing": 53,
+          "animation": 52,
+          "management": 55,
+          "postproduction": 51
+        },
+        "experience": {
+          "planning": 4,
+          "direction": 4,
+          "drawing": 4,
+          "animation": 4,
+          "management": 4,
+          "postproduction": 4
+        },
+        "potential": {
+          "planning": 78,
+          "direction": 78,
+          "drawing": 78,
+          "animation": 78,
+          "management": 82,
+          "postproduction": 79
+        },
+        "revealed_potential": {
+          "planning": false,
+          "direction": false,
+          "drawing": false,
+          "animation": false,
+          "management": false,
+          "postproduction": false
+        },
+        "talent_type": "generalist",
+        "clues": [
+          "长期参与不同环节，单项没有极端峰值，但各工序都能承担任务。"
+        ],
+        "traits": [
+          "多面手"
+        ],
+        "weekly_salary": 43800,
+        "project_fee": 0,
+        "fatigue": 0,
+        "morale": 80,
+        "departure_warning": false
+      },
+      "meta": {
+        "specialty": "direction",
+        "template_id": "seasoned_generalist",
+        "template_name": "老练全能",
+        "variant": 1,
+        "source": "2026-11-23 calibration experiment; not production content",
+        "usage": "用于人物模板数值校准，不进入正式初始名册",
+        "resume_one_line": "长期参与不同环节，单项没有极端峰值，但各工序都能承担任务。",
+        "ability_sum": 320,
+        "rarity_band": "SR",
+        "salary_formula": "15000 + sum(abilities)*90; free_veteran +10% (proposal only)",
+        "specialty_assignment_note": "按模板定位指定的主专业，仅供当前单专业适配模型做实验；不等于最终人物卡规则。"
+      }
+    },
+    {
+      "staff": {
+        "id": "exp_seasoned_generalist_02",
+        "name": "老练全能样本乙",
+        "role": "key_animator",
+        "employment": "core",
+        "abilities": {
+          "planning": 58,
+          "direction": 56,
+          "drawing": 55,
+          "animation": 54,
+          "management": 57,
+          "postproduction": 55
+        },
+        "experience": {
+          "planning": 4,
+          "direction": 4,
+          "drawing": 4,
+          "animation": 4,
+          "management": 4,
+          "postproduction": 4
+        },
+        "potential": {
+          "planning": 84,
+          "direction": 83,
+          "drawing": 83,
+          "animation": 83,
+          "management": 87,
+          "postproduction": 75
+        },
+        "revealed_potential": {
+          "planning": false,
+          "direction": false,
+          "drawing": false,
+          "animation": false,
+          "management": false,
+          "postproduction": false
+        },
+        "talent_type": "generalist",
+        "clues": [
+          "长期参与不同环节，单项没有极端峰值，但各工序都能承担任务。"
+        ],
+        "traits": [
+          "多面手"
+        ],
+        "weekly_salary": 45150,
+        "project_fee": 0,
+        "fatigue": 0,
+        "morale": 80,
+        "departure_warning": false
+      },
+      "meta": {
+        "specialty": "drawing",
+        "template_id": "seasoned_generalist",
+        "template_name": "老练全能",
+        "variant": 2,
+        "source": "2026-11-23 calibration experiment; not production content",
+        "usage": "用于人物模板数值校准，不进入正式初始名册",
+        "resume_one_line": "长期参与不同环节，单项没有极端峰值，但各工序都能承担任务。",
+        "ability_sum": 335,
+        "rarity_band": "SR",
+        "salary_formula": "15000 + sum(abilities)*90; free_veteran +10% (proposal only)",
+        "specialty_assignment_note": "按模板定位指定的主专业，仅供当前单专业适配模型做实验；不等于最终人物卡规则。"
+      }
+    },
+    {
+      "staff": {
+        "id": "exp_seasoned_generalist_03",
+        "name": "老练全能样本丙",
+        "role": "postproduction",
+        "employment": "core",
+        "abilities": {
+          "planning": 52,
+          "direction": 58,
+          "drawing": 56,
+          "animation": 57,
+          "management": 54,
+          "postproduction": 58
+        },
+        "experience": {
+          "planning": 4,
+          "direction": 4,
+          "drawing": 4,
+          "animation": 4,
+          "management": 4,
+          "postproduction": 4
+        },
+        "potential": {
+          "planning": 81,
+          "direction": 88,
+          "drawing": 76,
+          "animation": 78,
+          "management": 76,
+          "postproduction": 81
+        },
+        "revealed_potential": {
+          "planning": false,
+          "direction": false,
+          "drawing": false,
+          "animation": false,
+          "management": false,
+          "postproduction": false
+        },
+        "talent_type": "generalist",
+        "clues": [
+          "长期参与不同环节，单项没有极端峰值，但各工序都能承担任务。"
+        ],
+        "traits": [
+          "多面手"
+        ],
+        "weekly_salary": 45150,
+        "project_fee": 0,
+        "fatigue": 0,
+        "morale": 80,
+        "departure_warning": false
+      },
+      "meta": {
+        "specialty": "postproduction",
+        "template_id": "seasoned_generalist",
+        "template_name": "老练全能",
+        "variant": 3,
+        "source": "2026-11-23 calibration experiment; not production content",
+        "usage": "用于人物模板数值校准，不进入正式初始名册",
+        "resume_one_line": "长期参与不同环节，单项没有极端峰值，但各工序都能承担任务。",
+        "ability_sum": 335,
+        "rarity_band": "SR",
+        "salary_formula": "15000 + sum(abilities)*90; free_veteran +10% (proposal only)",
+        "specialty_assignment_note": "按模板定位指定的主专业，仅供当前单专业适配模型做实验；不等于最终人物卡规则。"
+      }
+    },
+    {
+      "staff": {
+        "id": "exp_genius_oddity_01",
+        "name": "天才偏科怪样本甲",
+        "role": "key_animator",
+        "employment": "core",
+        "abilities": {
+          "planning": 55,
+          "direction": 52,
+          "drawing": 98,
+          "animation": 92,
+          "management": 55,
+          "postproduction": 50
+        },
+        "experience": {
+          "planning": 4,
+          "direction": 4,
+          "drawing": 10,
+          "animation": 10,
+          "management": 4,
+          "postproduction": 4
+        },
+        "potential": {
+          "planning": 75,
+          "direction": 75,
+          "drawing": 100,
+          "animation": 100,
+          "management": 76,
+          "postproduction": 74
+        },
+        "revealed_potential": {
+          "planning": false,
+          "direction": false,
+          "drawing": false,
+          "animation": false,
+          "management": false,
+          "postproduction": false
+        },
+        "talent_type": "uneven",
+        "clues": [
+          "作品集有极高水准的代表作，但协作和跨专业经历存在明显短板。"
+        ],
+        "traits": [
+          "天才型"
+        ],
+        "weekly_salary": 51180,
+        "project_fee": 0,
+        "fatigue": 0,
+        "morale": 80,
+        "departure_warning": false
+      },
+      "meta": {
+        "specialty": "drawing",
+        "template_id": "genius_oddity",
+        "template_name": "天才偏科怪",
+        "variant": 1,
+        "source": "2026-11-23 calibration experiment; not production content",
+        "usage": "用于人物模板数值校准，不进入正式初始名册",
+        "resume_one_line": "作品集有极高水准的代表作，但协作和跨专业经历存在明显短板。",
+        "ability_sum": 402,
+        "rarity_band": "SSR",
+        "salary_formula": "15000 + sum(abilities)*90; free_veteran +10% (proposal only)",
+        "specialty_assignment_note": "按模板定位指定的主专业，仅供当前单专业适配模型做实验；不等于最终人物卡规则。"
+      }
+    },
+    {
+      "staff": {
+        "id": "exp_genius_oddity_02",
+        "name": "天才偏科怪样本乙",
+        "role": "scriptwriter",
+        "employment": "core",
+        "abilities": {
+          "planning": 91,
+          "direction": 88,
+          "drawing": 42,
+          "animation": 40,
+          "management": 38,
+          "postproduction": 40
+        },
+        "experience": {
+          "planning": 10,
+          "direction": 10,
+          "drawing": 1,
+          "animation": 1,
+          "management": 1,
+          "postproduction": 1
+        },
+        "potential": {
+          "planning": 100,
+          "direction": 100,
+          "drawing": 70,
+          "animation": 69,
+          "management": 68,
+          "postproduction": 60
+        },
+        "revealed_potential": {
+          "planning": false,
+          "direction": false,
+          "drawing": false,
+          "animation": false,
+          "management": false,
+          "postproduction": false
+        },
+        "talent_type": "uneven",
+        "clues": [
+          "作品集有极高水准的代表作，但协作和跨专业经历存在明显短板。"
+        ],
+        "traits": [
+          "天才型"
+        ],
+        "weekly_salary": 45510,
+        "project_fee": 0,
+        "fatigue": 0,
+        "morale": 80,
+        "departure_warning": false
+      },
+      "meta": {
+        "specialty": "planning",
+        "template_id": "genius_oddity",
+        "template_name": "天才偏科怪",
+        "variant": 2,
+        "source": "2026-11-23 calibration experiment; not production content",
+        "usage": "用于人物模板数值校准，不进入正式初始名册",
+        "resume_one_line": "作品集有极高水准的代表作，但协作和跨专业经历存在明显短板。",
+        "ability_sum": 339,
+        "rarity_band": "SR",
+        "salary_formula": "15000 + sum(abilities)*90; free_veteran +10% (proposal only)",
+        "specialty_assignment_note": "按模板定位指定的主专业，仅供当前单专业适配模型做实验；不等于最终人物卡规则。"
+      }
+    },
+    {
+      "staff": {
+        "id": "exp_genius_oddity_03",
+        "name": "天才偏科怪样本丙",
+        "role": "animator",
+        "employment": "core",
+        "abilities": {
+          "planning": 45,
+          "direction": 48,
+          "drawing": 45,
+          "animation": 97,
+          "management": 45,
+          "postproduction": 45
+        },
+        "experience": {
+          "planning": 1,
+          "direction": 1,
+          "drawing": 1,
+          "animation": 11,
+          "management": 1,
+          "postproduction": 1
+        },
+        "potential": {
+          "planning": 74,
+          "direction": 78,
+          "drawing": 65,
+          "animation": 100,
+          "management": 67,
+          "postproduction": 68
+        },
+        "revealed_potential": {
+          "planning": false,
+          "direction": false,
+          "drawing": false,
+          "animation": false,
+          "management": false,
+          "postproduction": false
+        },
+        "talent_type": "uneven",
+        "clues": [
+          "作品集有极高水准的代表作，但协作和跨专业经历存在明显短板。"
+        ],
+        "traits": [
+          "天才型"
+        ],
+        "weekly_salary": 44250,
+        "project_fee": 0,
+        "fatigue": 0,
+        "morale": 80,
+        "departure_warning": false
+      },
+      "meta": {
+        "specialty": "animation",
+        "template_id": "genius_oddity",
+        "template_name": "天才偏科怪",
+        "variant": 3,
+        "source": "2026-11-23 calibration experiment; not production content",
+        "usage": "用于人物模板数值校准，不进入正式初始名册",
+        "resume_one_line": "作品集有极高水准的代表作，但协作和跨专业经历存在明显短板。",
+        "ability_sum": 325,
+        "rarity_band": "SR",
+        "salary_formula": "15000 + sum(abilities)*90; free_veteran +10% (proposal only)",
+        "specialty_assignment_note": "按模板定位指定的主专业，仅供当前单专业适配模型做实验；不等于最终人物卡规则。"
+      }
+    },
+    {
+      "staff": {
+        "id": "exp_late_bloomer_01",
+        "name": "大器晚成样本甲",
+        "role": "animator",
+        "employment": "core",
+        "abilities": {
+          "planning": 30,
+          "direction": 28,
+          "drawing": 35,
+          "animation": 32,
+          "management": 30,
+          "postproduction": 28
+        },
+        "experience": {
+          "planning": 0,
+          "direction": 0,
+          "drawing": 1,
+          "animation": 0,
+          "management": 0,
+          "postproduction": 0
+        },
+        "potential": {
+          "planning": 66,
+          "direction": 65,
+          "drawing": 73,
+          "animation": 71,
+          "management": 70,
+          "postproduction": 69
+        },
+        "revealed_potential": {
+          "planning": false,
+          "direction": false,
+          "drawing": false,
+          "animation": false,
+          "management": false,
+          "postproduction": false
+        },
+        "talent_type": "specialist",
+        "clues": [
+          "现阶段成果普通，学习记录和早期作品显示出高于当前能力的成长潜力。"
+        ],
+        "traits": [
+          "新人"
+        ],
+        "weekly_salary": 31470,
+        "project_fee": 0,
+        "fatigue": 0,
+        "morale": 80,
+        "departure_warning": false
+      },
+      "meta": {
+        "specialty": "animation",
+        "template_id": "late_bloomer",
+        "template_name": "大器晚成",
+        "variant": 1,
+        "source": "2026-11-23 calibration experiment; not production content",
+        "usage": "用于人物模板数值校准，不进入正式初始名册",
+        "resume_one_line": "现阶段成果普通，学习记录和早期作品显示出高于当前能力的成长潜力。",
+        "ability_sum": 183,
+        "rarity_band": "N",
+        "salary_formula": "15000 + sum(abilities)*90; free_veteran +10% (proposal only)",
+        "specialty_assignment_note": "按模板定位指定的主专业，仅供当前单专业适配模型做实验；不等于最终人物卡规则。"
+      }
+    },
+    {
+      "staff": {
+        "id": "exp_late_bloomer_02",
+        "name": "大器晚成样本乙",
+        "role": "director",
+        "employment": "core",
+        "abilities": {
+          "planning": 32,
+          "direction": 35,
+          "drawing": 28,
+          "animation": 30,
+          "management": 34,
+          "postproduction": 32
+        },
+        "experience": {
+          "planning": 0,
+          "direction": 1,
+          "drawing": 0,
+          "animation": 0,
+          "management": 0,
+          "postproduction": 0
+        },
+        "potential": {
+          "planning": 69,
+          "direction": 73,
+          "drawing": 67,
+          "animation": 70,
+          "management": 75,
+          "postproduction": 74
+        },
+        "revealed_potential": {
+          "planning": false,
+          "direction": false,
+          "drawing": false,
+          "animation": false,
+          "management": false,
+          "postproduction": false
+        },
+        "talent_type": "specialist",
+        "clues": [
+          "现阶段成果普通，学习记录和早期作品显示出高于当前能力的成长潜力。"
+        ],
+        "traits": [
+          "新人"
+        ],
+        "weekly_salary": 32190,
+        "project_fee": 0,
+        "fatigue": 0,
+        "morale": 80,
+        "departure_warning": false
+      },
+      "meta": {
+        "specialty": "direction",
+        "template_id": "late_bloomer",
+        "template_name": "大器晚成",
+        "variant": 2,
+        "source": "2026-11-23 calibration experiment; not production content",
+        "usage": "用于人物模板数值校准，不进入正式初始名册",
+        "resume_one_line": "现阶段成果普通，学习记录和早期作品显示出高于当前能力的成长潜力。",
+        "ability_sum": 191,
+        "rarity_band": "N",
+        "salary_formula": "15000 + sum(abilities)*90; free_veteran +10% (proposal only)",
+        "specialty_assignment_note": "按模板定位指定的主专业，仅供当前单专业适配模型做实验；不等于最终人物卡规则。"
+      }
+    },
+    {
+      "staff": {
+        "id": "exp_late_bloomer_03",
+        "name": "大器晚成样本丙",
+        "role": "postproduction",
+        "employment": "core",
+        "abilities": {
+          "planning": 40,
+          "direction": 42,
+          "drawing": 38,
+          "animation": 40,
+          "management": 40,
+          "postproduction": 42
+        },
+        "experience": {
+          "planning": 1,
+          "direction": 1,
+          "drawing": 1,
+          "animation": 1,
+          "management": 1,
+          "postproduction": 1
+        },
+        "potential": {
+          "planning": 78,
+          "direction": 81,
+          "drawing": 78,
+          "animation": 81,
+          "management": 82,
+          "postproduction": 85
+        },
+        "revealed_potential": {
+          "planning": false,
+          "direction": false,
+          "drawing": false,
+          "animation": false,
+          "management": false,
+          "postproduction": false
+        },
+        "talent_type": "specialist",
+        "clues": [
+          "现阶段成果普通，学习记录和早期作品显示出高于当前能力的成长潜力。"
+        ],
+        "traits": [
+          "新人"
+        ],
+        "weekly_salary": 36780,
+        "project_fee": 0,
+        "fatigue": 0,
+        "morale": 80,
+        "departure_warning": false
+      },
+      "meta": {
+        "specialty": "postproduction",
+        "template_id": "late_bloomer",
+        "template_name": "大器晚成",
+        "variant": 3,
+        "source": "2026-11-23 calibration experiment; not production content",
+        "usage": "用于人物模板数值校准，不进入正式初始名册",
+        "resume_one_line": "现阶段成果普通，学习记录和早期作品显示出高于当前能力的成长潜力。",
+        "ability_sum": 242,
+        "rarity_band": "R",
+        "salary_formula": "15000 + sum(abilities)*90; free_veteran +10% (proposal only)",
+        "specialty_assignment_note": "按模板定位指定的主专业，仅供当前单专业适配模型做实验；不等于最终人物卡规则。"
+      }
+    },
+    {
+      "staff": {
+        "id": "exp_production_manager_01",
+        "name": "制作进行型样本甲",
+        "role": "production_manager",
+        "employment": "core",
+        "abilities": {
+          "planning": 58,
+          "direction": 38,
+          "drawing": 30,
+          "animation": 32,
+          "management": 84,
+          "postproduction": 38
+        },
+        "experience": {
+          "planning": 4,
+          "direction": 1,
+          "drawing": 0,
+          "animation": 0,
+          "management": 9,
+          "postproduction": 1
+        },
+        "potential": {
+          "planning": 81,
+          "direction": 62,
+          "drawing": 55,
+          "animation": 58,
+          "management": 100,
+          "postproduction": 66
+        },
+        "revealed_potential": {
+          "planning": false,
+          "direction": false,
+          "drawing": false,
+          "animation": false,
+          "management": false,
+          "postproduction": false
+        },
+        "talent_type": "generalist",
+        "clues": [
+          "擅长排期、沟通、资源协调，专业制作能力并非其主要优势。"
+        ],
+        "traits": [
+          "社交达人"
+        ],
+        "weekly_salary": 40200,
+        "project_fee": 0,
+        "fatigue": 0,
+        "morale": 80,
+        "departure_warning": false
+      },
+      "meta": {
+        "specialty": "management",
+        "template_id": "production_manager",
+        "template_name": "制作进行型",
+        "variant": 1,
+        "source": "2026-11-23 calibration experiment; not production content",
+        "usage": "用于人物模板数值校准，不进入正式初始名册",
+        "resume_one_line": "擅长排期、沟通、资源协调，专业制作能力并非其主要优势。",
+        "ability_sum": 280,
+        "rarity_band": "R",
+        "salary_formula": "15000 + sum(abilities)*90; free_veteran +10% (proposal only)",
+        "specialty_assignment_note": "按模板定位指定的主专业，仅供当前单专业适配模型做实验；不等于最终人物卡规则。"
+      }
+    },
+    {
+      "staff": {
+        "id": "exp_production_manager_02",
+        "name": "制作进行型样本乙",
+        "role": "production_manager",
+        "employment": "core",
+        "abilities": {
+          "planning": 62,
+          "direction": 35,
+          "drawing": 28,
+          "animation": 30,
+          "management": 88,
+          "postproduction": 34
+        },
+        "experience": {
+          "planning": 4,
+          "direction": 1,
+          "drawing": 0,
+          "animation": 0,
+          "management": 10,
+          "postproduction": 0
+        },
+        "potential": {
+          "planning": 88,
+          "direction": 62,
+          "drawing": 56,
+          "animation": 59,
+          "management": 100,
+          "postproduction": 54
+        },
+        "revealed_potential": {
+          "planning": false,
+          "direction": false,
+          "drawing": false,
+          "animation": false,
+          "management": false,
+          "postproduction": false
+        },
+        "talent_type": "generalist",
+        "clues": [
+          "擅长排期、沟通、资源协调，专业制作能力并非其主要优势。"
+        ],
+        "traits": [
+          "社交达人"
+        ],
+        "weekly_salary": 39930,
+        "project_fee": 0,
+        "fatigue": 0,
+        "morale": 80,
+        "departure_warning": false
+      },
+      "meta": {
+        "specialty": "management",
+        "template_id": "production_manager",
+        "template_name": "制作进行型",
+        "variant": 2,
+        "source": "2026-11-23 calibration experiment; not production content",
+        "usage": "用于人物模板数值校准，不进入正式初始名册",
+        "resume_one_line": "擅长排期、沟通、资源协调，专业制作能力并非其主要优势。",
+        "ability_sum": 277,
+        "rarity_band": "R",
+        "salary_formula": "15000 + sum(abilities)*90; free_veteran +10% (proposal only)",
+        "specialty_assignment_note": "按模板定位指定的主专业，仅供当前单专业适配模型做实验；不等于最终人物卡规则。"
+      }
+    },
+    {
+      "staff": {
+        "id": "exp_production_manager_03",
+        "name": "制作进行型样本丙",
+        "role": "production_manager",
+        "employment": "core",
+        "abilities": {
+          "planning": 55,
+          "direction": 42,
+          "drawing": 34,
+          "animation": 35,
+          "management": 80,
+          "postproduction": 42
+        },
+        "experience": {
+          "planning": 4,
+          "direction": 1,
+          "drawing": 0,
+          "animation": 1,
+          "management": 11,
+          "postproduction": 1
+        },
+        "potential": {
+          "planning": 84,
+          "direction": 72,
+          "drawing": 54,
+          "animation": 56,
+          "management": 100,
+          "postproduction": 65
+        },
+        "revealed_potential": {
+          "planning": false,
+          "direction": false,
+          "drawing": false,
+          "animation": false,
+          "management": false,
+          "postproduction": false
+        },
+        "talent_type": "generalist",
+        "clues": [
+          "擅长排期、沟通、资源协调，专业制作能力并非其主要优势。"
+        ],
+        "traits": [
+          "社交达人"
+        ],
+        "weekly_salary": 40920,
+        "project_fee": 0,
+        "fatigue": 0,
+        "morale": 80,
+        "departure_warning": false
+      },
+      "meta": {
+        "specialty": "management",
+        "template_id": "production_manager",
+        "template_name": "制作进行型",
+        "variant": 3,
+        "source": "2026-11-23 calibration experiment; not production content",
+        "usage": "用于人物模板数值校准，不进入正式初始名册",
+        "resume_one_line": "擅长排期、沟通、资源协调，专业制作能力并非其主要优势。",
+        "ability_sum": 288,
+        "rarity_band": "R",
+        "salary_formula": "15000 + sum(abilities)*90; free_veteran +10% (proposal only)",
+        "specialty_assignment_note": "按模板定位指定的主专业，仅供当前单专业适配模型做实验；不等于最终人物卡规则。"
+      }
+    },
+    {
+      "staff": {
+        "id": "exp_postproduction_nerd_01",
+        "name": "后期宅样本甲",
+        "role": "postproduction",
+        "employment": "core",
+        "abilities": {
+          "planning": 32,
+          "direction": 38,
+          "drawing": 42,
+          "animation": 48,
+          "management": 35,
+          "postproduction": 84
+        },
+        "experience": {
+          "planning": 0,
+          "direction": 1,
+          "drawing": 1,
+          "animation": 1,
+          "management": 1,
+          "postproduction": 9
+        },
+        "potential": {
+          "planning": 55,
+          "direction": 62,
+          "drawing": 67,
+          "animation": 74,
+          "management": 62,
+          "postproduction": 100
+        },
+        "revealed_potential": {
+          "planning": false,
+          "direction": false,
+          "drawing": false,
+          "animation": false,
+          "management": false,
+          "postproduction": false
+        },
+        "talent_type": "specialist",
+        "clues": [
+          "作品集集中在摄影、合成与调色，其他工序参与较少。"
+        ],
+        "traits": [
+          "独行侠"
+        ],
+        "weekly_salary": 40110,
+        "project_fee": 0,
+        "fatigue": 0,
+        "morale": 80,
+        "departure_warning": false
+      },
+      "meta": {
+        "specialty": "postproduction",
+        "template_id": "postproduction_nerd",
+        "template_name": "后期宅",
+        "variant": 1,
+        "source": "2026-11-23 calibration experiment; not production content",
+        "usage": "用于人物模板数值校准，不进入正式初始名册",
+        "resume_one_line": "作品集集中在摄影、合成与调色，其他工序参与较少。",
+        "ability_sum": 279,
+        "rarity_band": "R",
+        "salary_formula": "15000 + sum(abilities)*90; free_veteran +10% (proposal only)",
+        "specialty_assignment_note": "按模板定位指定的主专业，仅供当前单专业适配模型做实验；不等于最终人物卡规则。"
+      }
+    },
+    {
+      "staff": {
+        "id": "exp_postproduction_nerd_02",
+        "name": "后期宅样本乙",
+        "role": "postproduction",
+        "employment": "core",
+        "abilities": {
+          "planning": 35,
+          "direction": 32,
+          "drawing": 38,
+          "animation": 42,
+          "management": 40,
+          "postproduction": 90
+        },
+        "experience": {
+          "planning": 1,
+          "direction": 0,
+          "drawing": 1,
+          "animation": 1,
+          "management": 1,
+          "postproduction": 10
+        },
+        "potential": {
+          "planning": 61,
+          "direction": 59,
+          "drawing": 66,
+          "animation": 71,
+          "management": 70,
+          "postproduction": 100
+        },
+        "revealed_potential": {
+          "planning": false,
+          "direction": false,
+          "drawing": false,
+          "animation": false,
+          "management": false,
+          "postproduction": false
+        },
+        "talent_type": "specialist",
+        "clues": [
+          "作品集集中在摄影、合成与调色，其他工序参与较少。"
+        ],
+        "traits": [
+          "独行侠"
+        ],
+        "weekly_salary": 39930,
+        "project_fee": 0,
+        "fatigue": 0,
+        "morale": 80,
+        "departure_warning": false
+      },
+      "meta": {
+        "specialty": "postproduction",
+        "template_id": "postproduction_nerd",
+        "template_name": "后期宅",
+        "variant": 2,
+        "source": "2026-11-23 calibration experiment; not production content",
+        "usage": "用于人物模板数值校准，不进入正式初始名册",
+        "resume_one_line": "作品集集中在摄影、合成与调色，其他工序参与较少。",
+        "ability_sum": 277,
+        "rarity_band": "R",
+        "salary_formula": "15000 + sum(abilities)*90; free_veteran +10% (proposal only)",
+        "specialty_assignment_note": "按模板定位指定的主专业，仅供当前单专业适配模型做实验；不等于最终人物卡规则。"
+      }
+    },
+    {
+      "staff": {
+        "id": "exp_postproduction_nerd_03",
+        "name": "后期宅样本丙",
+        "role": "postproduction",
+        "employment": "core",
+        "abilities": {
+          "planning": 38,
+          "direction": 42,
+          "drawing": 35,
+          "animation": 46,
+          "management": 32,
+          "postproduction": 82
+        },
+        "experience": {
+          "planning": 1,
+          "direction": 1,
+          "drawing": 1,
+          "animation": 1,
+          "management": 0,
+          "postproduction": 11
+        },
+        "potential": {
+          "planning": 67,
+          "direction": 72,
+          "drawing": 55,
+          "animation": 67,
+          "management": 54,
+          "postproduction": 100
+        },
+        "revealed_potential": {
+          "planning": false,
+          "direction": false,
+          "drawing": false,
+          "animation": false,
+          "management": false,
+          "postproduction": false
+        },
+        "talent_type": "specialist",
+        "clues": [
+          "作品集集中在摄影、合成与调色，其他工序参与较少。"
+        ],
+        "traits": [
+          "独行侠"
+        ],
+        "weekly_salary": 39750,
+        "project_fee": 0,
+        "fatigue": 0,
+        "morale": 80,
+        "departure_warning": false
+      },
+      "meta": {
+        "specialty": "postproduction",
+        "template_id": "postproduction_nerd",
+        "template_name": "后期宅",
+        "variant": 3,
+        "source": "2026-11-23 calibration experiment; not production content",
+        "usage": "用于人物模板数值校准，不进入正式初始名册",
+        "resume_one_line": "作品集集中在摄影、合成与调色，其他工序参与较少。",
+        "ability_sum": 275,
+        "rarity_band": "R",
+        "salary_formula": "15000 + sum(abilities)*90; free_veteran +10% (proposal only)",
+        "specialty_assignment_note": "按模板定位指定的主专业，仅供当前单专业适配模型做实验；不等于最终人物卡规则。"
+      }
+    },
+    {
+      "staff": {
+        "id": "exp_free_veteran_01",
+        "name": "自由老手样本甲",
+        "role": "key_animator",
+        "employment": "core",
+        "abilities": {
+          "planning": 48,
+          "direction": 52,
+          "drawing": 82,
+          "animation": 62,
+          "management": 46,
+          "postproduction": 48
+        },
+        "experience": {
+          "planning": 1,
+          "direction": 4,
+          "drawing": 9,
+          "animation": 4,
+          "management": 1,
+          "postproduction": 1
+        },
+        "potential": {
+          "planning": 71,
+          "direction": 76,
+          "drawing": 100,
+          "animation": 88,
+          "management": 73,
+          "postproduction": 76
+        },
+        "revealed_potential": {
+          "planning": false,
+          "direction": false,
+          "drawing": false,
+          "animation": false,
+          "management": false,
+          "postproduction": false
+        },
+        "talent_type": "specialist",
+        "clues": [
+          "自由职业履历完整，主专业能力成熟，报价高于同能力普通员工。"
+        ],
+        "traits": [
+          "稳定型"
+        ],
+        "weekly_salary": 49962,
+        "project_fee": 0,
+        "fatigue": 0,
+        "morale": 80,
+        "departure_warning": false
+      },
+      "meta": {
+        "specialty": "drawing",
+        "template_id": "free_veteran",
+        "template_name": "自由老手",
+        "variant": 1,
+        "source": "2026-11-23 calibration experiment; not production content",
+        "usage": "用于人物模板数值校准，不进入正式初始名册",
+        "resume_one_line": "自由职业履历完整，主专业能力成熟，报价高于同能力普通员工。",
+        "ability_sum": 338,
+        "rarity_band": "SR",
+        "salary_formula": "15000 + sum(abilities)*90; free_veteran +10% (proposal only)",
+        "specialty_assignment_note": "按模板定位指定的主专业，仅供当前单专业适配模型做实验；不等于最终人物卡规则。"
+      }
+    },
+    {
+      "staff": {
+        "id": "exp_free_veteran_02",
+        "name": "自由老手样本乙",
+        "role": "director",
+        "employment": "core",
+        "abilities": {
+          "planning": 50,
+          "direction": 84,
+          "drawing": 56,
+          "animation": 48,
+          "management": 50,
+          "postproduction": 52
+        },
+        "experience": {
+          "planning": 4,
+          "direction": 10,
+          "drawing": 4,
+          "animation": 1,
+          "management": 4,
+          "postproduction": 4
+        },
+        "potential": {
+          "planning": 76,
+          "direction": 100,
+          "drawing": 84,
+          "animation": 77,
+          "management": 80,
+          "postproduction": 72
+        },
+        "revealed_potential": {
+          "planning": false,
+          "direction": false,
+          "drawing": false,
+          "animation": false,
+          "management": false,
+          "postproduction": false
+        },
+        "talent_type": "specialist",
+        "clues": [
+          "自由职业履历完整，主专业能力成熟，报价高于同能力普通员工。"
+        ],
+        "traits": [
+          "稳定型"
+        ],
+        "weekly_salary": 50160,
+        "project_fee": 0,
+        "fatigue": 0,
+        "morale": 80,
+        "departure_warning": false
+      },
+      "meta": {
+        "specialty": "direction",
+        "template_id": "free_veteran",
+        "template_name": "自由老手",
+        "variant": 2,
+        "source": "2026-11-23 calibration experiment; not production content",
+        "usage": "用于人物模板数值校准，不进入正式初始名册",
+        "resume_one_line": "自由职业履历完整，主专业能力成熟，报价高于同能力普通员工。",
+        "ability_sum": 340,
+        "rarity_band": "SR",
+        "salary_formula": "15000 + sum(abilities)*90; free_veteran +10% (proposal only)",
+        "specialty_assignment_note": "按模板定位指定的主专业，仅供当前单专业适配模型做实验；不等于最终人物卡规则。"
+      }
+    },
+    {
+      "staff": {
+        "id": "exp_free_veteran_03",
+        "name": "自由老手样本丙",
+        "role": "scriptwriter",
+        "employment": "core",
+        "abilities": {
+          "planning": 82,
+          "direction": 52,
+          "drawing": 48,
+          "animation": 50,
+          "management": 46,
+          "postproduction": 54
+        },
+        "experience": {
+          "planning": 11,
+          "direction": 4,
+          "drawing": 1,
+          "animation": 4,
+          "management": 1,
+          "postproduction": 4
+        },
+        "potential": {
+          "planning": 100,
+          "direction": 82,
+          "drawing": 68,
+          "animation": 71,
+          "management": 68,
+          "postproduction": 77
+        },
+        "revealed_potential": {
+          "planning": false,
+          "direction": false,
+          "drawing": false,
+          "animation": false,
+          "management": false,
+          "postproduction": false
+        },
+        "talent_type": "specialist",
+        "clues": [
+          "自由职业履历完整，主专业能力成熟，报价高于同能力普通员工。"
+        ],
+        "traits": [
+          "稳定型"
+        ],
+        "weekly_salary": 49368,
+        "project_fee": 0,
+        "fatigue": 0,
+        "morale": 80,
+        "departure_warning": false
+      },
+      "meta": {
+        "specialty": "planning",
+        "template_id": "free_veteran",
+        "template_name": "自由老手",
+        "variant": 3,
+        "source": "2026-11-23 calibration experiment; not production content",
+        "usage": "用于人物模板数值校准，不进入正式初始名册",
+        "resume_one_line": "自由职业履历完整，主专业能力成熟，报价高于同能力普通员工。",
+        "ability_sum": 332,
+        "rarity_band": "SR",
+        "salary_formula": "15000 + sum(abilities)*90; free_veteran +10% (proposal only)",
+        "specialty_assignment_note": "按模板定位指定的主专业，仅供当前单专业适配模型做实验；不等于最终人物卡规则。"
+      }
+    }
+  ]
+}
