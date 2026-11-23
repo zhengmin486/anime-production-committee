@@ -1,0 +1,14 @@
+name: Staff scheduling simulator
+on:
+  pull_request:
+    paths: ["scripts/staff_scheduling_simulator.py", "scripts/tests/test_staff_scheduling_simulator.py"]
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.12"}
+      - run: python -m unittest scripts.tests.test_staff_scheduling_simulator -v
+      - run: python scripts/staff_scheduling_simulator.py --staff-file staff_templates.json --deadline 14
