@@ -27,7 +27,8 @@ inline constexpr int rating_small = 0;
 
 inline constexpr int initial_morale = 80;
 inline constexpr int initial_fatigue = 0;
-inline constexpr int initial_reputation = 0;
+// 声望为已确认规则（GAME_RULES V3.9 §1）：初始 100、下限 0、无上限、不随时间衰减；等级阈值与称号仍待定。
+inline constexpr int initial_reputation = 100;
 inline constexpr int base_speed = 9;
 inline constexpr int specialty_fit = 1200;
 inline constexpr int nonspecialty_fit = 800;

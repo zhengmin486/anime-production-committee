@@ -80,7 +80,7 @@ export function v3IdleState(): V3GameState {
     version: 3, seed: 12345, phase: 'idle',
     company: {
       week: 0, status: 'running', end_reason: null, initial_funds: 5_000_000, funds: 5_000_000,
-      reputation: 0, staff: v3Staff(), finance: v3EmptyFinance(),
+      reputation: 100, staff: v3Staff(), finance: v3EmptyFinance(),
     },
     offers: [
       offer,
@@ -178,6 +178,8 @@ export function v3SettledState(mode: V3CooperationMode = 'contract'): V3GameStat
   state.phase = 'project_settled'
   state.company.funds = mode === 'contract' ? 6_000_000 : 7_000_000
   state.company.finance = structuredClone(finance)
+  // 声望只在结算节点变化：quality 70 ≥ target 60 按成功档 +10；历史是 optional 字段，样本不预置。
+  state.company.reputation = 110
   state.project = null
   state.history = [work]
   state.last_project_id = work.id
