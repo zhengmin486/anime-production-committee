@@ -19,7 +19,19 @@ function configure(state, policy = 'balanced', module = core) {
   const recommended = state.project.stages[stage].recommended_configuration
   return ok('apply_decision', { state, decision: { type: 'configure_stage', stage, configuration: { assignments: recommended.assignments, policy, overtime: false } } }, module).state
 }
-const advance = (state, module = core) => ok('advance_week', { state }, module)
+// 周推进后若产生事件，自动选择不花钱的可用选项，使既有轨迹测试继续跑到阶段/交付节点。
+const advance = (state, module = core) => {
+  const result = ok('advance_week', { state }, module)
+  let next = result.state
+  while (next.phase === 'event_pending') {
+    const option = next.pending_event.options
+      .filter((item) => item.disabled_reason === null)
+      .sort((left, right) => left.cost - right.cost)[0]
+    next = ok('resolve_event', { state: next, option_id: option.id }, module).state
+  }
+  return { ...result, state: next }
+}
+const advanceRaw = (state, module = core) => ok('advance_week', { state }, module)
 function expectError(result, code) {
   assert.deepEqual(Object.keys(result), ['error'])
   assert.deepEqual(Object.keys(result.error).sort(), ['code', 'message'])
@@ -490,4 +502,97 @@ test('声望账本兼容旧存档缺席，并在两个独立 WASM 实例给出�
     ok('calculate_result', { state: completedReady(), scope: 'project' }, core),
   )
   assert.deepEqual(ok('initialize_game', { seed: 777 }, other).state.company, initial(777).company)
+})
+
+function resolveFirstAvailable(state) {
+  const option = state.pending_event.options
+    .filter((item) => item.disabled_reason === null)
+    .sort((left, right) => left.cost - right.cost)[0]
+  return ok('resolve_event', { state, option_id: option.id }).state
+}
+
+function reachStage(state, target) {
+  for (let step = 0; step < 40; step++) {
+    if (state.project.current_stage === target && state.project.stages[target].status === 'active') return state
+    if (state.phase === 'event_pending') { state = resolveFirstAvailable(state); continue }
+    const stage = state.project.current_stage
+    if (state.phase === 'producing' && state.project.stages[stage].status === 'ready') state = configure(state)
+    state = advanceRaw(state).state
+  }
+  throw new Error(`未能到达阶段 ${target}`)
+}
+
+test('事件：表现触发、选项代价、冷却与处理后可继续推进', () => {
+  let state = reachStage(configure(start(12345)), 'key_animation')
+  state.project.event_state.cooldowns = {}
+  state.project.stages.key_animation.quality = 40
+  const advanced = advanceRaw(state)
+  assert.equal(advanced.state.phase, 'event_pending')
+  const week = advanced.state.company.week
+  const event = advanced.state.pending_event
+  assert.equal(event.id, 'key_cut_rework')
+  assert.equal(event.polarity, 'negative')
+  assert.equal(event.tier, 'normal')
+  assert.equal(event.stage, 'key_animation')
+  assert.equal(event.trigger.metric, 'stage_quality')
+  assert.deepEqual(event.options.map((option) => option.id), ['accept', 'rework'])
+  assert.equal(event.options[1].cost, 180000)
+  assert.ok(event.options[1].effects_preview.includes('本阶段质量 +4'))
+  assert.equal(advanced.state.preview, null)
+
+  const morale = advanced.state.company.staff.map((person) => person.morale)
+  const resolved = ok('resolve_event', { state: advanced.state, option_id: 'accept' }).state
+  assert.equal(resolved.phase, 'producing')
+  assert.equal(resolved.pending_event, null)
+  assert.equal(resolved.project.event_state.cooldowns.quality_rework, week + 6)
+  assert.deepEqual(resolved.company.staff.map((person) => person.morale), morale.map((value) => Math.max(0, value - 3)))
+  assert.ok(resolved.preview !== null)
+
+  const next = advance(resolved)
+  assert.equal(next.report.week, week + 1)
+})
+
+test('事件：现金不足拒绝付费选项，同种子同状态结果可复现', () => {
+  const build = () => {
+    let state = reachStage(configure(start(4242)), 'key_animation')
+    state.project.event_state.cooldowns = {}
+    state.project.stages.key_animation.quality = 40
+    return advanceRaw(state).state
+  }
+  const first = build()
+  const second = build()
+  assert.deepEqual(first.pending_event, second.pending_event)
+  assert.equal(first.pending_event.id, 'key_cut_rework')
+
+  const poor = JSON.parse(JSON.stringify(first))
+  poor.company.funds = 100000
+  expectError(call('resolve_event', { state: poor, option_id: 'rework' }), 'MODE_NOT_ALLOWED')
+})
+
+test('事件：承制项目不能用延期，阶段效果挂起到阶段结束', () => {
+  const base = reachStage(configure(start(888)), 'key_animation')
+  base.project.event_state.pending = []
+  const stage = 'key_animation'
+  const crafted = {
+    ...base,
+    phase: 'event_pending',
+    preview: null,
+    pending_event: {
+      id: 'schedule_slip', category: 'schedule', stage,
+      title: '作画进度落后', description: '离交付只剩三周，作画进度明显落后于计划。',
+      trigger: { metric: 'weeks_to_deadline', value: 2, threshold: 3 },
+      tier: 'normal', polarity: 'negative', expires_week: null, escalation_note: null,
+      options: [
+        { id: 'accept', label: '维持原计划', cost: 0, allows_reconfigure: false, disabled_reason: null, effects_preview: [] },
+        { id: 'delay', label: '向委员会申请延期', cost: 250000, allows_reconfigure: false, disabled_reason: null, effects_preview: [] },
+      ],
+    },
+  }
+  expectError(call('resolve_event', { state: crafted, option_id: 'delay' }), 'MODE_NOT_ALLOWED')
+  const resolved = ok('resolve_event', { state: crafted, option_id: 'accept' }).state
+  assert.equal(resolved.phase, 'producing')
+  assert.deepEqual(resolved.project.event_state.pending, [
+    { source_event: 'schedule_slip', scope: 'stage', target: 'quality', stage, value: -3, applied: false },
+  ])
+  probeValidation(resolved)
 })

@@ -207,6 +207,8 @@ export interface Project {
   // M2 渠道框架（DATA_MODEL V3.7）：成员构成在立项时固定；承制模式两字段为 null。
   committee?: CommitteeMember[] | null
   tv_service?: TvService | null
+  // M2 事件（#11）：冷却、重大事件去重、未生效效果与履历输入。
+  event_state?: ProjectEventState
 }
 
 export interface EventOption {
@@ -215,7 +217,12 @@ export interface EventOption {
   cost: number
   allows_reconfigure: boolean
   disabled_reason: string | null
+  // M2 事件（#11）：已知代价清单，由核心生成，仅用于展示，不参与结算。
+  effects_preview?: string[]
 }
+
+export type EventTier = 'normal' | 'major'
+export type EventPolarity = 'negative' | 'positive'
 
 export interface GameEvent {
   id: string
@@ -225,6 +232,34 @@ export interface GameEvent {
   description: string
   trigger: { metric: string; value: number; threshold: number }
   options: EventOption[]
+  // M2 事件（#11）：缺省视为普通负面事件，兼容 M1 夹具与旧存档。
+  tier?: EventTier
+  polarity?: EventPolarity
+  expires_week?: number | null
+  escalation_note?: string | null
+}
+
+export interface MajorEventRecord {
+  id: string
+  name: string
+  choice: string
+  result: string
+}
+
+export interface PendingEventEffect {
+  source_event: string
+  scope: 'stage' | 'project'
+  target: 'quality'
+  stage: Stage | null
+  value: number
+  applied: boolean
+}
+
+export interface ProjectEventState {
+  cooldowns: Record<string, number>
+  major_seen: string[]
+  pending: PendingEventEffect[]
+  major_log: MajorEventRecord[]
 }
 
 export interface WorkRecord {
@@ -249,6 +284,7 @@ export interface WorkRecord {
   style?: WorkStyle
   rating?: WorkRating
   channel_breakdown?: ChannelRevenue[]
+  major_events?: MajorEventRecord[]
 }
 
 export interface CompanyResult {

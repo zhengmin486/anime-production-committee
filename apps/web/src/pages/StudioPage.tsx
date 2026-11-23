@@ -80,12 +80,13 @@ export function StudioPage({ core }: { core: ReturnType<typeof useGameCore> }) {
       {company.end_reason && <p className="action-note">{endReasonNames[company.end_reason]}，公司进入结束流程。</p>}
     </section>
 
-    {game.phase === 'event_pending' && game.pending_event && <section className="ledger event-panel" aria-label="制作异常" data-testid="event-panel">
-      <div className="ledger-heading"><h2>{game.pending_event.title}</h2><span>{eventCategoryNames[game.pending_event.category]}</span></div>
+    {game.phase === 'event_pending' && game.pending_event && <section className="ledger event-panel" aria-label="制作事件" data-testid="event-panel">
+      <div className="ledger-heading"><h2>{game.pending_event.title}</h2><span>{game.pending_event.tier === 'major' ? '重大 · ' : ''}{game.pending_event.polarity === 'positive' ? '正面机会' : eventCategoryNames[game.pending_event.category]}</span></div>
       <p className="event-description">{game.pending_event.description}</p>
       <p className="local-note">触发依据：{eventMetricNames[game.pending_event.trigger.metric] ?? game.pending_event.trigger.metric} {game.pending_event.trigger.value}（阈值 {game.pending_event.trigger.threshold}）· 当前阶段 {stageNames[game.pending_event.stage]}</p>
       <div className="event-options">{game.pending_event.options.map((option) => <button key={option.id} className="button secondary event-option" disabled={unavailable || option.disabled_reason !== null} onClick={() => void resolveEvent(option.id)}>
         <span>{option.label}{option.cost > 0 ? ` · ¥${money(option.cost)}` : ''}</span>
+        {option.effects_preview && option.effects_preview.length > 0 && <small>{option.effects_preview.join(' · ')}</small>}
         {option.disabled_reason && <small>{option.disabled_reason}</small>}
       </button>)}</div>
     </section>}

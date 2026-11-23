@@ -3,7 +3,7 @@
 - 模块负责人：@pyxz0；内容协作者：@Muchbv（见 [#13](https://github.com/zhengmin486/anime-production-committee/issues/13)）
 - 跟踪议题：[#11](https://github.com/zhengmin486/anime-production-committee/issues/11)
 - 依据：`docs/TEAM_DELIVERABLES/EVENT_MODULE.md` 的 15 条已确认规则、`docs/GAME_RULES.md` V3.2 第 7 步与第 8 节
-- 状态：**期限与放弃机制已由 zm 确认，待按本文档实现与验收**。本文档不修改其他已冻结规则；标「契约扩展」的条目仍需批注后才能进核心。
+- 状态：**M2-a 已实现（`feat/11-event-m2a-core`，PR #19）；M2-b 按第 5 节实现放弃与超时闭环**。本文档不修改其他已冻结规则；标「契约扩展」的条目仍需批注后才能进核心。
 
 ## 1. 现状（按 main 代码核对）
 
@@ -121,6 +121,8 @@
 `p_effective` = `clamp(60 + 修正, 0, 300)`‰。修正项：项目已开工周数每满 4 周 +10；最高疲劳 ≥ 70 再 +20；现金低于两周支出 +15。全部 `TODO(待定)`。
 
 **确定性要求**：候选池遍历顺序为目录声明顺序；同优先级再用 `id` 字典序兜底。禁用 `std::unordered_map` 参与选序，避免平台差异。
+
+**实现说明（2026-11-23）**：实际代码用 `next_seed(seed + week * 2654435761)` 取低位作为**无状态混合**，不写回 `GameState.seed`。这样同 seed + 同周 + 同状态可复现，同时不改变 M1 固定种子轨迹、市场轮换和既有黄金数据；平级候选用同一次混合值的次低位选择。代价是它不属于「新增种子消费点」，不需要重写既有 RNG 协议。
 
 ## 4. 效果结算
 

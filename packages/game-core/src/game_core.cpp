@@ -259,6 +259,42 @@ bool is_producing_active(const Json& state) {
     return project.is_object() && !project.at("current_stage").is_null()
         && project.at("stages").at(project.at("current_stage").get<std::string>()).at("status") == "active";
 }
+Integer staff_max_fatigue(const Json& state) {
+    Integer value = 0;
+    for (const auto& person : state.at("company").at("staff")) value = std::max(value, num(person, "fatigue"));
+    return value;
+}
+Integer staff_min_morale(const Json& state) {
+    Integer value = 100;
+    for (const auto& person : state.at("company").at("staff")) value = std::min(value, num(person, "morale"));
+    return value;
+}
+Integer event_metric_value(const Json& state, const std::string& metric) {
+    const auto& project = state.at("project");
+    const auto stage_name = project.at("current_stage").get<std::string>();
+    const auto index = static_cast<std::size_t>(stage_index(stage_name));
+    const auto& stage = project.at("stages").at(stage_name);
+    if (metric == "stage_quality") return num(stage, "quality");
+    if (metric == "stage_progress_permille") {
+        const auto workload = number(project.at("offer").at("workloads").at(index), rules::max_integer, 1);
+        return num(stage, "work_done") * 1000 / workload;
+    }
+    if (metric == "max_fatigue") return staff_max_fatigue(state);
+    if (metric == "weeks_in_project") return num(state.at("company"), "week") - num(project, "start_week");
+    if (metric == "weeks_to_deadline") return num(project, "deadline_week") - num(state.at("company"), "week");
+    if (metric == "funds") return num(state.at("company").at("funds"));
+    if (metric == "morale") return staff_min_morale(state);
+    return 0;
+}
+bool event_condition_met(const Json& state, const rules::EventSpec& spec) {
+    const auto value = event_metric_value(state, spec.metric);
+    const std::string op(spec.op);
+    if (op == "<") return value < spec.threshold;
+    if (op == "<=") return value <= spec.threshold;
+    if (op == ">") return value > spec.threshold;
+    if (op == ">=") return value >= spec.threshold;
+    return false;
+}
 Json idle_preview(const Json& state) {
     const auto total = salary_total(state);
     auto costs = zero_costs();
@@ -274,12 +310,23 @@ Integer weekly_production_cost(const Json& state) {
     const auto workers = static_cast<Integer>(config.at("assignments").size());
     return rules::stage_cost * policy.cost / 1000 + (config.at("overtime") == true ? rules::overtime_cost * workers : 0);
 }
+int event_effective_probability(const Json& state) {
+    if (state.at("project").is_null() || !is_producing_active(state)) return 0;
+    const auto& project = state.at("project");
+    auto value = rules::event_base_probability_permille;
+    value += static_cast<int>((num(state.at("company"), "week") - num(project, "start_week")) / rules::event_probability_step_weeks)
+        * rules::event_probability_step_permille;
+    if (staff_max_fatigue(state) >= rules::event_fatigue_bonus_threshold) value += rules::event_fatigue_bonus_permille;
+    const auto weekly = salary_total(state) + weekly_production_cost(state);
+    if (weekly > 0 && num(state.at("company").at("funds")) < weekly * 2) value += rules::event_cash_pressure_permille;
+    return std::clamp(value, 0, rules::event_max_probability_permille);
+}
 Json active_preview(const Json& state) {
     const auto salaries = salary_total(state) - rules::operations_weekly;
     const auto production = weekly_production_cost(state);
     auto costs = zero_costs();
     costs["salary"] = salaries; costs["operations"] = rules::operations_weekly; costs["production"] = production;
-    return {{"next_week", num(state.at("company"), "week") + 1}, {"costs", costs}, {"total_cost", add(add(salaries, rules::operations_weekly), production)}, {"event_probability_per_mille", 0}};
+    return {{"next_week", num(state.at("company"), "week") + 1}, {"costs", costs}, {"total_cost", add(add(salaries, rules::operations_weekly), production)}, {"event_probability_per_mille", event_effective_probability(state)}};
 }
 void refresh_preview(Json& state) {
     const auto& phase = state.at("phase");
@@ -433,6 +480,10 @@ void check_event(const Json& event) {
     signed_number(trigger.at("value")); signed_number(trigger.at("threshold"));
     const auto& options = event.at("options");
     require(options.is_array() && !options.empty());
+    if (event.contains("tier")) require(one_of(event.at("tier"), {"normal", "major"}));
+    if (event.contains("polarity")) require(one_of(event.at("polarity"), {"negative", "positive"}));
+    if (event.contains("expires_week") && !event.at("expires_week").is_null()) number(event.at("expires_week"), rules::max_weeks);
+    if (event.contains("escalation_note") && !event.at("escalation_note").is_null()) nonempty_text(event.at("escalation_note"));
     std::set<std::string> ids;
     for (const auto& option : options) {
         require(option.is_object() && !option.contains("effect") && !option.contains("effects"));
@@ -440,6 +491,11 @@ void check_event(const Json& event) {
         nonempty_text(option.at("label")); number(option.at("cost"));
         require(option.at("allows_reconfigure").is_boolean());
         if (!option.at("disabled_reason").is_null()) nonempty_text(option.at("disabled_reason"));
+        if (option.contains("effects_preview")) {
+            const auto& preview = option.at("effects_preview");
+            require(preview.is_array() && preview.size() <= 4);
+            for (const auto& line : preview) nonempty_text(line);
+        }
     }
 }
 int check_stages(const Json& stages, const Json* workloads = nullptr) {
@@ -480,6 +536,47 @@ void check_mode_finance(const Json& object) {
         require(num(object.at("finance"), "investment_paid") == 0 && num(object.at("finance"), "commercial_share_received") == 0);
     } else number(object.at("investment_percent"), 100, 10);
 }
+void check_event_state(const Json& event_state, const Json& project) {
+    require(event_state.is_object());
+    if (event_state.contains("cooldowns")) {
+        const auto& cooldowns = event_state.at("cooldowns");
+        require(cooldowns.is_object());
+        for (auto entry = cooldowns.begin(); entry != cooldowns.end(); ++entry) number(entry.value());
+    }
+    if (event_state.contains("major_seen")) {
+        const auto& seen = event_state.at("major_seen");
+        require(seen.is_array());
+        std::set<std::string> ids;
+        for (const auto& id : seen) require(ids.insert(nonempty_text(id)).second);
+    }
+    if (event_state.contains("major_log")) {
+        const auto& log = event_state.at("major_log");
+        require(log.is_array());
+        for (const auto& entry : log) {
+            require(entry.is_object());
+            nonempty_text(entry.at("id")); nonempty_text(entry.at("name"));
+            nonempty_text(entry.at("choice")); nonempty_text(entry.at("result"));
+        }
+    }
+    if (!event_state.contains("pending")) return;
+    const auto& pending = event_state.at("pending");
+    require(pending.is_array());
+    const auto current = project.at("current_stage").is_null() ? -1 : stage_index(project.at("current_stage").get<std::string>());
+    for (const auto& effect : pending) {
+        require(effect.is_object());
+        nonempty_text(effect.at("source_event"));
+        require(one_of(effect.at("scope"), {"stage", "project"}));
+        require(one_of(effect.at("target"), {"quality"}));
+        signed_number(effect.at("value"));
+        require(effect.at("applied").is_boolean());
+        if (effect.at("scope") == "stage") {
+            require(!effect.at("stage").is_null());
+            const auto index = stage_index(text(effect.at("stage")));
+            require(index >= 0);
+            if (effect.at("applied") == false && current >= 0) require(index >= current);
+        } else require(effect.at("stage").is_null());
+    }
+}
 void check_project(const Json& project) {
     require(project.is_object());
     check_offer(project.at("offer")); check_mode_finance(project);
@@ -513,6 +610,7 @@ void check_project(const Json& project) {
     const auto current = project.at("current_stage").is_null() ? -1 : stage_index(text(project.at("current_stage")));
     require(current == check_stages(project.at("stages"), &project.at("offer").at("workloads")));
     require((current == -1) == (delivery == "completed"));
+    if (project.contains("event_state")) check_event_state(project.at("event_state"), project);
 }
 void check_work_record(const Json& work) {
     require(work.is_object());
@@ -529,6 +627,14 @@ void check_work_record(const Json& work) {
     require((check_stages(work.at("stages")) == -1) == (work.at("end_reason") == "completed"));
     check_style_origin(work);
     if (work.contains("rating")) check_rating(work.at("rating"));
+    if (work.contains("major_events")) {
+        require(work.at("major_events").is_array());
+        for (const auto& entry : work.at("major_events")) {
+            require(entry.is_object());
+            nonempty_text(entry.at("id")); nonempty_text(entry.at("name"));
+            nonempty_text(entry.at("choice")); nonempty_text(entry.at("result"));
+        }
+    }
     if (work.contains("channel_breakdown")) {
         const auto& breakdown = work.at("channel_breakdown");
         require(breakdown.is_array());
@@ -728,7 +834,9 @@ void check_phase_invariants(const Json& state) {
         require(!preview.is_null());
         const auto expected = phase == "idle" ? idle_preview(state) : active_preview(state);
         require(preview.at("next_week") == expected.at("next_week") && preview.at("total_cost") == expected.at("total_cost")
-            && preview.at("event_probability_per_mille") == expected.at("event_probability_per_mille"));
+            // 0 兼容 M1 旧存档：那时不存在事件概率，preview 恒为 0。
+            && (preview.at("event_probability_per_mille") == expected.at("event_probability_per_mille")
+                || preview.at("event_probability_per_mille") == 0));
         for (auto key : {"salary", "operations", "production", "temporary", "outsourcing", "events", "extension", "penalty", "development", "distribution"})
             require(optional_amount(preview.at("costs"), key) == optional_amount(expected.at("costs"), key));
     } else require(preview.is_null());
@@ -780,6 +888,19 @@ void close_bankrupt(Json& state) {
         state["phase"] = "project_ready";
     } else state["offers"] = Json::array();
 }
+void apply_stage_event_effects(Json& state, const std::string& stage) {
+    auto& project = state["project"];
+    if (!project.contains("event_state")) return;
+    for (auto& effect : project["event_state"]["pending"]) {
+        if (effect.at("applied") == true) continue;
+        if (effect.at("scope") != "stage" || effect.at("stage") != stage) continue;
+        if (effect.at("target") == "quality") {
+            auto& target = project["stages"][stage];
+            target["quality"] = clamp_score(num(target, "quality") + signed_number(effect.at("value")));
+        }
+        effect["applied"] = true;
+    }
+}
 Json complete_stage(Json& state, const std::string& stage, int index) {
     auto& project = state["project"];
     auto& item = project["stages"][stage];
@@ -792,6 +913,7 @@ Json complete_stage(Json& state, const std::string& stage, int index) {
     const auto workers = static_cast<Integer>(config.at("assignments").size());
     auto costs = zero_costs();
     costs["production"] = weeks_spent * (rules::stage_cost * policy.cost / 1000) + (config.at("overtime") == true ? weeks_spent * rules::overtime_cost * workers : 0);
+    apply_stage_event_effects(state, stage);
     const auto quality = num(item, "quality");
     Json issues = Json::array();
     if (quality < 40) issues.push_back(u8"画面稳定性不足，需要后续作品改进");
@@ -890,7 +1012,9 @@ std::string start_project(std::string input) {
             {"deadline_week", add(num(state.at("company"), "week"), num(*offer_json, "duration_weeks"))},
             {"current_stage", std::string(rules::stages[0])}, {"stages", stages},
             {"extension_count", 0}, {"committee_pressure", nullptr}, {"finance", empty_finance(grant)},
-            {"temporary_staff", Json::array()}, {"outsourcing", Json::array()}, {"delivery_reason", nullptr}
+            {"temporary_staff", Json::array()}, {"outsourcing", Json::array()}, {"delivery_reason", nullptr},
+            {"event_state", {{"cooldowns", Json::object()}, {"major_seen", Json::array()},
+                             {"pending", Json::array()}, {"major_log", Json::array()}}}
         };
         state["company"]["funds"] = add(num(state.at("company").at("funds")), grant);
         state["company"]["finance"]["contract_received"] = add(num(state.at("company").at("finance"), "contract_received"), grant);
@@ -976,6 +1100,144 @@ std::string apply_decision(std::string input) {
     });
 }
 
+std::string event_option_disabled(const Json& state, const rules::EventOptionSpec& option) {
+    const auto& project = state.at("project");
+    if (option.cost > num(state.at("company").at("funds")))
+        return u8"现金不足，需要 " + std::to_string(option.cost) + u8" 日元";
+    const std::string kind(option.kind);
+    if (kind == "outsource") return u8"供应商系统尚未接入，暂不能应急外包";
+    if (kind == "extension") {
+        if (project.at("mode") != "committee") return u8"承制项目不能延期";
+        if (num(project.at("extension_count")) >= 1) return u8"委员会延期已用完";
+        return u8"委员会延期规则尚未接入";
+    }
+    return {};
+}
+std::string event_effect_text(const rules::EventEffect& effect) {
+    const std::string target(effect.target);
+    const std::string name = target == "quality" ? u8"质量" : target == "work_done" ? u8"进度"
+        : target == "fatigue" ? u8"疲劳" : target == "morale" ? u8"士气" : u8"现金";
+    const std::string scope(effect.scope);
+    const std::string prefix = scope == "stage" ? u8"本阶段" : scope == "project" ? u8"本作" : "";
+    return prefix + name + (effect.value >= 0 ? " +" : " ") + std::to_string(effect.value);
+}
+Json build_event(const Json& state, const rules::EventSpec& spec) {
+    Json options = Json::array();
+    for (const auto& option : spec.options) {
+        Json preview = Json::array();
+        for (const auto& effect : option.effects) preview.push_back(event_effect_text(effect));
+        const auto reason = event_option_disabled(state, option);
+        options.push_back({
+            {"id", option.id}, {"label", option.label}, {"cost", option.cost},
+            {"allows_reconfigure", false},
+            {"disabled_reason", reason.empty() ? Json() : Json(reason)},
+            {"effects_preview", preview}
+        });
+    }
+    const auto& project = state.at("project");
+    return {
+        {"id", spec.id}, {"category", spec.category}, {"stage", project.at("current_stage")},
+        {"title", spec.name}, {"description", spec.description},
+        {"trigger", {{"metric", spec.metric}, {"value", event_metric_value(state, spec.metric)}, {"threshold", spec.threshold}}},
+        {"tier", spec.tier}, {"polarity", spec.polarity},
+        {"expires_week", nullptr}, {"escalation_note", nullptr},
+        {"options", options}
+    };
+}
+void apply_event_option(Json& state, const rules::EventSpec& spec, const rules::EventOptionSpec& option) {
+    auto& project = state["project"];
+    auto& company = state["company"];
+    if (!project.contains("event_state")) project["event_state"] = {
+        {"cooldowns", Json::object()}, {"major_seen", Json::array()},
+        {"pending", Json::array()}, {"major_log", Json::array()}};
+    auto& event_state = project["event_state"];
+    if (option.cost > 0) {
+        company["funds"] = sub(num(company.at("funds")), option.cost);
+        add_cost(company["finance"], "events", option.cost);
+        add_cost(project["finance"], "events", option.cost);
+    }
+    const auto current_stage = project.at("current_stage").get<std::string>();
+    const auto current_index = stage_index(current_stage);
+    for (const auto& effect : option.effects) {
+        const std::string scope(effect.scope);
+        const std::string target(effect.target);
+        if (scope == "instant") {
+            if (target == "quality") {
+                auto& item = project["stages"][current_stage];
+                item["quality"] = clamp_score(num(item, "quality") + effect.value);
+            } else if (target == "work_done") {
+                auto& item = project["stages"][current_stage];
+                const auto workload = num(project.at("offer").at("workloads").at(static_cast<std::size_t>(current_index)));
+                item["work_done"] = std::clamp<Integer>(num(item, "work_done") + effect.value, 0, workload);
+            } else if (target == "fatigue") {
+                for (auto& person : company["staff"]) person["fatigue"] = std::clamp<Integer>(num(person, "fatigue") + effect.value, 0, 100);
+            } else if (target == "morale") {
+                for (auto& person : company["staff"]) person["morale"] = std::clamp<Integer>(num(person, "morale") + effect.value, 0, 100);
+            }
+            continue;
+        }
+        auto resolved_scope = scope;
+        std::string resolved_stage = current_stage;
+        if (scope == "stage" && effect.stage >= 0) resolved_stage = rules::stages[effect.stage];
+        // 事件只能影响当前或后续阶段；目标阶段已完成时降级为项目效果，避免追溯已结算阶段。
+        if (scope == "stage" && stage_index(resolved_stage) < current_index) {
+            resolved_scope = "project";
+            resolved_stage.clear();
+        }
+        event_state["pending"].push_back({
+            {"source_event", spec.id}, {"scope", resolved_scope}, {"target", target},
+            {"stage", resolved_scope == "stage" ? Json(resolved_stage) : Json()},
+            {"value", effect.value}, {"applied", false}});
+    }
+    if (spec.once_per_project) event_state["major_seen"].push_back(spec.id);
+    if (spec.cooldown_weeks > 0) event_state["cooldowns"][spec.tag] = num(company.at("week")) + spec.cooldown_weeks;
+    if (std::string(spec.tier) == "major") event_state["major_log"].push_back({
+        {"id", spec.id}, {"name", spec.name}, {"choice", option.id}, {"result", option.label}});
+    state["pending_event"] = nullptr;
+    state["phase"] = "producing";
+}
+void maybe_raise_event(Json& state) {
+    if (state.at("phase") != "producing" || !is_producing_active(state)) return;
+    const auto& project = state.at("project");
+    const auto current_index = stage_index(project.at("current_stage").get<std::string>());
+    const auto week = num(state.at("company"), "week");
+    const auto event_state = project.contains("event_state") ? project.at("event_state") : Json::object();
+    std::vector<const rules::EventSpec*> pool;
+    std::vector<const rules::EventSpec*> performance;
+    for (const auto& spec : rules::events) {
+        if (std::find(spec.stages.begin(), spec.stages.end(), current_index) == spec.stages.end()) continue;
+        if (event_state.contains("cooldowns") && event_state.at("cooldowns").contains(spec.tag)
+            && num(event_state.at("cooldowns").at(spec.tag)) > week) continue;
+        if (spec.once_per_project && event_state.contains("major_seen")) {
+            const auto& seen = event_state.at("major_seen");
+            if (std::find(seen.begin(), seen.end(), Json(spec.id)) != seen.end()) continue;
+        }
+        pool.push_back(&spec);
+        if (event_condition_met(state, spec)) performance.push_back(&spec);
+    }
+    // 事件抽样不推进 GameState.seed：同 seed + 同周 + 同状态结果一致，且不改变 M1 固定种子轨迹。
+    const auto mix = static_cast<std::uint32_t>(number(state.at("seed"), rules::max_seed))
+        + static_cast<std::uint32_t>(week) * rules::event_roll_salt;
+    const auto roll = static_cast<int>(next_seed(mix) % 1000U);
+    std::vector<const rules::EventSpec*> candidates;
+    if (!performance.empty()) candidates = performance;
+    else {
+        if (roll >= event_effective_probability(state)) return;
+        for (const auto* spec : pool) if (spec->random_weight > 0) candidates.push_back(spec);
+    }
+    if (candidates.empty()) return;
+    int best = 1000;
+    for (const auto* spec : candidates) best = std::min(best, spec->priority);
+    std::vector<const rules::EventSpec*> top;
+    for (const auto* spec : candidates) if (spec->priority == best) top.push_back(spec);
+    std::sort(top.begin(), top.end(), [](const rules::EventSpec* left, const rules::EventSpec* right) {
+        return std::string(left->id) < std::string(right->id);
+    });
+    const auto index = static_cast<std::size_t>((next_seed(mix) / 1000U) % static_cast<std::uint32_t>(top.size()));
+    state["pending_event"] = build_event(state, *top[index]);
+    state["phase"] = "event_pending";
+    state["preview"] = nullptr;
+}
 std::string advance_week(std::string input) {
     return execute(input, [](const Json& request) {
         auto state = request.at("state");
@@ -1129,15 +1391,29 @@ std::string advance_week(std::string input) {
             }
             message += u8"十年经营期满，公司进入结束流程。";
         }
+        maybe_raise_event(state);
         refresh_preview(state);
         return Json{{"state", state}, {"report", report}};
     });
 }
 
 std::string resolve_event(std::string input) {
-    return execute(input, [](const Json& request) -> Json {
-        if (request.at("state").at("phase") == "event_pending") not_allowed(u8"事件状态有效，但事件选项效果目录尚未接入，暂不能执行事件选择。");
-        throw ApiError{"INVALID_PHASE", u8"当前没有待处理事件；随机事件库将在后续里程碑开放。"};
+    return execute(input, [](const Json& request) {
+        auto state = request.at("state");
+        running_check(state);
+        if (state.at("phase") != "event_pending") wrong_phase();
+        const auto option_id = text(request.at("option_id"));
+        const auto& event = state.at("pending_event");
+        const rules::EventSpec* spec = nullptr;
+        for (const auto& candidate : rules::events) if (event.at("id") == candidate.id) spec = &candidate;
+        require(spec != nullptr);
+        const rules::EventOptionSpec* chosen = nullptr;
+        for (const auto& option : spec->options) if (option_id == option.id) chosen = &option;
+        require(chosen != nullptr);
+        if (!event_option_disabled(state, *chosen).empty()) not_allowed(u8"该选项当前不可用。");
+        apply_event_option(state, *spec, *chosen);
+        refresh_preview(state);
+        return response(std::move(state), u8"已处理「" + std::string(spec->name) + u8"」，制作继续。");
     });
 }
 
@@ -1155,7 +1431,11 @@ std::string calculate_result(std::string input) {
             const auto reason = text(project.at("delivery_reason"));
             Integer weighted = 0;
             for (std::size_t i = 0; i < rules::stages.size(); ++i) weighted += num(project.at("stages").at(rules::stages[i]), "quality") * rules::quality_weights[i];
-            const auto quality = weighted / 1000;
+            Integer quality = clamp_score(weighted / 1000);
+            if (project.contains("event_state"))
+                for (const auto& effect : project.at("event_state").at("pending"))
+                    if (effect.at("scope") == "project" && effect.at("applied") != true)
+                        quality = clamp_score(quality + signed_number(effect.at("value")));
             const auto commercial_score = clamp_score((num(offer, "audience_base") * 300 + num(offer, "commercial_potential") * 300 + quality * 400) / 1000);
             const auto revenue = commercial_score * scale_of(text(offer.at("scale"))).revenue_per_point;
             const auto contract = num(project.at("finance"), "contract_received");
@@ -1207,6 +1487,7 @@ std::string calculate_result(std::string input) {
                 {"profit", sub(num(finance, "contract_received"), costs_total(finance.at("costs")))}, {"team", team}, {"stages", project.at("stages")}
             };
             for (auto key : {"origin", "style"}) if (offer.contains(key)) record[key] = offer.at(key);
+            if (project.contains("event_state")) record["major_events"] = project.at("event_state").at("major_log");
             state["history"].push_back(record);
             state["last_project_id"] = id;
             state["project"] = nullptr;

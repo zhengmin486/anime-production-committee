@@ -3,6 +3,7 @@
 #include <array>
 #include <cstdint>
 #include <nlohmann/json.hpp>
+#include <vector>
 
 namespace apc::rules {
 
@@ -97,5 +98,72 @@ inline constexpr std::array<OfferSpec, 12> offers{{
     {"proj_movie_02", u8"群山回响", "light_novel", "movie", 18000000, 45, 82, 92, 96, "high", {125, 125, 125, 125, 125}}
 }};
 
+// 制作事件（#11 / 设计 docs/EVENT_MODULE_DESIGN.md）。
+// 数值全部 TODO(待定)：触发概率、冷却与事件费用等待 zm 审查后校准。
+inline constexpr int event_base_probability_permille = 60;
+inline constexpr int event_max_probability_permille = 300;
+inline constexpr int event_probability_step_weeks = 4;
+inline constexpr int event_probability_step_permille = 10;
+inline constexpr int event_fatigue_bonus_threshold = 70;
+inline constexpr int event_fatigue_bonus_permille = 20;
+inline constexpr int event_cash_pressure_permille = 15;
+// 事件抽样用无状态混合，不推进 GameState.seed：M1 固定种子轨迹与市场轮换保持不变。
+inline constexpr std::uint32_t event_roll_salt = 2654435761U;
+
+struct EventEffect { const char* scope; const char* target; int value; int stage; };
+struct EventOptionSpec { const char* id; const char* kind; const char* label; std::int64_t cost; std::vector<EventEffect> effects; };
+struct EventSpec {
+    const char* id; const char* name; const char* polarity; const char* tier;
+    const char* category; const char* tag; const char* description;
+    std::vector<int> stages; int priority; int cooldown_weeks; bool once_per_project;
+    const char* metric; const char* op; int threshold; int random_weight;
+    std::vector<EventOptionSpec> options;
+};
+
+inline const std::vector<EventSpec> events{
+    {"key_cut_rework", u8"关键镜头返修", "negative", "normal", "quality", "quality_rework",
+     u8"本阶段有几卡关键镜头没有达到作画监督的要求。现在返修还来得及，但要多占用一周的人手。",
+     {2, 3}, 20, 6, false, "stage_quality", "<", 55, 0,
+     {{"accept", "abandon", u8"按现状推进", 0, {{"instant", "morale", -3, -1}}},
+      {"rework", "overtime", u8"抽调人手返修", 180000, {{"instant", "fatigue", 6, -1}, {"stage", "quality", 4, -1}}}}},
+    {"schedule_slip", u8"作画进度落后", "negative", "normal", "schedule", "schedule_slip",
+     u8"离交付只剩三周，作画进度明显落后于计划。继续按原节奏推进很可能赶不上截止周。",
+     {2, 3}, 10, 4, false, "weeks_to_deadline", "<=", 3, 0,
+     {{"accept", "abandon", u8"维持原计划", 0, {{"stage", "quality", -3, -1}}},
+      {"crunch", "overtime", u8"全员赶工", 120000, {{"instant", "fatigue", 8, -1}, {"instant", "work_done", 120, -1}}},
+      {"delay", "extension", u8"向委员会申请延期", 250000, {{"instant", "morale", -4, -1}}}}},
+    {"animator_exhaustion", u8"原画师过劳", "negative", "normal", "personnel", "staff_fatigue",
+     u8"主力原画师连续加班，本周已经出现明显的状态下滑。再压下去可能影响整段作画质量。",
+     {2, 3, 4}, 5, 6, false, "max_fatigue", ">=", 78, 0,
+     {{"accept", "abandon", u8"让他自己调整", 0, {{"instant", "morale", -6, -1}}},
+      {"replace", "outsource", u8"临时找外包接手", 320000, {{"stage", "quality", -2, -1}}}}},
+    {"supplier_dunning", u8"外包催款", "negative", "normal", "budget", "budget_pressure",
+     u8"协力的外包公司来催上一批分镜的尾款，账面这周本来就不宽裕。",
+     {1, 2, 3, 4}, 25, 8, false, "funds", "<", 600000, 0,
+     {{"accept", "abandon", u8"先结清尾款", 300000, {{"instant", "morale", -2, -1}}},
+      {"negotiate", "overtime", u8"商量分期支付", 150000, {{"instant", "morale", -4, -1}}}}},
+    {"storyboard_spark", u8"分镜灵光", "positive", "normal", "quality", "creative_spark",
+     u8"演出在会议里提了一个更大胆的调度方案，能把这一段的气氛再推高一层，但需要额外的人手配合。",
+     {1, 2}, 35, 10, false, "stage_quality", ">=", 70, 0,
+     {{"take", "accept", u8"采纳方案", 100000, {{"instant", "fatigue", 4, -1}, {"stage", "quality", 3, -1}}},
+      {"skip", "decline", u8"按原方案走", 0, {}}}},
+    {"station_visit", u8"电视台探班", "positive", "normal", "budget", "external_relations",
+     u8"电视台的编成部想来现场看看进度。接待要花钱，但对方的兴趣会体现在后续的资源上。",
+     {2, 3}, 40, 12, false, "weeks_in_project", ">=", 6, 25,
+     {{"host", "accept", u8"接待并展示样片", 60000, {{"instant", "morale", 6, -1}, {"project", "quality", 1, -1}}},
+      {"decline", "decline", u8"礼貌婉拒", 0, {}}}},
+    {"director_illness", u8"作画监督病倒", "negative", "major", "personnel", "major_director_illness",
+     u8"作画监督在连续两周通宵后倒下，医生要求至少静养两周。他手上还压着后半个阶段的检查工作。",
+     {2, 3}, 1, 0, true, "max_fatigue", ">=", 65, 0,
+     {{"accept", "abandon", u8"让副手顶上", 0, {{"stage", "quality", -5, -1}, {"project", "quality", -2, -1}}},
+      {"overtime", "overtime", u8"请退休前辈回来救场", 300000, {{"instant", "fatigue", 8, -1}, {"stage", "quality", 2, -1}}},
+      {"outsource", "outsource", u8"把检查工作分包出去", 500000, {{"project", "quality", -1, -1}}},
+      {"extend", "extension", u8"用掉委员会延期", 250000, {{"instant", "morale", -4, -1}}}}},
+    {"sponsor_boost", u8"赞助商送来支援", "positive", "major", "budget", "major_sponsor_boost",
+     u8"一家做地方联合宣传的赞助商看中了这部作品的题材，愿意派两位熟手来帮忙赶一段进度。",
+     {3, 4}, 2, 0, true, "weeks_in_project", ">=", 10, 15,
+     {{"take", "accept", u8"接受支援", 0, {{"instant", "work_done", 150, -1}, {"instant", "morale", 3, -1}}},
+      {"decline", "decline", u8"不欠这份人情", 0, {}}}}
+};
 
 }  // namespace apc::rules

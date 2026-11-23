@@ -134,6 +134,7 @@ for (const [index, event] of (doc.events || []).entries()) {
         if (effect.value < min || effect.value > max) fail(ep, `${effect.target} 取值须在 ${min}–${max}`)
       }
       if (INSTANT_ONLY.includes(effect.target) && effect.scope !== 'instant') fail(ep, `${effect.target} 只能即时结算（scope=instant）`)
+      if (effect.target === 'funds' && effect.value > 0) fail(ep, '事件收入分类未定：funds 效果只能为负（支出），不能用事件直接加钱')
       if (effect.scope === 'stage') {
         if (effect.stage !== undefined) {
           if (!STAGES.includes(effect.stage)) fail(ep, `未知阶段: ${effect.stage}`)

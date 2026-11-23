@@ -71,6 +71,7 @@
 - `scope`：`instant`（立即）/ `stage`（到该阶段结束）/ `project`（到本作交付）。
 - `target`：`quality` / `work_done` / `fatigue` / `morale` / `funds`。
 - `fatigue` / `morale` / `funds` **只能** `instant`；`work_done` **不能** `project`。
+- `funds` 只能写负数：事件收入分类未定，M2 不接受「事件直接加钱」，正面前景请用士气、进度或质量表达。
 - `stage` 作用域不写 `stage` 时默认作用于触发时的当前阶段；要指定后续阶段就写 `"stage": "animation_check"`，且必须在 `stages` 里。
 
 ## 三条内容纪律
