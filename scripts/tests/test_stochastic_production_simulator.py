@@ -49,6 +49,12 @@ class StochasticProductionTests(unittest.TestCase):
         self.assertGreater(sum(probabilities.values()), 1.0)
         self.assertLess(sum(probabilities.values()), 1.45)
 
+    def test_quality_randomness_does_not_change_work_random_stream(self):
+        work = sim.run_once(self.people, "pair_specialist", 60, 14, "work_only", 314)
+        both = sim.run_once(self.people, "pair_specialist", 60, 14, "work_and_quality", 314)
+        self.assertEqual(work["weeks"], both["weeks"])
+        self.assertEqual(work["total_work"], both["total_work"])
+
     def test_quality_dimensions_are_bounded_and_randomized(self):
         results = [
             sim.run_once(self.people, "all_staff", 30, 14, "work_and_quality", seed)
