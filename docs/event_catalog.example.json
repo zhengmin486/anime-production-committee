@@ -22,8 +22,17 @@
         "threshold": 55
       },
       "random_weight": 0,
-      "expires_weeks": 0,
-      "escalation": null,
+      "expires_weeks": 2,
+      "escalation": {
+        "description": "拖到后期才返修，整段作画稳定性下降",
+        "effects": [
+          {
+            "scope": "stage",
+            "target": "quality",
+            "value": -3
+          }
+        ]
+      },
       "description": "本阶段有几卡关键镜头没有达到作画监督的要求。现在返修还来得及，但要多占用一周的人手。",
       "options": [
         {
@@ -204,8 +213,22 @@
         "threshold": 600000
       },
       "random_weight": 0,
-      "expires_weeks": 0,
-      "escalation": null,
+      "expires_weeks": 2,
+      "escalation": {
+        "description": "外包公司停止接单并追讨尾款，现金与士气同时受损",
+        "effects": [
+          {
+            "scope": "instant",
+            "target": "funds",
+            "value": -400000
+          },
+          {
+            "scope": "instant",
+            "target": "morale",
+            "value": -3
+          }
+        ]
+      },
       "description": "协力的外包公司来催上一批分镜的尾款，账面这周本来就不宽裕。",
       "options": [
         {

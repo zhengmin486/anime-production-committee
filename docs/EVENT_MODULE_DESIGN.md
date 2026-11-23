@@ -3,7 +3,7 @@
 - 模块负责人：@pyxz0；内容协作者：@Muchbv（见 [#13](https://github.com/zhengmin486/anime-production-committee/issues/13)）
 - 跟踪议题：[#11](https://github.com/zhengmin486/anime-production-committee/issues/11)
 - 依据：`docs/TEAM_DELIVERABLES/EVENT_MODULE.md` 的 15 条已确认规则、`docs/GAME_RULES.md` V3.2 第 7 步与第 8 节
-- 状态：**M2-a 已实现（`feat/11-event-m2a-core`，PR #19）；M2-b 按第 5 节实现放弃与超时闭环**。本文档不修改其他已冻结规则；标「契约扩展」的条目仍需批注后才能进核心。
+- 状态：**M2-a 与 M2-b 均已实现**（`feat/11-event-m2a-core`、`feat/11-event-m2b-deferred`，stacked PR）；本文档不修改其他已冻结规则，M2-c 的跨模块选项仍等 #6/#7。
 
 ## 1. 现状（按 main 代码核对）
 

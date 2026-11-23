@@ -234,7 +234,8 @@ create_custom_offer 决策受 K1/K2 阻塞，本轮不进入 Decision 联合类�
 - 已实现：8 条事件目录（负面 5 / 正面 3 / 重大 2）、表现触发与随机触发、同周固定优先级、tag 冷却、重大事件同项目一次、放弃/加班、即时效果、阶段与项目质量效果、重大事件履历输入、事件面板与 `effects_preview`。
 - 触发抽样：`next_seed(seed + week * 2654435761)` 取低位作为无状态混合，**不推进 `GameState.seed`**；同 seed + 同周 + 同状态结果一致，M1 固定种子轨迹与市场轮换保持不变。
 - 事件支出只记 `events` 账目且只扣一次现金；事件收入分类未定，`funds` 效果只能为负，正面前景改用士气/进度/质量表达。
-- 未实现：处理期限与超时升级（与「暂停周推进」互斥，待裁定）、应急外包（等 #7 供应商池）、委员会延期（等 #6 request_extension）。
+- M2-b 已实现放弃与超时闭环：`resolve_event` 的 `option_id="__defer__"` 把事件完整存入 `project.event_state.deferred_event` 并结束本周；下一次 `advance_week` 先推进周数，未到期则只恢复事件、不执行工资/运营/制作结算，到期或超期则先原子执行 `escalation` 再继续该周结算。无期限事件放弃后仍会在下一周恢复；`deferred_event` 与 `pending_event` 互斥。
+- 未实现：应急外包（等 #7 供应商池）、委员会延期（等 #6 request_extension）。
 
 ### 9. 待定参数与实现纪律
 

@@ -51,6 +51,7 @@ function StageConfigPanel({ stage, recommended, lockedConfiguration, staff, disa
 
 export function StudioPage({ core }: { core: ReturnType<typeof useGameCore> }) {
   const { game, busy, report, result, companyResult, saveConflict, startProject, decide, advance, resolveEvent, settle, settleCompany, save, cancelOverwrite, load, goHome } = useGameStore()
+  const deferredEvent = game?.project?.event_state?.deferred_event ?? null
   if (!game) return null
   const unavailable = busy || core.status !== 'ready'
   const company = game.company
@@ -85,6 +86,17 @@ export function StudioPage({ core }: { core: ReturnType<typeof useGameCore> }) {
       <p className="event-description">{game.pending_event.description}</p>
       <p className="local-note">触发依据：{eventMetricNames[game.pending_event.trigger.metric] ?? game.pending_event.trigger.metric} {game.pending_event.trigger.value}（阈值 {game.pending_event.trigger.threshold}）· 当前阶段 {stageNames[game.pending_event.stage]}</p>
       <div className="event-options">{game.pending_event.options.map((option) => <button key={option.id} className="button secondary event-option" disabled={unavailable || option.disabled_reason !== null} onClick={() => void resolveEvent(option.id)}>
+        <span>{option.label}{option.cost > 0 ? ` · ¥${money(option.cost)}` : ''}</span>
+        {option.effects_preview && option.effects_preview.length > 0 && <small>{option.effects_preview.join(' · ')}</small>}
+        {option.disabled_reason && <small>{option.disabled_reason}</small>}
+      </button>)}</div>
+      <button className="text-button" disabled={unavailable} onClick={() => void resolveEvent('__defer__')}>放弃本周处理（事件暂存，下次推进时优先恢复）</button>
+    </section>}
+
+    {game.phase === 'producing' && deferredEvent && <section className="ledger event-panel" aria-label="暂存事件" data-testid="deferred-event">
+      <div className="ledger-heading"><h2>暂存：{deferredEvent.title}</h2><span>{deferredEvent.expires_week === null || deferredEvent.expires_week === undefined ? '无处理期限' : `第 ${deferredEvent.expires_week} 周前处理`}</span></div>
+      <p className="local-note">已放弃本周处理机会。下一次推进时事件会先恢复；也可以现在直接处理。</p>
+      <div className="event-options">{deferredEvent.options.map((option) => <button key={option.id} className="button secondary event-option" disabled={unavailable || option.disabled_reason !== null} onClick={() => void resolveEvent(option.id)}>
         <span>{option.label}{option.cost > 0 ? ` · ¥${money(option.cost)}` : ''}</span>
         {option.effects_preview && option.effects_preview.length > 0 && <small>{option.effects_preview.join(' · ')}</small>}
         {option.disabled_reason && <small>{option.disabled_reason}</small>}

@@ -482,7 +482,7 @@ void check_event(const Json& event) {
     require(options.is_array() && !options.empty());
     if (event.contains("tier")) require(one_of(event.at("tier"), {"normal", "major"}));
     if (event.contains("polarity")) require(one_of(event.at("polarity"), {"negative", "positive"}));
-    if (event.contains("expires_week") && !event.at("expires_week").is_null()) number(event.at("expires_week"), rules::max_weeks);
+    if (event.contains("expires_week") && !event.at("expires_week").is_null()) number(event.at("expires_week"));
     if (event.contains("escalation_note") && !event.at("escalation_note").is_null()) nonempty_text(event.at("escalation_note"));
     std::set<std::string> ids;
     for (const auto& option : options) {
@@ -558,6 +558,8 @@ void check_event_state(const Json& event_state, const Json& project) {
             nonempty_text(entry.at("choice")); nonempty_text(entry.at("result"));
         }
     }
+    if (event_state.contains("deferred_event") && !event_state.at("deferred_event").is_null())
+        check_event(event_state.at("deferred_event"));
     if (!event_state.contains("pending")) return;
     const auto& pending = event_state.at("pending");
     require(pending.is_array());
@@ -827,8 +829,12 @@ void check_phase_invariants(const Json& state) {
             }
         }
     }
-    if (phase == "event_pending") require(!event.is_null() && is_producing_active(state));
+    const auto deferred = project.is_object() && project.contains("event_state")
+        && project.at("event_state").contains("deferred_event")
+        ? project.at("event_state").at("deferred_event") : Json();
+    if (phase == "event_pending") require(!event.is_null() && is_producing_active(state) && deferred.is_null());
     else require(event.is_null());
+    if (!deferred.is_null()) require(phase == "producing");
     const auto& preview = state.at("preview");
     if (status == "running" && (phase == "idle" || (phase == "producing" && is_producing_active(state)))) {
         require(!preview.is_null());
@@ -1014,7 +1020,8 @@ std::string start_project(std::string input) {
             {"extension_count", 0}, {"committee_pressure", nullptr}, {"finance", empty_finance(grant)},
             {"temporary_staff", Json::array()}, {"outsourcing", Json::array()}, {"delivery_reason", nullptr},
             {"event_state", {{"cooldowns", Json::object()}, {"major_seen", Json::array()},
-                             {"pending", Json::array()}, {"major_log", Json::array()}}}
+                             {"pending", Json::array()}, {"major_log", Json::array()},
+                             {"deferred_event", nullptr}}}
         };
         state["company"]["funds"] = add(num(state.at("company").at("funds")), grant);
         state["company"]["finance"]["contract_received"] = add(num(state.at("company").at("finance"), "contract_received"), grant);
@@ -1140,25 +1147,22 @@ Json build_event(const Json& state, const rules::EventSpec& spec) {
         {"title", spec.name}, {"description", spec.description},
         {"trigger", {{"metric", spec.metric}, {"value", event_metric_value(state, spec.metric)}, {"threshold", spec.threshold}}},
         {"tier", spec.tier}, {"polarity", spec.polarity},
-        {"expires_week", nullptr}, {"escalation_note", nullptr},
+        {"expires_week", spec.expires_weeks > 0
+            ? Json(add(num(state.at("company"), "week"), spec.expires_weeks)) : Json()},
+        {"escalation_note", spec.expires_weeks > 0 ? Json(spec.escalation.empty() ? u8"超时后后果加重" : u8"超时后后果加重，且不可再处理") : Json()},
         {"options", options}
     };
 }
-void apply_event_option(Json& state, const rules::EventSpec& spec, const rules::EventOptionSpec& option) {
+void apply_event_effects(Json& state, const rules::EventSpec& spec, const std::vector<rules::EventEffect>& effects) {
     auto& project = state["project"];
     auto& company = state["company"];
     if (!project.contains("event_state")) project["event_state"] = {
         {"cooldowns", Json::object()}, {"major_seen", Json::array()},
-        {"pending", Json::array()}, {"major_log", Json::array()}};
+        {"pending", Json::array()}, {"major_log", Json::array()}, {"deferred_event", nullptr}};
     auto& event_state = project["event_state"];
-    if (option.cost > 0) {
-        company["funds"] = sub(num(company.at("funds")), option.cost);
-        add_cost(company["finance"], "events", option.cost);
-        add_cost(project["finance"], "events", option.cost);
-    }
     const auto current_stage = project.at("current_stage").get<std::string>();
     const auto current_index = stage_index(current_stage);
-    for (const auto& effect : option.effects) {
+    for (const auto& effect : effects) {
         const std::string scope(effect.scope);
         const std::string target(effect.target);
         if (scope == "instant") {
@@ -1173,6 +1177,15 @@ void apply_event_option(Json& state, const rules::EventSpec& spec, const rules::
                 for (auto& person : company["staff"]) person["fatigue"] = std::clamp<Integer>(num(person, "fatigue") + effect.value, 0, 100);
             } else if (target == "morale") {
                 for (auto& person : company["staff"]) person["morale"] = std::clamp<Integer>(num(person, "morale") + effect.value, 0, 100);
+            } else if (target == "funds" && effect.value < 0) {
+                // 强制支出不得超过现有现金：事件不能让 funds 变负而绕过破产判定。
+                const auto funds = num(company.at("funds"));
+                const auto amount = std::min<Integer>(funds, -static_cast<Integer>(effect.value));
+                if (amount > 0) {
+                    company["funds"] = sub(funds, amount);
+                    add_cost(company["finance"], "events", amount);
+                    add_cost(project["finance"], "events", amount);
+                }
             }
             continue;
         }
@@ -1189,12 +1202,62 @@ void apply_event_option(Json& state, const rules::EventSpec& spec, const rules::
             {"stage", resolved_scope == "stage" ? Json(resolved_stage) : Json()},
             {"value", effect.value}, {"applied", false}});
     }
+}
+void apply_event_option(Json& state, const rules::EventSpec& spec, const rules::EventOptionSpec& option) {
+    auto& project = state["project"];
+    auto& company = state["company"];
+    if (!project.contains("event_state")) project["event_state"] = {
+        {"cooldowns", Json::object()}, {"major_seen", Json::array()},
+        {"pending", Json::array()}, {"major_log", Json::array()}, {"deferred_event", nullptr}};
+    auto& event_state = project["event_state"];
+    if (option.cost > 0) {
+        company["funds"] = sub(num(company.at("funds")), option.cost);
+        add_cost(company["finance"], "events", option.cost);
+        add_cost(project["finance"], "events", option.cost);
+    }
+    apply_event_effects(state, spec, option.effects);
     if (spec.once_per_project) event_state["major_seen"].push_back(spec.id);
     if (spec.cooldown_weeks > 0) event_state["cooldowns"][spec.tag] = num(company.at("week")) + spec.cooldown_weeks;
     if (std::string(spec.tier) == "major") event_state["major_log"].push_back({
         {"id", spec.id}, {"name", spec.name}, {"choice", option.id}, {"result", option.label}});
     state["pending_event"] = nullptr;
     state["phase"] = "producing";
+}
+const rules::EventSpec* find_event_spec(const std::string& id) {
+    for (const auto& spec : rules::events) if (id == spec.id) return &spec;
+    return nullptr;
+}
+bool has_deferred_event(const Json& state) {
+    const auto& project = state.at("project");
+    if (!project.is_object() || !project.contains("event_state")) return false;
+    const auto& event_state = project.at("event_state");
+    return event_state.contains("deferred_event") && !event_state.at("deferred_event").is_null();
+}
+void defer_pending_event(Json& state) {
+    auto& project = state["project"];
+    auto& event_state = project["event_state"];
+    event_state["deferred_event"] = state.at("pending_event");
+    state["pending_event"] = nullptr;
+    state["phase"] = "producing";
+}
+void restore_deferred_event(Json& state) {
+    auto& project = state["project"];
+    auto& event_state = project["event_state"];
+    state["pending_event"] = event_state.at("deferred_event");
+    event_state["deferred_event"] = nullptr;
+    state["phase"] = "event_pending";
+    state["preview"] = nullptr;
+}
+void escalate_deferred_event(Json& state) {
+    auto& project = state["project"];
+    auto& event_state = project["event_state"];
+    const auto deferred = event_state.at("deferred_event");
+    const auto* spec = find_event_spec(deferred.at("id").get<std::string>());
+    require(spec != nullptr);
+    apply_event_effects(state, *spec, spec->escalation);
+    if (std::string(spec->tier) == "major") event_state["major_log"].push_back({
+        {"id", spec->id}, {"name", spec->name}, {"choice", "escalation"}, {"result", u8"超时升级"}});
+    event_state["deferred_event"] = nullptr;
 }
 void maybe_raise_event(Json& state) {
     if (state.at("phase") != "producing" || !is_producing_active(state)) return;
@@ -1273,6 +1336,22 @@ std::string advance_week(std::string input) {
             return Json{{"state", state}, {"report", report}};
         }
         if (state.at("phase") != "producing" || !is_producing_active(state)) wrong_phase();
+        if (has_deferred_event(state)) {
+            const auto& deferred = state.at("project").at("event_state").at("deferred_event");
+            const auto next_week = add(num(state.at("company"), "week"), 1);
+            if (!deferred.at("expires_week").is_null() && next_week >= num(deferred.at("expires_week"))) {
+                escalate_deferred_event(state);
+                report["messages"].push_back(u8"暂存事件已到处理期限，先执行超时升级，再结算本周。");
+            } else {
+                // 未到期：只推进周数并恢复事件，本周工资、运营与制作结算都不执行。
+                state["company"]["week"] = next_week;
+                restore_deferred_event(state);
+                report["week"] = next_week;
+                report["messages"].push_back(u8"暂存事件尚未到期，本周恢复处理，未执行工资、运营与制作结算。");
+                refresh_preview(state);
+                return Json{{"state", state}, {"report", report}};
+            }
+        }
         const auto stage_name = state.at("project").at("current_stage").get<std::string>();
         const auto index = stage_index(stage_name);
         const auto& config = state.at("project").at("stages").at(stage_name).at("configuration");
@@ -1401,19 +1480,41 @@ std::string resolve_event(std::string input) {
     return execute(input, [](const Json& request) {
         auto state = request.at("state");
         running_check(state);
-        if (state.at("phase") != "event_pending") wrong_phase();
         const auto option_id = text(request.at("option_id"));
-        const auto& event = state.at("pending_event");
-        const rules::EventSpec* spec = nullptr;
-        for (const auto& candidate : rules::events) if (event.at("id") == candidate.id) spec = &candidate;
-        require(spec != nullptr);
-        const rules::EventOptionSpec* chosen = nullptr;
-        for (const auto& option : spec->options) if (option_id == option.id) chosen = &option;
-        require(chosen != nullptr);
-        if (!event_option_disabled(state, *chosen).empty()) not_allowed(u8"该选项当前不可用。");
-        apply_event_option(state, *spec, *chosen);
-        refresh_preview(state);
-        return response(std::move(state), u8"已处理「" + std::string(spec->name) + u8"」，制作继续。");
+        const auto phase = state.at("phase").get<std::string>();
+        if (phase == "event_pending") {
+            const auto& event = state.at("pending_event");
+            const auto* spec = find_event_spec(event.at("id").get<std::string>());
+            require(spec != nullptr);
+            if (option_id == "__defer__") {
+                defer_pending_event(state);
+                refresh_preview(state);
+                return response(std::move(state), u8"已放弃本周处理机会；事件暂存，下一次推进时优先恢复。");
+            }
+            const rules::EventOptionSpec* chosen = nullptr;
+            for (const auto& option : spec->options) if (option_id == option.id) chosen = &option;
+            require(chosen != nullptr);
+            if (!event_option_disabled(state, *chosen).empty()) not_allowed(u8"该选项当前不可用。");
+            apply_event_option(state, *spec, *chosen);
+            refresh_preview(state);
+            return response(std::move(state), u8"已处理「" + std::string(spec->name) + u8"」，制作继续。");
+        }
+        if (phase == "producing" && has_deferred_event(state)) {
+            // 暂存期间仍可直接处理：把事件临时放回 pending 槽位，复用同一套结算。
+            const auto deferred = state.at("project").at("event_state").at("deferred_event");
+            const auto* spec = find_event_spec(deferred.at("id").get<std::string>());
+            require(spec != nullptr);
+            const rules::EventOptionSpec* chosen = nullptr;
+            for (const auto& option : spec->options) if (option_id == option.id) chosen = &option;
+            require(chosen != nullptr);
+            if (!event_option_disabled(state, *chosen).empty()) not_allowed(u8"该选项当前不可用。");
+            state["pending_event"] = deferred;
+            state["project"]["event_state"]["deferred_event"] = nullptr;
+            apply_event_option(state, *spec, *chosen);
+            refresh_preview(state);
+            return response(std::move(state), u8"已处理暂存事件「" + std::string(spec->name) + u8"」，制作继续。");
+        }
+        wrong_phase();
     });
 }
 

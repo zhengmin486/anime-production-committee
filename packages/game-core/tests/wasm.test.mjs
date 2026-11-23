@@ -596,3 +596,91 @@ test('事件：承制项目不能用延期，阶段效果挂起到阶段结束',
   ])
   probeValidation(resolved)
 })
+
+function pendingKeyCut(seed = 12345) {
+  const state = reachStage(configure(start(seed)), 'key_animation')
+  state.project.event_state.cooldowns = {}
+  state.project.stages.key_animation.quality = 40
+  return advanceRaw(state).state
+}
+
+test('M2-b：放弃本周处理会完整暂存，下次推进优先恢复且不结算', () => {
+  const pending = pendingKeyCut()
+  const week = pending.company.week
+  const funds = pending.company.funds
+  const deferred = ok('resolve_event', { state: pending, option_id: '__defer__' }).state
+  assert.equal(deferred.phase, 'producing')
+  assert.equal(deferred.pending_event, null)
+  assert.equal(deferred.project.event_state.deferred_event.id, 'key_cut_rework')
+  assert.equal(deferred.project.event_state.deferred_event.expires_week, week + 2)
+
+  const restored = advanceRaw(deferred).state
+  assert.equal(restored.phase, 'event_pending')
+  assert.equal(restored.company.week, week + 1)
+  assert.equal(restored.company.funds, funds, '未到期恢复时不得先扣工资与运营')
+  assert.equal(restored.pending_event.id, 'key_cut_rework')
+  assert.equal(restored.project.event_state.deferred_event, null)
+})
+
+test('M2-b：到期后只升级一次，且升级先于本周结算', () => {
+  const pending = pendingKeyCut()
+  const week = pending.company.week
+  const deferred = ok('resolve_event', { state: pending, option_id: '__defer__' }).state
+  const restored = advanceRaw(deferred).state
+  const deferredAgain = ok('resolve_event', { state: restored, option_id: '__defer__' }).state
+  const fundsBefore = deferredAgain.company.funds
+  const overdue = advanceRaw(deferredAgain)
+  assert.equal(overdue.state.phase, 'producing')
+  assert.equal(overdue.state.company.week, week + 2)
+  assert.equal(overdue.state.project.event_state.deferred_event, null)
+  assert.ok(overdue.state.company.funds < fundsBefore, '到期周应继续执行正常结算')
+  assert.ok(overdue.report.messages.some((message) => message.includes('超时升级')))
+  assert.ok(overdue.state.project.event_state.pending.some(
+    (effect) => effect.source_event === 'key_cut_rework' && effect.value === -3 && effect.applied === false,
+  ))
+  // 升级后不再有待处理事件，也没有第二次升级入口
+  assert.equal(overdue.state.pending_event, null)
+  assert.equal(overdue.state.project.event_state.deferred_event, null)
+})
+
+test('M2-b：无期限事件放弃后仍会恢复；暂存期间可直接处理', () => {
+  const base = reachStage(configure(start(888)), 'key_animation')
+  base.project.event_state.pending = []
+  base.project.event_state.deferred_event = null
+  const stage = 'key_animation'
+  const crafted = {
+    ...base,
+    phase: 'event_pending',
+    preview: null,
+    pending_event: {
+      id: 'schedule_slip', category: 'schedule', stage,
+      title: '作画进度落后', description: '离交付只剩三周，作画进度明显落后于计划。',
+      trigger: { metric: 'weeks_to_deadline', value: 2, threshold: 3 },
+      tier: 'normal', polarity: 'negative', expires_week: null, escalation_note: null,
+      options: [
+        { id: 'accept', label: '维持原计划', cost: 0, allows_reconfigure: false, disabled_reason: null, effects_preview: [] },
+      ],
+    },
+  }
+  const deferred = ok('resolve_event', { state: crafted, option_id: '__defer__' }).state
+  assert.equal(deferred.project.event_state.deferred_event.expires_week, null)
+  const week = deferred.company.week
+  const restored = advanceRaw(deferred).state
+  assert.equal(restored.phase, 'event_pending')
+  assert.equal(restored.company.week, week + 1)
+
+  // 暂存期间直接处理，不推进周数
+  const pendingAgain = ok('resolve_event', { state: pendingKeyCut(), option_id: '__defer__' }).state
+  const handled = ok('resolve_event', { state: pendingAgain, option_id: 'accept' }).state
+  assert.equal(handled.phase, 'producing')
+  assert.equal(handled.project.event_state.deferred_event, null)
+  expectError(call('resolve_event', { state: handled, option_id: 'accept' }), 'INVALID_PHASE')
+})
+
+test('M2-b：pending_event 与 deferred_event 互斥', () => {
+  const deferred = ok('resolve_event', { state: pendingKeyCut(), option_id: '__defer__' }).state
+  const conflicting = JSON.parse(JSON.stringify(deferred))
+  conflicting.phase = 'event_pending'
+  conflicting.pending_event = conflicting.project.event_state.deferred_event
+  probeValidation(conflicting, 'INVALID_INPUT')
+})

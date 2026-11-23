@@ -14,7 +14,7 @@ V2 是旧版纵向切片；V3 是当前目标协议。M1 已在 C++/WASM 实现�
 | start_project | `{state,offer_id,mode,investment_percent}` | `{state,message}` | running idle；报价必须在当前四个市场选项或 custom_offer 槽（未采纳的员工提案不可直接接）。contract 投资 0；committee 投资整数 10–100；原创只能 committee |
 | apply_decision | `{state,decision}` | `{state,message}` | 按下表分支校验，不存在通用任意改字段接口 |
 | advance_week | `{state}` | `{state,report}` | running idle，或 producing 且当前阶段 active；推进恰一周，费用不足转关闭成功响应，不伪造已完成一周 |
-| resolve_event | `{state,option_id}` | `{state,message}` | running event_pending；`option_id` 必须是当前事件的目录选项，禁用选项（现金不足、外包未接入、承制延期）返回 MODE_NOT_ALLOWED；成功后清空事件、扣一次 events 账目并回到 producing。M2-a 没有可改配的事件，`configuration` 暂不接受 |
+| resolve_event | `{state,option_id}` | `{state,message}` | running event_pending，或 producing 且存在 `deferred_event`；`option_id` 为目录选项或保留值 `__defer__`（放弃本周处理，事件转入 `deferred_event`）。禁用选项（现金不足、外包未接入、承制延期）返回 MODE_NOT_ALLOWED；处理后清空事件、扣一次 events 账目并回到 producing。M2 没有可改配的事件，`configuration` 暂不接受 |
 | calculate_result | `{state,scope}` | `{state,scope,result}` | scope=project 仅 project_ready；scope=company 仅 closing 且项目已结清。分别返回 WorkRecord/CompanyResult |
 
 错误统一 `{error:{code,message}}`，不含可采用的新状态。code：INVALID_INPUT（结构/值/引用错误）、INVALID_PHASE（状态不允许）、INSUFFICIENT_BUDGET（可选支出不足）、STAGE_LOCKED（阶段中改常规配置）、MODE_NOT_ALLOWED（原创承制或承制延期）、CAPACITY_EXCEEDED（外包专业/剩余产能不匹配）、COMPANY_ENDED（关闭后经营动作）、INTERNAL_ERROR。WASM 加载/JSON 响应错误仍由服务层处理，不冒充核心业务码。

@@ -260,6 +260,8 @@ export interface ProjectEventState {
   major_seen: string[]
   pending: PendingEventEffect[]
   major_log: MajorEventRecord[]
+  // M2-b：放弃本周处理后完整暂存的事件；与 pending_event 互斥。
+  deferred_event?: GameEvent | null
 }
 
 export interface WorkRecord {

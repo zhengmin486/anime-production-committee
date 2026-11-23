@@ -95,7 +95,26 @@ for (const [index, event] of (doc.events || []).entries()) {
     if (typeof escalation !== 'object' || escalation === null) fail(where, '有处理期限时必须提供 escalation 对象')
     else {
       if (typeof escalation.description !== 'string' || escalation.description.length < 1 || escalation.description.length > 160) fail(where, 'escalation.description 长度须为 1–160')
-      if (!Array.isArray(escalation.effects) || escalation.effects.length === 0) fail(where, 'escalation.effects 必须是非空数组')
+      if (!Array.isArray(escalation.effects) || escalation.effects.length === 0 || escalation.effects.length > 3) {
+        fail(where, 'escalation.effects 必须是 1–3 项的数组')
+      } else {
+        for (const [index, effect] of escalation.effects.entries()) {
+          const ep = `${where}.escalation.effects[${index}]`
+          if (typeof effect !== 'object' || effect === null) { fail(ep, '必须是对象'); continue }
+          if (!SCOPES.includes(effect.scope)) fail(ep, `scope 须为 ${SCOPES.join('/')}`)
+          if (!TARGETS.includes(effect.target)) { fail(ep, `target 须为 ${TARGETS.join('/')}`); continue }
+          if (!isInt(effect.value) || effect.value === 0) fail(ep, 'value 必须是非零整数')
+          else {
+            const [min, max] = RANGES[effect.target]
+            if (effect.value < min || effect.value > max) fail(ep, `${effect.target} 取值须在 ${min}–${max}`)
+          }
+          if (INSTANT_ONLY.includes(effect.target) && effect.scope !== 'instant') fail(ep, `${effect.target} 只能即时结算（scope=instant）`)
+          if (effect.target === 'funds' && effect.value > 0) fail(ep, '升级不能给玩家加钱，funds 只能为负')
+          if (effect.scope === 'stage' && effect.stage !== undefined && Array.isArray(stages) && !stages.includes(effect.stage)) {
+            fail(ep, `effect.stage=${effect.stage} 不在事件适用阶段内`)
+          }
+        }
+      }
     }
   } else if (event.escalation !== null && event.escalation !== undefined) {
     warn(where, 'expires_weeks 为 0 时 escalation 会被忽略，建议填 null')
