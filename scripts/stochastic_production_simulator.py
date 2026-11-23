@@ -31,8 +31,9 @@ DIMENSION_ABILITY = {
 
 def performance_parameters(skill):
     """Higher skill raises the mean multiplier and narrows its range."""
-    mean = 1.0 + (int(skill) - 50) * 0.001
-    spread = max(0.10, 0.40 - int(skill) * 0.003)
+    skill = int(skill)
+    mean = 1.0 + (skill - 50) * 0.001
+    spread = max(0.10, 0.40 - skill * 0.003)
     return mean, spread
 
 def work_multiplier(skill, rng):
@@ -40,28 +41,23 @@ def work_multiplier(skill, rng):
     return rng.uniform(mean - spread, mean + spread)
 
 def quality_gain(skill, rng, stochastic):
-    """Per selected dimension, return an experimental positive increment."""
-    if stochastic:
-        base_gain = rng.randint(1, 4)
-    else:
-        base_gain = 2.5
-    return max(1, round(base_gain * (0.65 + int(skill) / 100)))
-
-def pick_dimensions(stage, workers, rng, stochastic, tick):
-    dimensions = STAGE_DIMENSIONS[stage]
+    """Higher skill raises average quality contribution and narrows its spread."""
+    mean, spread = performance_parameters(skill)
+    mean_gain = 2.5 + int(skill) / 50
     if not stochastic:
-        # Deterministic round-robin control: no random selection or random gain.
-        return [dimensions[tick % len(dimensions)]]
-    # One dimension is guaranteed; a second may also receive an improvement.
+        return mean_gain
+    return max(0.25, rng.uniform(mean_gain * (1 - spread), mean_gain * (1 + spread)))
+
+def pick_dimensions(stage, person, rng):
+    dimensions = STAGE_DIMENSIONS[stage]
+    skill_weights = [
+        max(1, int(person["abilities"][DIMENSION_ABILITY[dim]]))
+        for dim in dimensions
+    ]
     count = 1 + int(rng.random() < 0.45)
-    # Pool weights are derived from the assigned team's relevant abilities.
-    weights = []
-    for dim in dimensions:
-        ability = DIMENSION_ABILITY[dim]
-        weights.append(max(1, sum(int(p["abilities"][ability]) for p in workers)))
     chosen = []
     for _ in range(count):
-        dim = rng.choices(dimensions, weights=weights, k=1)[0]
+        dim = rng.choices(dimensions, weights=skill_weights, k=1)[0]
         if dim not in chosen:
             chosen.append(dim)
     return chosen
@@ -72,16 +68,14 @@ def run_once(people, strategy, workload, deadline, mode, seed, ability_model="mu
     policy = base.POLICIES["deadline" if overtime else "balanced"]
     fatigue = {p["id"]: int(p.get("fatigue", 0)) for p in people}
     morale = {p["id"]: int(p.get("morale", 80)) for p in people}
-    quality = {d: 0 for d in DIMENSIONS}
+    quality = {d: 0.0 for d in DIMENSIONS}
     total_work = weeks = 0
     stage_weeks = {}
     assignments = {}
-    tick = 0
 
     for stage, ability, _ in base.STAGES:
         remaining = workload
         used = 0
-        previous_team = None
         fixed = None if strategy in base.DYNAMIC else base.choose(
             strategy, stage, ability, people, morale, fatigue,
             policy["speed"], ability_model
@@ -93,9 +87,10 @@ def run_once(people, strategy, workload, deadline, mode, seed, ability_model="mu
             ) if fixed is None else fixed
             ids = [p["id"] for p in workers]
             assignments.setdefault(stage, []).append(ids)
-            previous_team = ids
             coordination = base.coordination_factor(workers) if ability_model == "multi" else 1000
-            weekly_work = 0
+
+            worker_rows = []
+            weekly_work_float = 0.0
             for p in workers:
                 pid = p["id"]
                 skill = base.effective_ability(p, stage, ability, ability_model)
@@ -104,26 +99,38 @@ def run_once(people, strategy, workload, deadline, mode, seed, ability_model="mu
                     stage, ability_model, coordination
                 )
                 if mode in ("work_only", "work_and_quality"):
-                    points = max(0, round(points * work_multiplier(skill, rng)))
-                weekly_work += points
-
-                if mode == "work_and_quality":
-                    selected = pick_dimensions(stage, workers, rng, True, tick)
+                    points_float = points * work_multiplier(skill, rng)
                 else:
-                    selected = pick_dimensions(stage, workers, rng, False, tick)
-                for dim in selected:
-                    dim_skill = int(p["abilities"][DIMENSION_ABILITY[dim]])
-                    # A worker's personal contribution is accumulated independently.
-                    quality[dim] = min(100, quality[dim] + quality_gain(
-                        dim_skill, rng, mode == "work_and_quality"
-                    ))
+                    points_float = float(points)
+                weekly_work_float += points_float
+                worker_rows.append((p, points_float))
+
+            weekly_work = max(0, round(weekly_work_float))
+            quality_delta = {d: 0.0 for d in DIMENSIONS}
+            if weekly_work_float > 0:
+                for p, points_float in worker_rows:
+                    share = points_float / weekly_work_float
+                    if mode == "work_and_quality":
+                        selected = pick_dimensions(stage, p, rng)
+                    else:
+                        # Control groups apply the expected contribution to every
+                        # dimension available in the current stage, without RNG.
+                        selected = list(STAGE_DIMENSIONS[stage])
+                    for dim in selected:
+                        dim_skill = int(p["abilities"][DIMENSION_ABILITY[dim]])
+                        quality_delta[dim] += share * quality_gain(
+                            dim_skill, rng, mode == "work_and_quality"
+                        )
+                for dim, delta in quality_delta.items():
+                    quality[dim] = min(100.0, quality[dim] + delta)
 
             gain = min(remaining, weekly_work)
             remaining -= gain
             total_work += gain
+            assigned_ids = set(ids)
             for p in people:
                 pid = p["id"]
-                if pid in set(ids):
+                if pid in assigned_ids:
                     fatigue[pid] = min(100, fatigue[pid] + base.FATIGUE_WORK)
                     morale[pid] = max(0, min(100, morale[pid] + policy["morale"] -
                         (base.OVERTIME_MORALE if overtime else 0)))
@@ -132,7 +139,6 @@ def run_once(people, strategy, workload, deadline, mode, seed, ability_model="mu
                     morale[pid] = max(0, min(100, morale[pid] + base.REST_MORALE))
             weeks += 1
             used += 1
-            tick += 1
             if weekly_work <= 0:
                 break
         stage_weeks[stage] = used
@@ -142,6 +148,7 @@ def run_once(people, strategy, workload, deadline, mode, seed, ability_model="mu
     completed = len(stage_weeks) == len(base.STAGES) and all(
         stage_weeks.get(s, 0) > 0 for s, _, _ in base.STAGES
     ) and total_work >= workload * len(base.STAGES)
+    quality = {k: round(v, 2) for k, v in quality.items()}
     return {
         "completed": completed,
         "weeks": weeks,
