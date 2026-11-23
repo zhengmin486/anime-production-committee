@@ -13,6 +13,7 @@ interface GameStore {
   report: WeekReport | null
   result: WorkRecord | null
   companyResult: CompanyResult | null
+  saveConflict: boolean
   start: (seed?: number) => Promise<void>
   resume: () => void
   goHome: () => void
@@ -22,7 +23,8 @@ interface GameStore {
   resolveEvent: (optionId: string) => Promise<void>
   settle: () => Promise<void>
   settleCompany: () => Promise<void>
-  save: () => Promise<void>
+  save: (overwrite?: boolean) => Promise<void>
+  cancelOverwrite: () => void
   load: () => Promise<void>
 }
 
@@ -48,7 +50,7 @@ export const useGameStore = create<GameStore>((set, get) => {
   // 所有异步入口共用一把锁；仅在成功后整体采用核心返回的状态。
   const run = async (action: () => Promise<Partial<GameStore>>) => {
     if (get().busy) return
-    set({ busy: true, error: null, notice: null })
+    set({ busy: true, error: null, notice: null, saveConflict: false })
     try {
       set(await action())
     } catch (error) {
@@ -70,15 +72,16 @@ export const useGameStore = create<GameStore>((set, get) => {
     report: null,
     result: null,
     companyResult: null,
+    saveConflict: false,
     start: (seed) => run(async () => {
       const { state } = await initializeGame(startingSeed(seed))
       return { game: state, screen: 'studio', report: null, result: null, companyResult: null }
     }),
     resume: () => {
-      if (!get().busy && get().game) set({ screen: 'studio', error: null, notice: null })
+      if (!get().busy && get().game) set({ screen: 'studio', error: null, notice: null, saveConflict: false })
     },
     goHome: () => {
-      if (!get().busy) set({ screen: 'home', error: null, notice: null })
+      if (!get().busy) set({ screen: 'home', error: null, notice: null, saveConflict: false })
     },
     startProject: (offerId) => withGame(async (game) => {
       const { state, message } = await startProject(game, offerId)
@@ -106,10 +109,15 @@ export const useGameStore = create<GameStore>((set, get) => {
       const { state, result } = await calculateCompanyResult(game)
       return { game: state, companyResult: result }
     }),
-    save: () => withGame(async (game) => {
-      await saveGame(game)
-      return { notice: '已保存到此浏览器。' }
+    save: (overwrite) => withGame(async (game) => {
+      const outcome = await saveGame(game, overwrite === true)
+      return outcome === 'saved'
+        ? { notice: '已保存到此浏览器。', saveConflict: false }
+        : { notice: '此浏览器已有存档，覆盖后旧存档不可恢复。', saveConflict: true }
     }),
+    cancelOverwrite: () => {
+      if (!get().busy) set({ notice: null, saveConflict: false })
+    },
     load: () => run(async () => {
       const game = await loadGame()
       return game

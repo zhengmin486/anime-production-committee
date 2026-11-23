@@ -57,9 +57,7 @@ async function putSave(page, record) {
     })
   }, record)
 }
-async function savedState(page) {
-  await page.getByRole('button', { name: '保存进度', exact: true }).click()
-  await page.getByText('已保存到此浏览器。', { exact: true }).waitFor()
+async function readSave(page) {
   return page.evaluate(() => new Promise((done, fail) => {
     const request = indexedDB.open('anime-production-committee', 1)
     request.onsuccess = () => {
@@ -71,6 +69,21 @@ async function savedState(page) {
     }
     request.onerror = () => fail(request.error)
   }))
+}
+async function clickSave(page) {
+  await page.getByRole('button', { name: '保存进度', exact: true }).click()
+  // 单槽首次写入直接成功；已占用时须等确认入口出现，再带 overwrite 重试。
+  await page.waitForFunction(() => [...document.querySelectorAll('button')].some((node) => node.textContent.includes('确认覆盖本地存档'))
+    || [...document.querySelectorAll('[role="status"]')].some((node) => node.textContent.includes('已保存到此浏览器')))
+  const confirm = page.getByRole('button', { name: '确认覆盖本地存档', exact: true })
+  if (await confirm.count() > 0) {
+    await confirm.click()
+    await page.getByText('已保存到此浏览器。', { exact: true }).waitFor()
+  }
+}
+async function savedState(page) {
+  await clickSave(page)
+  return readSave(page)
 }
 async function newProject(page, seed = 12345) {
   await page.goto(`${baseUrl}/?seed=${seed}`)
@@ -176,6 +189,14 @@ test('浏览器真实 WASM 新游戏→阶段配置→周推进→违约结算�
   } finally { await context.close() }
 })
 
+async function advanceWeeks(page, weeks) {
+  for (let step = 0; step < weeks; step++) {
+    const configure = page.getByRole('button', { name: '锁定阶段方案', exact: true })
+    if (await configure.isVisible()) await lockStage(page)
+    await advanceUi(page)
+  }
+}
+
 test('IndexedDB 保存、刷新恢复、无存档提示与继续经营', async () => {
   const context = await browser.newContext()
   try {
@@ -196,6 +217,61 @@ test('IndexedDB 保存、刷新恢复、无存档提示与继续经营', async (
     await page.getByRole('button', { name: '读取本地存档' }).click()
     await textEquals(page.getByTestId('funds'), '¥5,790,000')
     assert.deepEqual((await savedState(page)).state, saved.state)
+  } finally { await context.close() }
+})
+
+test('读取检查点存档后继续推进，与不中断运行的完整状态逐字段一致', async () => {
+  const context = await browser.newContext()
+  try {
+    const page = await context.newPage()
+    await newProject(page)
+    await lockStage(page)
+    await advanceWeeks(page, 2)
+    const checkpoint = await savedState(page)
+    assert.equal(checkpoint.version, 3)
+    assert.equal(checkpoint.state.company.week, 2)
+    assert.equal(checkpoint.state.phase, 'producing')
+    await advanceWeeks(page, 2)
+    const uninterrupted = await savedState(page)
+    assert.equal(uninterrupted.state.company.week, 4)
+    assert.equal(uninterrupted.state.phase, 'producing')
+    await putSave(page, checkpoint)
+    await page.getByRole('button', { name: '读取存档', exact: true }).click()
+    await page.getByText('已读取本地存档。', { exact: true }).waitFor()
+    await textEquals(page.getByTestId('week'), '2')
+    assert.deepEqual((await readSave(page)).state, checkpoint.state)
+    await advanceWeeks(page, 2)
+    const resumed = await savedState(page)
+    assert.equal(resumed.state.company.week, 4)
+    assert.equal(resumed.state.seed, checkpoint.state.seed)
+    assert.deepEqual(resumed.state, uninterrupted.state)
+  } finally { await context.close() }
+})
+
+test('单槽覆盖需明确确认，未确认时旧存档原样保留', async () => {
+  const context = await browser.newContext()
+  try {
+    const page = await context.newPage()
+    await newProject(page)
+    await lockStage(page)
+    await advanceUi(page)
+    const first = await savedState(page)
+    assert.equal(await page.getByRole('button', { name: '确认覆盖本地存档', exact: true }).count(), 0)
+    await advanceUi(page)
+    await page.getByRole('button', { name: '保存进度', exact: true }).click()
+    const confirm = page.getByRole('button', { name: '确认覆盖本地存档', exact: true })
+    await confirm.waitFor()
+    await page.getByText('此浏览器已有存档，覆盖后旧存档不可恢复。', { exact: true }).waitFor()
+    assert.deepEqual(await readSave(page), first)
+    await page.getByRole('button', { name: '取消覆盖', exact: true }).click()
+    assert.equal(await confirm.count(), 0)
+    assert.equal(await page.getByText('已保存到此浏览器。', { exact: true }).count(), 0)
+    assert.deepEqual(await readSave(page), first)
+    await clickSave(page)
+    const second = await readSave(page)
+    assert.equal(first.state.company.week, 1)
+    assert.equal(second.state.company.week, 2)
+    assert.equal(second.version, 3)
   } finally { await context.close() }
 })
 

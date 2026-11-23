@@ -87,6 +87,16 @@ v3IdleState/v3ProducingState/v3EventState/v3ReadyState/v3SettledState/v3EndedSta
 
 M0 的校验器验证结构与状态关联，不执行产能、付款或阶段推进。类型检查/夹具测试通过只表示 M0 契约可用，不能用作 #3–#8 的规则实现验收。
 
+## V3.5 存档入口与状态恢复
+
+存档信封、单槽占用与恢复后确定性运行的规则见 [DATA_MODEL V3.5](DATA_MODEL.md)；本节只记录 TypeScript 服务层入口与错误口径。
+
+入口位于 [saveGame.ts](../apps/web/src/services/saveGame.ts)：`saveGame(state, overwrite = false): Promise<'saved' | 'occupied'>`、`loadGame(): Promise<GameState | null>`、`decodeV3SaveRecord(record): GameState | null`。记录为 `{version: 3, savedAt, state}`，`state.version` 同为 3；IndexedDB 名称、DB schema 版本 1、仓库 `saves`、键 `current` 均不随记录版本变化。v2 读写入口已移除，页面与 store 只处理 v3。
+
+`saveGame` 先用 `isGameState` 校验完整状态，再在同一个读写事务内读取单槽决定是否 `put`：槽位已占用且未带 `overwrite = true` 时中止事务返回 `occupied`，不产生部分写入；store 收到 `occupied` 后只提供确认入口，玩家确认才重试。`loadGame` 无存档返回 null；v1/v2 抛「v{n} 存档不兼容周制经营 v3，请新开游戏；旧存档未被覆盖。」；损坏或未知版本抛「存档损坏或版本不受支持，当前数据未改变。」两类都是 TypeScript `Error`，不冒充 C++ 错误码，保存与读取失败都不改动当前会话，也不覆盖或抹去存档记录。
+
+恢复采用存档中的完整状态：store 不重算、不补齐、不降级校验，`report` / `result` 面板与会话草稿不恢复；`state.seed` 原样回传，后续推进由核心按该 seed 继续。核心在每次带状态调用时独立校验权威状态，前端校验不构成防篡改，也不授权动作；TS 契约尚未收录的核心新增字段由存档原样透传，其契约与校验由对应核心任务同提交。
+
 ---
 
 ## V2 历史接口（仅供迁移核对）
@@ -223,7 +233,7 @@ console.log(state, output.report)
 
 不要使用 file:// 打开页面；浏览器需要通过 HTTP(S) 获取模块与 WASM。加载器无 JavaScript 规则兜底，不可在构建失败时伪造成功结果。
 
-## IndexedDB 存档
+## IndexedDB 存档（v2 历史，现行契约见 V3.5）
 
 不是跨语言协议；由 TypeScript 服务独立负责：
 
@@ -239,7 +249,7 @@ interface SaveRecord {
 
 只有一个手动存档槽，不自动保存或自动继续。只保存 `GameState`，不保存 `report` / `result`；结算结果仅会话内展示，重载后不恢复历史结算面板。已结算状态的企划已被清空，不能从该存档重建上一部作品的结果。
 
-[saveGame.ts](../apps/web/src/services/saveGame.ts) 的 `saveGame(state): Promise<void>` 在事务完成后才成功，`loadGame(): Promise<GameState | null>` 返回校验后的业务状态而非整个存档记录。没有存档时返回 null；损坏数据或不受支持的版本报错，不覆盖当前会话。v1 明确拒绝并提示新开游戏，无旧版迁移或静默转换。存档错误是 TypeScript `Error`，不属于 C++ 错误码。
+[saveGame.ts](../apps/web/src/services/saveGame.ts) 的 `saveGame(state): Promise<void>` 在事务完成后才成功，`loadGame(): Promise<GameState | null>` 返回校验后的业务状态而非整个存档记录。没有存档时返回 null；损坏数据或不受支持的版本报错，不覆盖当前会话。v1 明确拒绝并提示新开游戏，无旧版迁移或静默转换。存档错误是 TypeScript `Error`，不属于 C++ 错误码。v2 的单槽写入不检查槽位是否已被占用；占用确认与 v3 记录版本规则见上面的 V3.5 一节。
 
 ## 版本与变更约束
 

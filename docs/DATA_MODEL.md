@@ -56,11 +56,13 @@
 
 ## V3.5 存档与集成切换
 
-目标信封 `SaveRecord={version:3,savedAt:string,state:GameState}`，savedAt 为有效日期字符串。IndexedDB 名称、schema=1、saves/current 不变，记录版本不是数据库版本。
+存档信封 `SaveRecord={version:3,savedAt:string,state:GameState}`，savedAt 为有效日期字符串。IndexedDB 名称、schema=1、saves/current 不变，记录版本不是数据库版本。
 
-M0 在 services/saveGame.ts 实现 decodeV3SaveRecord 与只读 loadGameV3：拒绝 v1/v2，提示“v2 存档不兼容周制经营 v3，请新开游戏；旧存档未被覆盖。”；损坏/未知版本保留原档与会话。读取不迁移、不删除、不覆盖。history、成长、阶段配置、事件、关闭原因和 company_result 都在 state 中保存，report 与 UI 草稿不保存。
+[saveGame.ts](../apps/web/src/services/saveGame.ts) 导出 `decodeV3SaveRecord`、`loadGame(): Promise<GameState | null>` 与 `saveGame(state, overwrite = false): Promise<'saved' | 'occupied'>`；v2 读写入口已移除，页面与 store 只处理 v3。v1/v2 记录拒绝并提示「v2 存档不兼容周制经营 v3，请新开游戏；旧存档未被覆盖。」，损坏与未知版本报错，两类失败都不迁移、不删除、不覆盖，也不改动当前会话。history、成长、阶段配置、事件、关闭原因和 company_result 都在 state 中随核心返回的状态一起保存；report、result 面板与 UI 草稿不保存，因此恢复 `project_settled`/`company_ended` 后不重建上一部作品的结算展示。
 
-当前 v2 页面继续调用原 loadGame/saveGame。#5 在真实 v3 核心就绪时切换读写并移除旧入口；新游戏不自动写档，旧槽被覆盖前须由玩家明确保存并确认。M0 的版本拒绝代码不代表 v2 首页已拒绝自己的存档。
+单槽覆盖需要明确确认：`saveGame` 在同一个读写事务内先 `get('current')` 再决定是否 `put`，槽位已被占用且未带 `overwrite = true` 时中止事务返回 `occupied`，不存在「先查后写」竞态或部分写入。store 把冲突转成工作台确认入口（`saveConflict`、`确认覆盖本地存档` / `取消覆盖`），玩家确认后才以 `overwrite` 重试；busy 期间、玩家转向其他动作、返回首页或读取存档都会让这条确认失效。新游戏、推进和结算都不自动写档。v1/v2 记录即使内容不可读也继续占用单槽，未经确认不会被新游戏覆盖。
+
+恢复后的运行由核心判定：存档原样携带 seed，前端不重建、不补齐、不重算任何业务字段；恢复后继续推进与不中断运行逐字段一致，浏览器用例「读取检查点存档后继续推进」以真实 WASM 与真实 IndexedDB 验证这一点。核心侧新增而 TS 契约尚未收录的字段由存档原样透传，其契约与校验由对应核心任务同提交。
 
 ## V3.6 M2 契约扩展（2026-11-22 负责人批准）
 

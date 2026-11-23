@@ -176,14 +176,63 @@ describe('状态操作（服务隔离单元测试，不是 WASM 验证）', () =
   it('保存与读取通过存档服务执行，成功载入才清理回执', async () => {
     const state = v3ProducingState()
     useGameStore.setState({ game: state, report: v3WeekReport(), result: workResult(), companyResult: companyResult() })
-    vi.mocked(saveGame).mockResolvedValue()
+    vi.mocked(saveGame).mockResolvedValue('saved')
     await store().save()
-    expect(saveGame).toHaveBeenCalledWith(state)
+    expect(saveGame).toHaveBeenCalledWith(state, false)
     expect(store().report).toEqual(v3WeekReport())
     const next = v3ReadyState()
     vi.mocked(loadGame).mockResolvedValue(next)
     await store().load()
     expect(store()).toMatchObject({ game: next, screen: 'studio', report: null, result: null, companyResult: null, notice: '已读取本地存档。' })
+  })
+
+  it('读取后立即保存写入的就是载入状态，不在前端重建任何字段', async () => {
+    const saved = v3SettledState()
+    vi.mocked(loadGame).mockResolvedValue(saved)
+    await store().load()
+    vi.mocked(saveGame).mockResolvedValue('saved')
+    await store().save()
+    expect(saveGame).toHaveBeenCalledWith(saved, false)
+    expect(store().game).toBe(saved)
+  })
+
+  it('单槽被占用时不写入，等待玩家确认后才带 overwrite 保存', async () => {
+    const game = v3ProducingState()
+    useGameStore.setState({ screen: 'studio', game, notice: '上一轮提示' })
+    vi.mocked(saveGame).mockResolvedValue('occupied')
+    await store().save()
+    expect(store()).toMatchObject({ game, busy: false, saveConflict: true, notice: '此浏览器已有存档，覆盖后旧存档不可恢复。' })
+    expect(store().error).toBeNull()
+    vi.mocked(saveGame).mockClear()
+    vi.mocked(saveGame).mockResolvedValue('saved')
+    await store().save(true)
+    expect(saveGame).toHaveBeenCalledWith(game, true)
+    expect(store()).toMatchObject({ saveConflict: false, notice: '已保存到此浏览器。' })
+  })
+
+  it('取消覆盖只收起确认提示，不动游戏状态', async () => {
+    const game = v3ProducingState()
+    useGameStore.setState({ screen: 'studio', game, saveConflict: true, notice: '此浏览器已有存档，覆盖后旧存档不可恢复。' })
+    store().cancelOverwrite()
+    expect(store()).toMatchObject({ game, saveConflict: false, notice: null })
+    expect(saveGame).not.toHaveBeenCalled()
+  })
+
+  it.each(['start', 'advance', 'load'])('玩家改做 %s 时确认提示随 notice 一起失效', async (action) => {
+    useGameStore.setState({ screen: 'studio', game: v3ProducingState(), saveConflict: true, notice: '此浏览器已有存档，覆盖后旧存档不可恢复。' })
+    vi.mocked(core.initializeGame).mockResolvedValue({ state: v3IdleState(), message: '公司成立' })
+    vi.mocked(core.advanceWeek).mockResolvedValue({ state: v3ReadyState(), report: v3WeekReport() })
+    vi.mocked(loadGame).mockResolvedValue(v3SettledState())
+    await (action === 'start' ? store().start(12345) : action === 'advance' ? store().advance() : store().load())
+    expect(store().saveConflict).toBe(false)
+  })
+
+  it('确认提示在返回首页与继续经营之间不残留', () => {
+    useGameStore.setState({ screen: 'studio', game: v3ProducingState(), saveConflict: true, notice: '此浏览器已有存档，覆盖后旧存档不可恢复。' })
+    store().goHome()
+    expect(store()).toMatchObject({ screen: 'home', saveConflict: false, notice: null })
+    store().resume()
+    expect(store().saveConflict).toBe(false)
   })
 
   it('没有存档时不覆盖现有状态或回执', async () => {
@@ -231,7 +280,7 @@ describe('状态操作（服务隔离单元测试，不是 WASM 验证）', () =
     pending.reject(new Error('释放测试请求'))
     await request
     expect(store().busy).toBe(false)
-    vi.mocked(saveGame).mockResolvedValue()
+    vi.mocked(saveGame).mockResolvedValue('saved')
     await store().save()
     expect(store().notice).toBe('已保存到此浏览器。')
   })

@@ -50,7 +50,7 @@ function StageConfigPanel({ stage, recommended, lockedConfiguration, staff, disa
 }
 
 export function StudioPage({ core }: { core: ReturnType<typeof useGameCore> }) {
-  const { game, busy, report, result, companyResult, startProject, decide, advance, resolveEvent, settle, settleCompany, save, load, goHome } = useGameStore()
+  const { game, busy, report, result, companyResult, saveConflict, startProject, decide, advance, resolveEvent, settle, settleCompany, save, cancelOverwrite, load, goHome } = useGameStore()
   if (!game) return null
   const unavailable = busy || core.status !== 'ready'
   const company = game.company
@@ -207,6 +207,10 @@ export function StudioPage({ core }: { core: ReturnType<typeof useGameCore> }) {
       <button className="button secondary" onClick={() => void load()} disabled={busy}><FolderOpen size={16} aria-hidden="true" />读取存档</button>
       {running && <button className="button secondary" onClick={() => void decide({ type: 'end_company' })} disabled={unavailable}><Flag size={16} aria-hidden="true" />结束经营</button>}
     </div>
-    <p className="local-note">存档仅保存在此浏览器，不会上传。种子仅在空闲周与返回市场时推进，用于复现经营状态。</p>
+    {saveConflict && <div className="save-actions">
+      <button className="button primary" onClick={() => void save(true)} disabled={busy}><Save size={16} aria-hidden="true" />确认覆盖本地存档</button>
+      <button className="button secondary" onClick={cancelOverwrite} disabled={busy}>取消覆盖</button>
+    </div>}
+    <p className="local-note">存档仅保存在此浏览器，不会上传，且只有一个手动存档槽；覆盖已有存档需要你明确确认。种子仅在空闲周与返回市场时推进，用于复现经营状态。</p>
   </main>
 }
