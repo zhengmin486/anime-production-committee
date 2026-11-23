@@ -48,16 +48,31 @@ def quality_gain(skill, rng, stochastic):
         return mean_gain
     return max(0.25, rng.uniform(mean_gain * (1 - spread), mean_gain * (1 + spread)))
 
-def pick_dimensions(stage, person, rng):
+def dimension_weights(stage, person):
     dimensions = STAGE_DIMENSIONS[stage]
-    skill_weights = [
+    weights = [
         max(1, int(person["abilities"][DIMENSION_ABILITY[dim]]))
         for dim in dimensions
     ]
+    total = sum(weights)
+    return {dim: weight / total for dim, weight in zip(dimensions, weights)}
+
+def expected_dimension_probabilities(stage, person):
+    # One draw is guaranteed; a second draw occurs with probability 0.45.
+    # Repeated draws of the same dimension count only once.
+    return {
+        dim: 1.45 * probability - 0.45 * probability * probability
+        for dim, probability in dimension_weights(stage, person).items()
+    }
+
+def pick_dimensions(stage, person, rng):
+    probabilities = dimension_weights(stage, person)
+    dimensions = list(probabilities)
+    weights = list(probabilities.values())
     count = 1 + int(rng.random() < 0.45)
     chosen = []
     for _ in range(count):
-        dim = rng.choices(dimensions, weights=skill_weights, k=1)[0]
+        dim = rng.choices(dimensions, weights=weights, k=1)[0]
         if dim not in chosen:
             chosen.append(dim)
     return chosen
@@ -112,13 +127,14 @@ def run_once(people, strategy, workload, deadline, mode, seed, ability_model="mu
                     share = points_float / weekly_work_float
                     if mode == "work_and_quality":
                         selected = pick_dimensions(stage, p, rng)
+                        probabilities = {dim: 1.0 for dim in selected}
                     else:
-                        # Control groups apply the expected contribution to every
-                        # dimension available in the current stage, without RNG.
-                        selected = list(STAGE_DIMENSIONS[stage])
-                    for dim in selected:
+                        # Deterministic control uses the expected inclusion chance,
+                        # so its mean is comparable to the random dimension draw.
+                        probabilities = expected_dimension_probabilities(stage, p)
+                    for dim, probability in probabilities.items():
                         dim_skill = int(p["abilities"][DIMENSION_ABILITY[dim]])
-                        quality_delta[dim] += share * quality_gain(
+                        quality_delta[dim] += share * probability * quality_gain(
                             dim_skill, rng, mode == "work_and_quality"
                         )
                 for dim, delta in quality_delta.items():
