@@ -1,0 +1,901 @@
+{
+  "schema": "apc.staff_templates/0.1",
+  "issue": 13,
+  "date": "2026-11-23",
+  "status": "内容提案。核心字段严格对齐 gameV3.ts Staff 契约；meta 为内容侧注记，不属于契约。所有数值 TODO(待定)，最终归 @Sqks183。",
+  "conventions": {
+    "salary_formula_core": "15000 + sum(abilities) * 90（#7 招募提案推荐值）",
+    "project_fee_formula_temp": "同能力核心周薪 × 12 周 × 1.3（以 12 周为基准时长，随时长按比例调整）",
+    "rarity_bands": "N<240 / R 240-319 / SR 320-399 / SSR>=400（六维当前能力和）",
+    "initial_fatigue": 0,
+    "initial_morale": 80,
+    "potential_rule": "potential = abilities + [10,30]，上限钳到 100",
+    "traits_catalog": "只允许 #8 已确认特性目录：天才型/完美主义/高效率/稳定型/多面手/新人/社交达人/独行侠；效果机制归 #8",
+    "specialty_note": "TS Staff 契约暂无 specialty 字段（动态员工专业匹配来源待 #7 落地）；meta.specialty 是提请 Sqks183 的内容注记，对应 C++ StaffSpec.specialty"
+  },
+  "staff": [
+    {
+      "staff": {
+        "id": "staff_01",
+        "name": "林导演",
+        "role": "director",
+        "employment": "core",
+        "abilities": {
+          "planning": 70,
+          "direction": 75,
+          "drawing": 45,
+          "animation": 40,
+          "management": 65,
+          "postproduction": 40
+        },
+        "experience": {
+          "planning": 10,
+          "direction": 24,
+          "drawing": 8,
+          "animation": 4,
+          "management": 16,
+          "postproduction": 4
+        },
+        "potential": {
+          "planning": 90,
+          "direction": 95,
+          "drawing": 70,
+          "animation": 65,
+          "management": 85,
+          "postproduction": 65
+        },
+        "revealed_potential": {
+          "planning": false,
+          "direction": false,
+          "drawing": false,
+          "animation": false,
+          "management": false,
+          "postproduction": false
+        },
+        "talent_type": "specialist",
+        "clues": [
+          "善于分镜调度"
+        ],
+        "traits": [
+          "稳定型"
+        ],
+        "weekly_salary": 45000,
+        "project_fee": 0,
+        "fatigue": 0,
+        "morale": 80,
+        "departure_warning": false
+      },
+      "meta": {
+        "specialty": "direction",
+        "source": "M1 初始名册（game_rules.hpp staff_01 原值）",
+        "usage": "分镜与演出阶段核心",
+        "resume_one_line": "创业起就在的老导演，片单比履历本厚。"
+      }
+    },
+    {
+      "staff": {
+        "id": "staff_02",
+        "name": "陈原画",
+        "role": "key_animator",
+        "employment": "core",
+        "abilities": {
+          "planning": 45,
+          "direction": 50,
+          "drawing": 80,
+          "animation": 70,
+          "management": 40,
+          "postproduction": 45
+        },
+        "experience": {
+          "planning": 4,
+          "direction": 6,
+          "drawing": 30,
+          "animation": 12,
+          "management": 2,
+          "postproduction": 4
+        },
+        "potential": {
+          "planning": 70,
+          "direction": 75,
+          "drawing": 95,
+          "animation": 90,
+          "management": 65,
+          "postproduction": 70
+        },
+        "revealed_potential": {
+          "planning": false,
+          "direction": false,
+          "drawing": false,
+          "animation": false,
+          "management": false,
+          "postproduction": false
+        },
+        "talent_type": "specialist",
+        "clues": [
+          "擅长动作设计"
+        ],
+        "traits": [
+          "高效率"
+        ],
+        "weekly_salary": 38000,
+        "project_fee": 0,
+        "fatigue": 0,
+        "morale": 80,
+        "departure_warning": false
+      },
+      "meta": {
+        "specialty": "drawing",
+        "source": "M1 初始名册（staff_02 原值）",
+        "usage": "原画阶段核心",
+        "resume_one_line": "一晚上能出五卡，草稿上只有箭头和拟声词。"
+      }
+    },
+    {
+      "staff": {
+        "id": "staff_03",
+        "name": "许动画",
+        "role": "animator",
+        "employment": "core",
+        "abilities": {
+          "planning": 40,
+          "direction": 45,
+          "drawing": 60,
+          "animation": 65,
+          "management": 40,
+          "postproduction": 50
+        },
+        "experience": {
+          "planning": 2,
+          "direction": 2,
+          "drawing": 8,
+          "animation": 18,
+          "management": 2,
+          "postproduction": 6
+        },
+        "potential": {
+          "planning": 65,
+          "direction": 70,
+          "drawing": 80,
+          "animation": 85,
+          "management": 60,
+          "postproduction": 70
+        },
+        "revealed_potential": {
+          "planning": false,
+          "direction": false,
+          "drawing": false,
+          "animation": false,
+          "management": false,
+          "postproduction": false
+        },
+        "talent_type": "uneven",
+        "clues": [
+          "出画速度快"
+        ],
+        "traits": [
+          "稳定型"
+        ],
+        "weekly_salary": 32000,
+        "project_fee": 0,
+        "fatigue": 0,
+        "morale": 80,
+        "departure_warning": false
+      },
+      "meta": {
+        "specialty": "animation",
+        "source": "M1 初始名册（staff_03 原值）",
+        "usage": "动画与作画检查主力",
+        "resume_one_line": "中切数量常年全组第一，从不出错也从不多画一笔。"
+      }
+    },
+    {
+      "staff": {
+        "id": "staff_04",
+        "name": "周摄影",
+        "role": "postproduction",
+        "employment": "core",
+        "abilities": {
+          "planning": 40,
+          "direction": 45,
+          "drawing": 50,
+          "animation": 50,
+          "management": 45,
+          "postproduction": 70
+        },
+        "experience": {
+          "planning": 2,
+          "direction": 4,
+          "drawing": 4,
+          "animation": 4,
+          "management": 4,
+          "postproduction": 22
+        },
+        "potential": {
+          "planning": 60,
+          "direction": 65,
+          "drawing": 70,
+          "animation": 70,
+          "management": 60,
+          "postproduction": 92
+        },
+        "revealed_potential": {
+          "planning": false,
+          "direction": false,
+          "drawing": false,
+          "animation": false,
+          "management": false,
+          "postproduction": false
+        },
+        "talent_type": "generalist",
+        "clues": [
+          "合成审美稳定"
+        ],
+        "traits": [
+          "多面手"
+        ],
+        "weekly_salary": 35000,
+        "project_fee": 0,
+        "fatigue": 0,
+        "morale": 80,
+        "departure_warning": false
+      },
+      "meta": {
+        "specialty": "postproduction",
+        "source": "M1 初始名册（staff_04 原值）",
+        "usage": "摄影与后期核心",
+        "resume_one_line": "他能用一层光晕把崩坏线稿救回三分。"
+      }
+    },
+    {
+      "staff": {
+        "id": "staff_05",
+        "name": "早见修",
+        "role": "animation_director",
+        "employment": "core",
+        "abilities": {
+          "planning": 30,
+          "direction": 66,
+          "drawing": 80,
+          "animation": 74,
+          "management": 38,
+          "postproduction": 32
+        },
+        "experience": {
+          "planning": 0,
+          "direction": 6,
+          "drawing": 20,
+          "animation": 14,
+          "management": 0,
+          "postproduction": 0
+        },
+        "potential": {
+          "planning": 48,
+          "direction": 88,
+          "drawing": 94,
+          "animation": 90,
+          "management": 50,
+          "postproduction": 45
+        },
+        "revealed_potential": {
+          "planning": false,
+          "direction": false,
+          "drawing": false,
+          "animation": false,
+          "management": false,
+          "postproduction": false
+        },
+        "talent_type": "uneven",
+        "clues": [
+          "他抽屉里锁着一沓没人看过的分镜——有人说比他现在修的卡好得多。"
+        ],
+        "traits": [
+          "完美主义",
+          "稳定型"
+        ],
+        "weekly_salary": 43800,
+        "project_fee": 0,
+        "fatigue": 0,
+        "morale": 80,
+        "departure_warning": false
+      },
+      "meta": {
+        "specialty": "drawing",
+        "source": "新模板（#13 V0.1 §1.2）",
+        "usage": "作画检查质量核心；E-M03 返修叙事锚点",
+        "resume_one_line": "业内人称橡皮擦之神，宁可重画不放行。"
+      }
+    },
+    {
+      "staff": {
+        "id": "staff_06",
+        "name": "高坂深雪",
+        "role": "scriptwriter",
+        "employment": "core",
+        "abilities": {
+          "planning": 92,
+          "direction": 70,
+          "drawing": 36,
+          "animation": 30,
+          "management": 58,
+          "postproduction": 45
+        },
+        "experience": {
+          "planning": 18,
+          "direction": 4,
+          "drawing": 0,
+          "animation": 0,
+          "management": 6,
+          "postproduction": 0
+        },
+        "potential": {
+          "planning": 100,
+          "direction": 92,
+          "drawing": 50,
+          "animation": 42,
+          "management": 78,
+          "postproduction": 60
+        },
+        "revealed_potential": {
+          "planning": false,
+          "direction": false,
+          "drawing": false,
+          "animation": false,
+          "management": false,
+          "postproduction": false
+        },
+        "talent_type": "specialist",
+        "clues": [
+          "她的剧本围读会上，制片人从没提过第三笔修改意见。"
+        ],
+        "traits": [
+          "高效率",
+          "稳定型"
+        ],
+        "weekly_salary": 44790,
+        "project_fee": 0,
+        "fatigue": 0,
+        "morale": 80,
+        "departure_warning": false
+      },
+      "meta": {
+        "specialty": "planning",
+        "source": "新模板",
+        "usage": "企划与脚本阶段核心；原创企划提案线载体",
+        "resume_one_line": "三稿过审的记录保持者，从不参加剧本会之外的会。"
+      }
+    },
+    {
+      "staff": {
+        "id": "staff_07",
+        "name": "周小满",
+        "role": "production_manager",
+        "employment": "core",
+        "abilities": {
+          "planning": 60,
+          "direction": 35,
+          "drawing": 22,
+          "animation": 25,
+          "management": 82,
+          "postproduction": 38
+        },
+        "experience": {
+          "planning": 6,
+          "direction": 0,
+          "drawing": 0,
+          "animation": 0,
+          "management": 16,
+          "postproduction": 2
+        },
+        "potential": {
+          "planning": 78,
+          "direction": 48,
+          "drawing": 32,
+          "animation": 36,
+          "management": 96,
+          "postproduction": 52
+        },
+        "revealed_potential": {
+          "planning": false,
+          "direction": false,
+          "drawing": false,
+          "animation": false,
+          "management": false,
+          "postproduction": false
+        },
+        "talent_type": "generalist",
+        "clues": [
+          "她的通讯录按『靠谱』『便宜』『快』分了三栏——只有一个人同时出现在三栏里，名字被划掉了。"
+        ],
+        "traits": [
+          "社交达人",
+          "高效率"
+        ],
+        "weekly_salary": 38580,
+        "project_fee": 0,
+        "fatigue": 0,
+        "morale": 80,
+        "departure_warning": false
+      },
+      "meta": {
+        "specialty": "management",
+        "source": "新模板（#13 V0.1 §1.3）",
+        "usage": "外包拆单/盯进度事件的人员锚点；注意 management 非任何阶段主专业（stage_ability），匹配收益按现有核心为非专业 800‰",
+        "resume_one_line": "凌晨三点也能要到报价单的人。"
+      }
+    },
+    {
+      "staff": {
+        "id": "staff_08",
+        "name": "月森枫",
+        "role": "postproduction",
+        "employment": "core",
+        "abilities": {
+          "planning": 25,
+          "direction": 35,
+          "drawing": 30,
+          "animation": 35,
+          "management": 40,
+          "postproduction": 86
+        },
+        "experience": {
+          "planning": 0,
+          "direction": 0,
+          "drawing": 2,
+          "animation": 2,
+          "management": 2,
+          "postproduction": 20
+        },
+        "potential": {
+          "planning": 40,
+          "direction": 52,
+          "drawing": 44,
+          "animation": 48,
+          "management": 56,
+          "postproduction": 98
+        },
+        "revealed_potential": {
+          "planning": false,
+          "direction": false,
+          "drawing": false,
+          "animation": false,
+          "management": false,
+          "postproduction": false
+        },
+        "talent_type": "specialist",
+        "clues": [
+          "他调色台前的椅子比全组任何一把都旧。"
+        ],
+        "traits": [
+          "稳定型"
+        ],
+        "weekly_salary": 37590,
+        "project_fee": 0,
+        "fatigue": 0,
+        "morale": 80,
+        "departure_warning": false
+      },
+      "meta": {
+        "specialty": "postproduction",
+        "source": "新模板",
+        "usage": "后期第二主力，与周摄影轮换降疲劳",
+        "resume_one_line": "能把预算表外的天空调出故事感。"
+      }
+    },
+    {
+      "staff": {
+        "id": "staff_09",
+        "name": "白石紬",
+        "role": "animator",
+        "employment": "core",
+        "abilities": {
+          "planning": 15,
+          "direction": 12,
+          "drawing": 40,
+          "animation": 48,
+          "management": 10,
+          "postproduction": 20
+        },
+        "experience": {
+          "planning": 0,
+          "direction": 0,
+          "drawing": 2,
+          "animation": 4,
+          "management": 0,
+          "postproduction": 0
+        },
+        "potential": {
+          "planning": 40,
+          "direction": 35,
+          "drawing": 66,
+          "animation": 78,
+          "management": 30,
+          "postproduction": 44
+        },
+        "revealed_potential": {
+          "planning": false,
+          "direction": false,
+          "drawing": false,
+          "animation": false,
+          "management": false,
+          "postproduction": false
+        },
+        "talent_type": "specialist",
+        "clues": [
+          "毕业制作的最后一卡，老师看了很久，说『这不像学生画的』。"
+        ],
+        "traits": [
+          "新人"
+        ],
+        "weekly_salary": 28050,
+        "project_fee": 0,
+        "fatigue": 0,
+        "morale": 80,
+        "departure_warning": false
+      },
+      "meta": {
+        "specialty": "animation",
+        "source": "新模板（#13 V0.1 §1.4）",
+        "usage": "低薪高潜养成位；与明星原画形成现在/未来取舍",
+        "resume_one_line": "中切速度同辈两倍，被盯着画就手抖。"
+      }
+    },
+    {
+      "staff": {
+        "id": "staff_10",
+        "name": "葛城莲",
+        "role": "scriptwriter",
+        "employment": "core",
+        "abilities": {
+          "planning": 80,
+          "direction": 58,
+          "drawing": 20,
+          "animation": 15,
+          "management": 32,
+          "postproduction": 35
+        },
+        "experience": {
+          "planning": 14,
+          "direction": 2,
+          "drawing": 0,
+          "animation": 0,
+          "management": 0,
+          "postproduction": 0
+        },
+        "potential": {
+          "planning": 96,
+          "direction": 82,
+          "drawing": 34,
+          "animation": 30,
+          "management": 48,
+          "postproduction": 52
+        },
+        "revealed_potential": {
+          "planning": false,
+          "direction": false,
+          "drawing": false,
+          "animation": false,
+          "management": false,
+          "postproduction": false
+        },
+        "talent_type": "uneven",
+        "clues": [
+          "他退稿信攒了一抽屉，最新一封写着『不是不好，是太像你了』。"
+        ],
+        "traits": [
+          "独行侠",
+          "高效率"
+        ],
+        "weekly_salary": 36600,
+        "project_fee": 0,
+        "fatigue": 0,
+        "morale": 80,
+        "departure_warning": false
+      },
+      "meta": {
+        "specialty": "planning",
+        "source": "新模板（#13 V0.1 §1.5）",
+        "usage": "员工提案（origin=proposal）风味来源",
+        "resume_one_line": "前小说编辑，交稿从不迟到，拒绝一切剧本会。"
+      }
+    },
+    {
+      "staff": {
+        "id": "staff_11",
+        "name": "胡桃泽八十稻",
+        "role": "animation_director",
+        "employment": "core",
+        "abilities": {
+          "planning": 60,
+          "direction": 70,
+          "drawing": 90,
+          "animation": 75,
+          "management": 50,
+          "postproduction": 60
+        },
+        "experience": {
+          "planning": 2,
+          "direction": 6,
+          "drawing": 18,
+          "animation": 8,
+          "management": 0,
+          "postproduction": 2
+        },
+        "potential": {
+          "planning": 78,
+          "direction": 92,
+          "drawing": 100,
+          "animation": 92,
+          "management": 64,
+          "postproduction": 78
+        },
+        "revealed_potential": {
+          "planning": false,
+          "direction": false,
+          "drawing": false,
+          "animation": false,
+          "management": false,
+          "postproduction": false
+        },
+        "talent_type": "generalist",
+        "clues": [
+          "试映片里最难修的那卡，他自己三分钟改完，然后说『下一卡更难的』。"
+        ],
+        "traits": [
+          "天才型",
+          "多面手"
+        ],
+        "weekly_salary": 51450,
+        "project_fee": 0,
+        "fatigue": 0,
+        "morale": 80,
+        "departure_warning": false
+      },
+      "meta": {
+        "specialty": "drawing",
+        "source": "新模板（SSR 全才档示例）",
+        "usage": "单项近满、六维均衡的顶级核心；薪资即持有成本",
+        "resume_one_line": "全才不是没有短板，是短板也比别人的高。"
+      }
+    },
+    {
+      "staff": {
+        "id": "staff_12",
+        "name": "白城玉",
+        "role": "key_animator",
+        "employment": "core",
+        "abilities": {
+          "planning": 90,
+          "direction": 40,
+          "drawing": 92,
+          "animation": 40,
+          "management": 30,
+          "postproduction": 50
+        },
+        "experience": {
+          "planning": 8,
+          "direction": 0,
+          "drawing": 22,
+          "animation": 0,
+          "management": 0,
+          "postproduction": 2
+        },
+        "potential": {
+          "planning": 100,
+          "direction": 58,
+          "drawing": 100,
+          "animation": 56,
+          "management": 44,
+          "postproduction": 68
+        },
+        "revealed_potential": {
+          "planning": false,
+          "direction": false,
+          "drawing": false,
+          "animation": false,
+          "management": false,
+          "postproduction": false
+        },
+        "talent_type": "uneven",
+        "clues": [
+          "分镜纸上的构图让演出部集体沉默了一晚上。",
+          "她的日程表只有两种状态：这张卡，和其他卡。"
+        ],
+        "traits": [
+          "天才型",
+          "独行侠"
+        ],
+        "weekly_salary": 44760,
+        "project_fee": 0,
+        "fatigue": 0,
+        "morale": 80,
+        "departure_warning": false
+      },
+      "meta": {
+        "specialty": "drawing",
+        "source": "新模板（偏科 SR 档示例）",
+        "usage": "企划+原画双高、协作面低的偏科怪才——E-M02 型慢工风险的原生候选",
+        "resume_one_line": "作品委员会里的孤品。"
+      }
+    },
+    {
+      "staff": {
+        "id": "temp_01",
+        "name": "吕克·博蒙",
+        "role": "key_animator",
+        "employment": "temporary",
+        "abilities": {
+          "planning": 20,
+          "direction": 55,
+          "drawing": 92,
+          "animation": 45,
+          "management": 8,
+          "postproduction": 15
+        },
+        "experience": {
+          "planning": 0,
+          "direction": 10,
+          "drawing": 40,
+          "animation": 6,
+          "management": 0,
+          "postproduction": 0
+        },
+        "potential": {
+          "planning": 36,
+          "direction": 76,
+          "drawing": 100,
+          "animation": 62,
+          "management": 18,
+          "postproduction": 30
+        },
+        "revealed_potential": {
+          "planning": false,
+          "direction": false,
+          "drawing": false,
+          "animation": false,
+          "management": false,
+          "postproduction": false
+        },
+        "talent_type": "specialist",
+        "clues": [
+          "他的获奖短片每一卡都能单独装裱——但片尾字幕里，只有他一个人的名字。",
+          "采访里他说：『我一年只接一个项目，因为我从不为日历工作。』"
+        ],
+        "traits": [
+          "天才型",
+          "独行侠"
+        ],
+        "weekly_salary": 0,
+        "project_fee": 564000,
+        "fatigue": 0,
+        "morale": 80,
+        "departure_warning": false
+      },
+      "meta": {
+        "specialty": "drawing",
+        "source": "新模板（#13 V0.1 §1.1 / E-M01 事件候选）",
+        "usage": "事故链主角：drawing 即战力顶级、management 极低；经事件选项走 hire_temporary 进入",
+        "resume_one_line": "作品集只有三支短片，三家工作室同时发邀请。",
+        "fee_note": "36150×12×1.3=564,000；12 周基准"
+      }
+    },
+    {
+      "staff": {
+        "id": "temp_02",
+        "name": "东方昱",
+        "role": "animator",
+        "employment": "temporary",
+        "abilities": {
+          "planning": 15,
+          "direction": 20,
+          "drawing": 55,
+          "animation": 72,
+          "management": 12,
+          "postproduction": 25
+        },
+        "experience": {
+          "planning": 0,
+          "direction": 0,
+          "drawing": 6,
+          "animation": 20,
+          "management": 0,
+          "postproduction": 0
+        },
+        "potential": {
+          "planning": 32,
+          "direction": 40,
+          "drawing": 74,
+          "animation": 90,
+          "management": 28,
+          "postproduction": 42
+        },
+        "revealed_potential": {
+          "planning": false,
+          "direction": false,
+          "drawing": false,
+          "animation": false,
+          "management": false,
+          "postproduction": false
+        },
+        "talent_type": "specialist",
+        "clues": [
+          "他带来的中切样本按镜头号码得比正片还整齐。"
+        ],
+        "traits": [
+          "高效率"
+        ],
+        "weekly_salary": 0,
+        "project_fee": 513396,
+        "fatigue": 0,
+        "morale": 80,
+        "departure_warning": false
+      },
+      "meta": {
+        "specialty": "animation",
+        "source": "新模板",
+        "usage": "三天赶工（E-M04）时期望内部/临时补量的对照人物",
+        "resume_one_line": "跨时区协作的老手，永远秒回消息。",
+        "fee_note": "32910×12×1.3=513,396"
+      }
+    },
+    {
+      "staff": {
+        "id": "temp_03",
+        "name": "梁姬",
+        "role": "postproduction",
+        "employment": "temporary",
+        "abilities": {
+          "planning": 20,
+          "direction": 30,
+          "drawing": 25,
+          "animation": 30,
+          "management": 20,
+          "postproduction": 78
+        },
+        "experience": {
+          "planning": 0,
+          "direction": 0,
+          "drawing": 0,
+          "animation": 0,
+          "management": 0,
+          "postproduction": 16
+        },
+        "potential": {
+          "planning": 38,
+          "direction": 48,
+          "drawing": 40,
+          "animation": 46,
+          "management": 36,
+          "postproduction": 94
+        },
+        "revealed_potential": {
+          "planning": false,
+          "direction": false,
+          "drawing": false,
+          "animation": false,
+          "management": false,
+          "postproduction": false
+        },
+        "talent_type": "specialist",
+        "clues": [
+          "她一个人包办过的片尾，比全组加起来还多。"
+        ],
+        "traits": [
+          "独行侠",
+          "稳定型"
+        ],
+        "weekly_salary": 0,
+        "project_fee": 519012,
+        "fatigue": 0,
+        "morale": 80,
+        "departure_warning": false
+      },
+      "meta": {
+        "specialty": "postproduction",
+        "source": "新模板",
+        "usage": "临时后期补位；与供应商外包的成本对照样本",
+        "resume_one_line": "自由接单五年，从没见过她开摄像头开会。",
+        "fee_note": "33270×12×1.3=519,012"
+      }
+    }
+  ]
+}
