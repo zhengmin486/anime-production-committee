@@ -2,7 +2,7 @@ import sys, unittest
 from pathlib import Path
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 import staff_scheduling_simulator as sim
-STAFF_FILE=Path("staff_templates.json")
+STAFF_FILE=Path("scripts/fixtures/staff_templates.json")
 class SchedulingTests(unittest.TestCase):
  @classmethod
  def setUpClass(cls): cls.people=sim.load_staff(STAFF_FILE)
