@@ -187,6 +187,7 @@ test('嵌套数值与安全整数边界', () => {
   }
   const rich = configure(start())
   rich.company.funds = Number.MAX_SAFE_INTEGER
+  rich.company.cash_log = []
   assert.equal(advance(rich).state.company.funds, Number.MAX_SAFE_INTEGER - 210_000)
   expectError(call('start_project', { state: { ...initial(), company: { ...initial().company, funds: Number.MAX_SAFE_INTEGER } }, offer_id: 'proj_ova_01', mode: 'contract', investment_percent: 0 }), 'INVALID_INPUT')
 })
@@ -233,6 +234,7 @@ test('动态报价快照决定工期和工作量，结算不重复扣已支付�
     state.company.finance.costs[key] = value
     state.company.funds -= value
   }
+  state.company.cash_log = []
   for (let index = 0; index < 5; index++) state = advance(configure(state)).state
   assert.equal(state.phase, 'project_ready')
   assert.equal(state.project.delivery_reason, 'completed')

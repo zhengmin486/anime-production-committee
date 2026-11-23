@@ -151,6 +151,64 @@ void add_cost(Json& finance, const char* category, Integer amount) {
     check_costs(finance.at("costs"));
 }
 
+struct CashReason { const char* reason; const char* type; };
+constexpr CashReason cash_reason_catalog[] = {
+    {"contract_budget", "income"}, {"weekly_fixed_costs", "expense"}, {"weekly_production_costs", "expense"},
+    {"deadline_penalty", "expense"}, {"closure_penalty", "expense"},
+};
+const CashReason* find_cash_reason(const std::string& reason) {
+    for (const auto& item : cash_reason_catalog) if (reason == item.reason) return &item;
+    return nullptr;
+}
+
+// 公司现金的唯一写入点：符号由业务原因决定，每笔变动都留下前后值，账本末笔必须等于当前现金。
+void record_cash(Json& state, const char* reason, Integer amount, Json project_id) {
+    const auto* kind = find_cash_reason(reason);
+    require(kind != nullptr && amount > 0);
+    const auto income = std::string(kind->type) == "income";
+    const auto before = signed_number(state.at("company").at("funds"));
+    const auto after = income ? add(before, amount) : sub(before, amount);
+    state["company"]["funds"] = after;
+    state["company"]["cash_log"].push_back({
+        {"week", num(state.at("company"), "week")}, {"type", kind->type}, {"reason", reason},
+        {"amount", income ? amount : -amount}, {"before", before}, {"after", after}, {"project_id", std::move(project_id)}
+    });
+}
+void check_cash_log(const Json& entries, Integer funds, Integer current_week) {
+    if (entries.is_null()) return;
+    require(entries.is_array());
+    bool first = true;
+    Integer previous_week = 0;
+    Integer previous_after = 0;
+    for (const auto& entry : entries) {
+        require(entry.is_object());
+        const auto week = number(entry.at("week"), rules::max_weeks);
+        const auto reason = nonempty_text(entry.at("reason"));
+        const auto* kind = find_cash_reason(reason);
+        require(kind != nullptr && one_of(entry.at("type"), {kind->type}));
+        const auto amount = signed_number(entry.at("amount"));
+        const auto before = signed_number(entry.at("before"));
+        const auto after = signed_number(entry.at("after"));
+        require(amount != 0 && (std::string(kind->type) == "income") == (amount > 0));
+        require(after == (amount > 0 ? add(before, amount) : sub(before, -amount)));
+        if (!entry.at("project_id").is_null()) nonempty_text(entry.at("project_id"));
+        require(week <= current_week);
+        require(first || (week >= previous_week && before == previous_after));
+        first = false;
+        previous_week = week;
+        previous_after = after;
+    }
+    require(first || previous_after == funds);
+}
+
+// 公司声望的唯一写入点：向下钳到 0，不设数值上限，返回实际生效的变化值。
+Integer change_reputation(Json& company, Integer delta) {
+    const auto before = num(company.at("reputation"));
+    const auto after = delta >= 0 ? add(before, delta) : std::max<Integer>(0, before + delta);
+    company["reputation"] = after;
+    return after - before;
+}
+
 Json make_staff(const rules::StaffSpec& spec) {
     Json abilities = Json::object(), potential = Json::object(), revealed = Json::object(), experience = Json::object();
     for (std::size_t i = 0; i < rules::abilities.size(); ++i) {
@@ -541,6 +599,7 @@ void check_state_entities(const Json& state) {
     require(company.is_object() && one_of(company.at("status"), {"running", "closing", "ended"}));
     number(company.at("week"), rules::max_weeks); number(company.at("initial_funds"));
     signed_number(company.at("funds")); number(company.at("reputation")); check_finance(company.at("finance"));
+    check_cash_log(optional_slot(company, "cash_log"), signed_number(company.at("funds")), num(company, "week"));
     require(company.at("end_reason").is_null() || one_of(company.at("end_reason"), {"time_limit", "bankrupt", "voluntary"}));
     if (company.contains("scout_pity")) {
         const auto& pity = company.at("scout_pity");
@@ -815,7 +874,7 @@ std::string initialize_game(std::string input) {
             {"company", {
                 {"week", 0}, {"status", "running"}, {"end_reason", nullptr},
                 {"initial_funds", rules::initial_funds}, {"funds", rules::initial_funds},
-                {"reputation", rules::initial_reputation}, {"staff", staff}, {"finance", empty_finance()}
+                {"reputation", rules::initial_reputation}, {"staff", staff}, {"finance", empty_finance()}, {"cash_log", Json::array()}
             }},
             {"offers", offers}, {"recruitment_pool", Json::array()}, {"suppliers", Json::array()},
             {"project", nullptr}, {"pending_event", nullptr}, {"history", Json::array()},
@@ -862,7 +921,7 @@ std::string start_project(std::string input) {
             {"extension_count", 0}, {"committee_pressure", nullptr}, {"finance", empty_finance(grant)},
             {"temporary_staff", Json::array()}, {"outsourcing", Json::array()}, {"delivery_reason", nullptr}
         };
-        state["company"]["funds"] = add(num(state.at("company").at("funds")), grant);
+        record_cash(state, "contract_budget", grant, state.at("project").at("offer").at("id"));
         state["company"]["finance"]["contract_received"] = add(num(state.at("company").at("finance"), "contract_received"), grant);
         state["offers"] = Json::array();
         clear_offer_slots(state);
@@ -959,7 +1018,7 @@ std::string advance_week(std::string input) {
                 return Json{{"state", state}, {"report", report}};
             }
             const auto salaries = cost - rules::operations_weekly;
-            state["company"]["funds"] = sub(num(state.at("company").at("funds")), cost);
+            record_cash(state, "weekly_fixed_costs", cost, Json(nullptr));
             pay_weekly_costs(state, salaries, 0);
             if (state.contains("pending_proposal")) state["pending_proposal"] = nullptr;
             state["company"]["week"] = add(num(state.at("company").at("week")), 1);
@@ -999,7 +1058,7 @@ std::string advance_week(std::string input) {
         const auto old_quality = num(stage_json, "quality");
         std::map<std::string, Json> staff_before;
         for (const auto& person : state.at("company").at("staff")) staff_before[person.at("id").get<std::string>()] = person;
-        state["company"]["funds"] = sub(num(state.at("company").at("funds")), cost);
+        record_cash(state, "weekly_production_costs", cost, state.at("project").at("offer").at("id"));
         pay_weekly_costs(state, salaries, production);
         const auto required = std::string(rules::abilities[rules::stage_ability[index]]);
         Integer work = 0, quality_sum = 0;
@@ -1133,7 +1192,7 @@ std::string calculate_result(std::string input) {
                 : reason == "deadline" ? scale(contract, static_cast<int>(rules::deadline_penalty_permille))
                 : scale(contract, static_cast<int>(rules::closed_penalty_permille));
             if (penalty > 0) {
-                state["company"]["funds"] = sub(signed_number(state.at("company").at("funds")), penalty);
+                record_cash(state, reason == "deadline" ? "deadline_penalty" : "closure_penalty", penalty, offer.at("id"));
                 add_cost(state["company"]["finance"], "penalty", penalty);
                 add_cost(state["project"]["finance"], "penalty", penalty);
             }
@@ -1141,8 +1200,7 @@ std::string calculate_result(std::string input) {
             Integer reputation_delta = 0;
             if (reason == "completed") reputation_delta = quality >= target ? rules::success_reputation : rules::below_target_reputation;
             else if (reason == "deadline") reputation_delta = rules::deadline_reputation;
-            const auto reputation = num(state.at("company").at("reputation"));
-            state["company"]["reputation"] = reputation_delta >= 0 ? add(reputation, reputation_delta) : std::max<Integer>(0, reputation + reputation_delta);
+            change_reputation(state["company"], reputation_delta);
             auto finance = project.at("finance");
             Json team = Json::array();
             std::set<std::string> seen;

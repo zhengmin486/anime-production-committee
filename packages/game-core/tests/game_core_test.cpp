@@ -30,6 +30,11 @@ Json configure(const Json& state, const char* policy = "balanced", bool overtime
     return call(apc::apply_decision, {{"state", state}, {"decision", {{"type", "configure_stage"}, {"stage", stage}, {"configuration", configuration}}}}).at("state");
 }
 Json advance(const Json& state) { return call(apc::advance_week, {{"state", state}}); }
+// 现金只能通过记账入口变化；夹具要把存档调到目标现金，必须同时清空账本，否则末笔记录与现金对不平。
+void set_cash(Json& state, std::int64_t amount) {
+    state["company"]["funds"] = amount;
+    state["company"]["cash_log"] = Json::array();
+}
 Json play_weeks(Json state, int weeks, const char* policy = "balanced") {
     for (int i = 0; i < weeks && state.at("phase") == "producing"; ++i) {
         const auto stage = state.at("project").at("current_stage").get<std::string>();
@@ -208,7 +213,7 @@ TEST(Initialize, V3CompanyStateAndFourOffers) {
         EXPECT_EQ(state.at("company").at("week"), 0); EXPECT_EQ(state.at("company").at("status"), "running");
         EXPECT_TRUE(state.at("company").at("end_reason").is_null());
         EXPECT_EQ(state.at("company").at("funds"), 2000000); EXPECT_EQ(state.at("company").at("initial_funds"), 2000000);
-        EXPECT_EQ(state.at("company").at("reputation"), 0); EXPECT_EQ(state.at("company").at("staff").size(), 4U);
+        EXPECT_EQ(state.at("company").at("reputation"), 100); EXPECT_EQ(state.at("company").at("staff").size(), 4U);
         EXPECT_EQ(state.at("offers").size(), 4U); EXPECT_TRUE(state.at("project").is_null());
         EXPECT_TRUE(state.at("pending_event").is_null()); EXPECT_TRUE(state.at("history").empty());
         EXPECT_TRUE(state.at("recruitment_pool").empty()); EXPECT_TRUE(state.at("suppliers").empty());
@@ -279,7 +284,7 @@ TEST(AdvanceWeek, IdlePaysFixedCostsAndRefreshesOffers) {
     EXPECT_TRUE(output.at("report").at("staff_deltas").empty());
     EXPECT_EQ(next.at("preview").at("total_cost"), 180000);
 
-    auto poor = initialize(); poor["company"]["funds"] = 179999;
+    auto poor = initialize(); set_cash(poor, 179999);
     const auto bankrupt = advance(poor);
     EXPECT_EQ(bankrupt.at("state").at("company").at("status"), "closing");
     EXPECT_EQ(bankrupt.at("state").at("company").at("end_reason"), "bankrupt");
@@ -376,7 +381,7 @@ TEST(AdvanceWeek, DeadlineAndBankruptcyAndTimeLimit) {
     EXPECT_EQ(late.at("company").at("week"), 2);
     EXPECT_EQ(late.at("project").at("stages").at("script").at("work_done"), 20);
 
-    auto broke = configure(start()); broke["company"]["funds"] = 209999;
+    auto broke = configure(start()); set_cash(broke, 209999);
     const auto eventless = advance(broke).at("state");
     EXPECT_EQ(eventless.at("company").at("status"), "closing");
     EXPECT_EQ(eventless.at("company").at("end_reason"), "bankrupt");
@@ -387,7 +392,7 @@ TEST(AdvanceWeek, DeadlineAndBankruptcyAndTimeLimit) {
     EXPECT_EQ(eventless.at("project").at("stages").at("script").at("work_done"), 0);
     EXPECT_TRUE(eventless.at("preview").is_null());
 
-    auto long_game = initialize(); long_game["company"]["funds"] = 100000000;
+    auto long_game = initialize(); set_cash(long_game, 100000000);
     for (int week = 0; week < 519; ++week) long_game = advance(long_game).at("state");
     EXPECT_EQ(long_game.at("company").at("week"), 519);
     EXPECT_EQ(long_game.at("company").at("status"), "running");
@@ -419,7 +424,7 @@ TEST(CalculateResult, DeadlinePenaltyGolden) {
     EXPECT_EQ(receipt.at("id"), "proj_ova_01");
     EXPECT_EQ(receipt.at("team").size(), 4U);
     EXPECT_EQ(output.at("state").at("company").at("funds"), 4780000);
-    EXPECT_EQ(output.at("state").at("company").at("reputation"), 0);
+    EXPECT_EQ(output.at("state").at("company").at("reputation"), 95);
     EXPECT_EQ(output.at("state").at("phase"), "project_settled");
     EXPECT_TRUE(output.at("state").at("project").is_null());
     EXPECT_EQ(output.at("state").at("last_project_id"), "proj_ova_01");
@@ -445,6 +450,135 @@ TEST(CalculateResult, InvariantsAndReturnToMarket) {
     expect_error(apc::calculate_result(Json{{"state", start()}, {"scope", "company"}}.dump()), "INVALID_PHASE");
     expect_error(apc::calculate_result(Json{{"state", initialize()}, {"scope", "unknown"}}.dump()), "INVALID_INPUT");
     expect_error(apc::calculate_result(Json{{"state", initialize()}, {"scope", "company"}}.dump()), "INVALID_PHASE");
+}
+namespace {
+// 五阶段各 1 工作量、19 周工期：能在截止周前跑完全部阶段，交付原因为 completed。
+Json completed_ready(std::uint32_t seed = 12345, const char* id = "dynamic_reputation", int target_quality = 1) {
+    auto idle = initialize(seed);
+    auto offer = dynamic_offer(id);
+    offer["target_quality"] = target_quality;
+    idle["offers"][0] = offer;
+    expect_validation(idle, true);
+    const auto state = call(apc::start_project, {{"state", idle}, {"offer_id", id}, {"mode", "contract"}, {"investment_percent", 0}}).at("state");
+    return play_until_ready(state);
+}
+// 两周工期配三周以上的实际产能：必然按 deadline 违约交付，声望按负向变化处理。
+Json deadline_ready(Json idle = initialize()) {
+    auto state = configure(call(apc::start_project, {{"state", idle}, {"offer_id", "proj_ova_01"}, {"mode", "contract"}, {"investment_percent", 0}}).at("state"));
+    state["project"]["deadline_week"] = 2;
+    state["project"]["offer"]["duration_weeks"] = 2;
+    return play_weeks(state, 2);
+}
+}
+TEST(Reputation, InitialValueIsOneHundred) {
+    for (auto seed : {0U, 12345U, 0xffffffffU}) {
+        const auto state = initialize(seed);
+        EXPECT_EQ(state.at("company").at("reputation"), 100);
+        expect_validation(state, true);
+    }
+}
+TEST(Reputation, CompletedSettlementAboveTargetAdds) {
+    const auto ready = completed_ready();
+    EXPECT_EQ(ready.at("project").at("delivery_reason"), "completed");
+    const auto output = call(apc::calculate_result, {{"state", ready}, {"scope", "project"}});
+    EXPECT_GE(output.at("result").at("quality_score"), 1);
+    EXPECT_EQ(output.at("state").at("company").at("reputation"), 110);
+    expect_validation(output.at("state"), true);
+}
+TEST(Reputation, CompletedSettlementBelowTargetAddsLess) {
+    const auto ready = completed_ready(12345, "dynamic_below_target", 100);
+    EXPECT_EQ(ready.at("project").at("delivery_reason"), "completed");
+    const auto output = call(apc::calculate_result, {{"state", ready}, {"scope", "project"}});
+    EXPECT_LT(output.at("result").at("quality_score"), 100);
+    EXPECT_EQ(output.at("state").at("company").at("reputation"), 103);
+    expect_validation(output.at("state"), true);
+}
+TEST(Reputation, DeadlineSettlementSubtracts) {
+    const auto ready = deadline_ready();
+    EXPECT_EQ(ready.at("project").at("delivery_reason"), "deadline");
+    const auto output = call(apc::calculate_result, {{"state", ready}, {"scope", "project"}});
+    EXPECT_EQ(output.at("state").at("company").at("reputation"), 95);
+    expect_validation(output.at("state"), true);
+}
+TEST(Reputation, ClosedDeliveryWithoutReputationRuleStaysUnchanged) {
+    auto state = configure(start());
+    set_cash(state, 209999);
+    state = advance(state).at("state");
+    EXPECT_EQ(state.at("project").at("delivery_reason"), "company_closed");
+    const auto output = call(apc::calculate_result, {{"state", state}, {"scope", "project"}});
+    EXPECT_EQ(output.at("state").at("company").at("reputation"), 100);
+    expect_validation(output.at("state"), true);
+}
+TEST(Reputation, FloorAtZeroNeverNegative) {
+    for (auto start_value : {0, 3, 5}) {
+        SCOPED_TRACE(start_value);
+        auto ready = deadline_ready();
+        ready["company"]["reputation"] = start_value;
+        expect_validation(ready, true);
+        const auto output = call(apc::calculate_result, {{"state", ready}, {"scope", "project"}});
+        EXPECT_EQ(output.at("state").at("company").at("reputation"), 0);
+        expect_validation(output.at("state"), true);
+    }
+}
+TEST(Reputation, NoUpperCapBeforeSafeIntegerCeiling) {
+    for (auto start_value : {max_i - 10, std::int64_t{9007199254740000}}) {
+        SCOPED_TRACE(start_value);
+        auto ready = completed_ready();
+        ready["company"]["reputation"] = start_value;
+        expect_validation(ready, true);
+        const auto output = call(apc::calculate_result, {{"state", ready}, {"scope", "project"}});
+        EXPECT_EQ(output.at("state").at("company").at("reputation"), start_value + 10);
+        expect_validation(output.at("state"), true);
+    }
+    auto idle = initialize();
+    idle["company"]["reputation"] = max_i;
+    expect_validation(idle, true);
+}
+TEST(Reputation, OverflowAtSafeIntegerCeilingIsAtomic) {
+    auto ready = completed_ready();
+    ready["company"]["reputation"] = max_i;
+    expect_validation(ready, true);
+    const auto before = ready.dump();
+    expect_error(apc::calculate_result(Json{{"state", ready}, {"scope", "project"}}.dump()), "INVALID_INPUT");
+    EXPECT_EQ(ready.dump(), before);
+}
+TEST(Reputation, InvalidValuesRejectedWithoutAnyWrite) {
+    expect_invalid_mutations(initialize(), {
+        [](Json& s) { s["company"]["reputation"] = -1; },
+        [](Json& s) { s["company"]["reputation"] = -max_i; },
+        [](Json& s) { s["company"]["reputation"] = 1.5; },
+        [](Json& s) { s["company"]["reputation"] = nullptr; },
+        [](Json& s) { s["company"]["reputation"] = "100"; },
+        [](Json& s) { s["company"]["reputation"] = max_i + 1; }
+    });
+}
+TEST(Reputation, DoesNotChangeWithoutSettlement) {
+    auto state = initialize();
+    for (int week = 1; week <= 8; ++week) {
+        state = advance(state).at("state");
+        EXPECT_EQ(state.at("company").at("week"), week);
+        EXPECT_EQ(state.at("company").at("reputation"), 100);
+    }
+    const auto producing = play_weeks(configure(start()), 3);
+    EXPECT_EQ(producing.at("company").at("week"), 3);
+    EXPECT_EQ(producing.at("company").at("reputation"), 100);
+}
+TEST(Reputation, SameSeedAndActionsProduceSameResult) {
+    for (auto seed : {0U, 12345U, 0xffffffffU}) {
+        const auto first = Json::parse(apc::calculate_result(Json{{"state", completed_ready(seed)}, {"scope", "project"}}.dump()));
+        play_until_ready(configure(start(4242)));
+        const auto second = Json::parse(apc::calculate_result(Json{{"state", completed_ready(seed)}, {"scope", "project"}}.dump()));
+        EXPECT_EQ(first, second) << "seed " << seed;
+        EXPECT_EQ(second.at("state").at("company").at("reputation"), 110);
+    }
+}
+TEST(Reputation, SavesWrittenBeforeTheInitialChangeRemainPlayable) {
+    auto ready = deadline_ready();
+    ready["company"]["reputation"] = 0;  // 初始值调整之前生成的 v3 存档
+    expect_validation(ready, true);
+    const auto output = call(apc::calculate_result, {{"state", ready}, {"scope", "project"}});
+    EXPECT_EQ(output.at("state").at("company").at("reputation"), 0);
+    expect_validation(output.at("state"), true);
 }
 TEST(Endings, VoluntaryEndSettlesPendingProjectThenSummary) {
     auto state = play_weeks(configure(start()), 1);
@@ -480,7 +614,7 @@ TEST(Endings, VoluntaryEndSettlesPendingProjectThenSummary) {
     EXPECT_EQ(idle.at("company_result").at("total_projects"), 0);
 }
 TEST(Endings, BankruptSettlementGoesNegativeAndSummaryFails) {
-    auto state = configure(start()); state["company"]["funds"] = 209999;
+    auto state = configure(start()); set_cash(state, 209999);
     state = advance(state).at("state");
     state = call(apc::calculate_result, {{"state", state}, {"scope", "project"}}).at("state");
     EXPECT_EQ(state.at("company").at("funds"), -190001);
@@ -829,8 +963,8 @@ TEST(ValidatorCompatibility, OptionalOfferCompanyAndCostFields) {
     offer["committee_members"] = Json::array({committee_member("publisher_a", 40), committee_member("publisher_b", 60)});
     offer["channel_potentials"] = {{"bd", 0}, {"publisher", 100}, {"toy", 20}, {"music", 30}, {"tv_broadcast", 40}};
     offer["required_works"] = Json::array({{{"rating", "A"}}, {{"rating", "A"}, {"source", "game"}}});
-    state["offers"][2]["min_reputation"] = 100;
-    state["offers"][3]["min_reputation"] = 200;
+    state["offers"][2]["min_reputation"] = 200;
+    state["offers"][3]["min_reputation"] = 300;
     state["company"]["finance"]["costs"]["development"] = 123;
     state["company"]["finance"]["costs"]["distribution"] = 456;
     expect_invalid_mutations(state, {
@@ -1266,7 +1400,7 @@ TEST(ValidatorCompatibility, ClosingAndEndedRejectEventsPreviewsAndInconsistentS
     });
     for (auto base : {idle, settled, ended}) {
         base["company"]["end_reason"] = "bankrupt";
-        base["company"]["funds"] = -1;
+        set_cash(base, -1);
         if (!base.at("company_result").is_null()) {
             base["company_result"]["reason"] = "bankrupt";
             base["company_result"]["final_funds"] = -1;
@@ -1308,7 +1442,7 @@ TEST(DynamicExecution, UnassignedDynamicStaffRestAndStaticStaffBeyondIndexFourWo
     state["project"]["temporary_staff"] = Json::array({dynamic_staff("unassigned_temp", "temporary")});
     state["project"]["finance"]["costs"]["temporary"] = 7500;
     state["company"]["finance"]["costs"]["temporary"] = 7500;
-    state["company"]["funds"] = 6000000 - 7500;
+    set_cash(state, 6000000 - 7500);
     state["project"]["stages"]["script"]["recommended_configuration"] = configuration(Json::array({assignment(known)}));
     state = configure(state);
     expect_validation(state, true);
@@ -1342,7 +1476,7 @@ TEST(DynamicExecution, ActiveOutsourcingAndCommitteeGameplayAreExplicitlyBlocked
         inactive["project"]["outsourcing"][0]["work_done"] = 10;
         inactive["project"]["finance"]["costs"]["outsourcing"] = 1230;
         inactive["company"]["finance"]["costs"]["outsourcing"] = 1230;
-        inactive["company"]["funds"] = 6000000 - 1230;
+        set_cash(inactive, 6000000 - 1230);
         expect_validation(inactive, true);
         const auto output = advance(inactive);
         EXPECT_EQ(output.at("report").at("costs").at("outsourcing"), 0);
@@ -1436,7 +1570,7 @@ TEST(DynamicExecution, RecordedCostsAffectProfitWithoutBeingChargedTwice) {
         costs["distribution"] = 888;
     }
     const std::int64_t recorded = 7500 + 1230 + 777 + 888;
-    ready["company"]["funds"] = ready.at("company").at("funds").get<std::int64_t>() - recorded;
+    set_cash(ready, ready.at("company").at("funds").get<std::int64_t>() - recorded);
     const auto funds = ready.at("company").at("funds");
     expect_validation(ready, true);
     const auto output = call(apc::calculate_result, {{"state", ready}, {"scope", "project"}});
@@ -1455,9 +1589,9 @@ TEST(DynamicExecution, RecordedCostsAffectProfitWithoutBeingChargedTwice) {
 
 TEST(DynamicExecution, AlreadyNegativeBankruptBalanceSettlesSafelyAndRemainsClosed) {
     auto state = configure(start());
-    state["company"]["funds"] = 209999;
+    set_cash(state, 209999);
     state = advance(state).at("state");
-    state["company"]["funds"] = -1;
+    set_cash(state, -1);
     expect_validation(state, true);
     const auto output = call(apc::calculate_result, {{"state", state}, {"scope", "project"}});
     const auto& settled = output.at("state");
@@ -1471,7 +1605,7 @@ TEST(DynamicExecution, AlreadyNegativeBankruptBalanceSettlesSafelyAndRemainsClos
     EXPECT_EQ(ended.at("company_result").at("final_funds"), -400001);
     EXPECT_EQ(ended.at("company_result").at("rating"), "failed");
     expect_validation(ended, true);
-    state["company"]["funds"] = -max_i;
+    set_cash(state, -max_i);
     expect_validation(state, true);
     const auto before = state.dump();
     expect_error(apc::calculate_result(Json{{"state", state}, {"scope", "project"}}.dump()), "INVALID_INPUT");
@@ -1540,4 +1674,161 @@ TEST(ValidatorCompatibility, ContractDeadlineMatchesItsOfferDuration) {
     short_project["project"]["deadline_week"] = 2;
     short_project["project"]["offer"]["duration_weeks"] = 2;
     expect_validation(short_project, true);
+}
+
+namespace {
+std::int64_t count_cash(const Json& state, const char* reason) {
+    std::int64_t total = 0;
+    for (const auto& entry : state.at("company").at("cash_log")) if (entry.at("reason") == reason) ++total;
+    return total;
+}
+Json last_cash(const Json& state) { return state.at("company").at("cash_log").back(); }
+std::int64_t cash(const Json& state) { return state.at("company").at("funds").get<std::int64_t>(); }
+}
+
+TEST(CashLedger, ContractBudgetIsTheOnlyIncomeAndTheChainClosesOnCurrentFunds) {
+    const auto state = play_weeks(configure(start()), 2);
+    const auto& log = state.at("company").at("cash_log");
+    ASSERT_TRUE(log.is_array());
+    ASSERT_FALSE(log.empty());
+    EXPECT_EQ(count_cash(state, "contract_budget"), 1);
+    EXPECT_EQ(count_cash(state, "weekly_production_costs"), state.at("company").at("week").get<std::int64_t>());
+    std::int64_t expected = apc::rules::initial_funds;
+    std::int64_t previous_week = 0;
+    for (const auto& entry : log) {
+        const auto amount = entry.at("amount").get<std::int64_t>();
+        ASSERT_NE(amount, 0);
+        EXPECT_EQ(entry.at("type") == "income", amount > 0);
+        EXPECT_EQ(entry.at("before").get<std::int64_t>(), expected);
+        EXPECT_EQ(entry.at("after").get<std::int64_t>(), expected + amount);
+        EXPECT_GE(entry.at("week").get<std::int64_t>(), previous_week);
+        EXPECT_LE(entry.at("week").get<std::int64_t>(), state.at("company").at("week").get<std::int64_t>());
+        previous_week = entry.at("week").get<std::int64_t>();
+        expected = entry.at("after").get<std::int64_t>();
+    }
+    EXPECT_EQ(expected, cash(state));
+    expect_validation(state, true);
+}
+
+TEST(CashLedger, ReasonDecidesSignAndProjectLink) {
+    const auto idle = advance(initialize());
+    const auto idle_entry = last_cash(idle.at("state"));
+    EXPECT_EQ(idle_entry.at("reason"), "weekly_fixed_costs");
+    EXPECT_EQ(idle_entry.at("type"), "expense");
+    EXPECT_LT(idle_entry.at("amount").get<std::int64_t>(), 0);
+    EXPECT_TRUE(idle_entry.at("project_id").is_null());
+    EXPECT_EQ(idle_entry.at("before").get<std::int64_t>(), apc::rules::initial_funds);
+    EXPECT_EQ(idle_entry.at("after").get<std::int64_t>(), cash(idle.at("state")));
+    EXPECT_EQ(idle_entry.at("amount").get<std::int64_t>(), idle.at("report").at("funds_delta").get<std::int64_t>());
+
+    const auto started = configure(start());
+    const auto& budget = started.at("company").at("cash_log").front();
+    EXPECT_EQ(budget.at("reason"), "contract_budget");
+    EXPECT_EQ(budget.at("type"), "income");
+    EXPECT_GT(budget.at("amount").get<std::int64_t>(), 0);
+    EXPECT_EQ(budget.at("project_id"), "proj_ova_01");
+
+    const auto producing = advance(started).at("state");
+    const auto week_entry = last_cash(producing);
+    EXPECT_EQ(week_entry.at("reason"), "weekly_production_costs");
+    EXPECT_EQ(week_entry.at("project_id"), "proj_ova_01");
+    EXPECT_EQ(week_entry.at("before").get<std::int64_t>(), cash(started));
+}
+
+TEST(CashLedger, DeadlinePenaltyIsRecordedOnceAgainstItsProject) {
+    auto soon = configure(start());
+    soon["project"]["deadline_week"] = 2;
+    soon["project"]["offer"]["duration_weeks"] = 2;
+    const auto late = play_weeks(soon, 2);
+    ASSERT_EQ(late.at("phase").get<std::string>(), "project_ready");
+    ASSERT_EQ(late.at("project").at("delivery_reason").get<std::string>(), "deadline");
+    const auto settled = call(apc::calculate_result, {{"state", late}, {"scope", "project"}}).at("state");
+    const auto penalty = last_cash(settled);
+    EXPECT_EQ(penalty.at("reason"), "deadline_penalty");
+    EXPECT_EQ(penalty.at("type"), "expense");
+    EXPECT_LT(penalty.at("amount").get<std::int64_t>(), 0);
+    EXPECT_EQ(penalty.at("project_id"), "proj_ova_01");
+    EXPECT_EQ(penalty.at("before").get<std::int64_t>(), cash(late));
+    EXPECT_EQ(penalty.at("after").get<std::int64_t>(), cash(settled));
+    EXPECT_EQ(count_cash(settled, "deadline_penalty"), 1);
+    const auto snapshot = settled.dump();
+    expect_error(apc::calculate_result(Json{{"state", settled}, {"scope", "project"}}.dump()), "INVALID_PHASE");
+    EXPECT_EQ(settled.dump(), snapshot);
+    expect_validation(settled, true);
+}
+
+TEST(CashLedger, CompanyClosurePenaltyIsRecordedAgainstTheProjectItClosed) {
+    auto broke = configure(start());
+    set_cash(broke, 209999);
+    const auto closed = advance(broke).at("state");
+    const auto settled = call(apc::calculate_result, {{"state", closed}, {"scope", "project"}}).at("state");
+    const auto entry = last_cash(settled);
+    EXPECT_EQ(entry.at("reason"), "closure_penalty");
+    EXPECT_EQ(entry.at("project_id"), "proj_ova_01");
+    EXPECT_LT(entry.at("amount").get<std::int64_t>(), 0);
+    EXPECT_EQ(entry.at("before").get<std::int64_t>(), cash(closed));
+    EXPECT_EQ(entry.at("after").get<std::int64_t>(), cash(settled));
+    EXPECT_EQ(settled.at("company").at("cash_log").size(), 1U);
+    expect_validation(settled, true);
+}
+
+TEST(CashLedger, BankruptcyPrecheckChangesNeitherCashNorLedger) {
+    auto broke = configure(start());
+    set_cash(broke, 209999);
+    const auto output = advance(broke);
+    const auto next = output.at("state");
+    EXPECT_EQ(next.at("company").at("status"), "closing");
+    EXPECT_EQ(next.at("company").at("end_reason"), "bankrupt");
+    EXPECT_EQ(cash(next), 209999);
+    EXPECT_EQ(next.at("company").at("week"), broke.at("company").at("week").get<std::int64_t>());
+    EXPECT_EQ(output.at("report").at("funds_delta").get<std::int64_t>(), 0);
+    EXPECT_TRUE(next.at("company").at("cash_log").empty());
+    EXPECT_EQ(count_cash(next, "weekly_fixed_costs") + count_cash(next, "weekly_production_costs"), 0);
+    expect_validation(next, true);
+}
+
+TEST(CashLedger, SameSeedSameActionsReproduceTheOriginalCashResults) {
+    const auto first = advance(configure(start())).at("state");
+    EXPECT_EQ(cash(first), 5790000);
+    const auto replay = advance(configure(start())).at("state");
+    EXPECT_EQ(replay.at("company").at("funds"), first.at("company").at("funds"));
+    EXPECT_EQ(replay.at("company").at("cash_log"), first.at("company").at("cash_log"));
+    EXPECT_EQ(replay.at("company").at("finance"), first.at("company").at("finance"));
+    auto soon = configure(start());
+    soon["project"]["deadline_week"] = 2;
+    soon["project"]["offer"]["duration_weeks"] = 2;
+    const auto settled = call(apc::calculate_result,
+        {{"state", play_weeks(soon, 2)}, {"scope", "project"}}).at("state");
+    EXPECT_EQ(cash(settled), last_cash(settled).at("after").get<std::int64_t>());
+    expect_validation(settled, true);
+}
+
+TEST(CashLedger, TamperedLedgersAreRejectedWithoutAnyWrite) {
+    const auto state = advance(configure(start())).at("state");
+    expect_invalid_mutations(state, {
+        [](Json& s) { s["company"]["cash_log"][0]["amount"] = 1; },
+        [](Json& s) { s["company"]["cash_log"][0]["after"] = max_i; },
+        [](Json& s) { s["company"]["cash_log"][0]["reason"] = "unknown_cash"; },
+        [](Json& s) { s["company"]["cash_log"][0]["type"] = "expense"; },
+        [](Json& s) { s["company"]["cash_log"][0]["project_id"] = ""; },
+        [](Json& s) { s["company"]["cash_log"][1]["week"] = 9; },
+        [](Json& s) { s["company"]["cash_log"].push_back(s["company"]["cash_log"][0]); },
+        [](Json& s) { s["company"]["cash_log"][1] = nullptr; },
+        [](Json& s) { s["company"]["funds"] = 2000000; }
+    });
+}
+
+TEST(CashLedger, SavesWithoutALedgerStayPlayableAndStartRecordingFromNow) {
+    auto state = advance(configure(start())).at("state");
+    state["company"].erase("cash_log");
+    expect_validation(state, true);
+    const auto next = advance(state).at("state");
+    EXPECT_EQ(next.at("company").at("cash_log").size(), 1U);
+    const auto entry = last_cash(next);
+    EXPECT_EQ(entry.at("before").get<std::int64_t>(), cash(state));
+    EXPECT_EQ(entry.at("after").get<std::int64_t>(), cash(next));
+    expect_validation(next, true);
+    auto null_ledger = state;
+    null_ledger["company"]["cash_log"] = nullptr;
+    expect_validation(null_ledger, true);
 }
