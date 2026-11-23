@@ -41,12 +41,25 @@ class StochasticProductionTests(unittest.TestCase):
         }
         self.assertGreater(len(values), 1)
 
-    def test_quality_dimensions_are_bounded(self):
-        result = sim.run_once(self.people, "all_staff", 60, 14, "work_and_quality", 42)
-        self.assertEqual(set(result["quality"]), set(sim.DIMENSIONS))
-        for value in result["quality"].values():
-            self.assertGreaterEqual(value, 0)
-            self.assertLessEqual(value, 100)
+    def test_expected_dimension_probabilities_match_random_draw_mean(self):
+        person = self.people[0]
+        probabilities = sim.expected_dimension_probabilities("storyboard", person)
+        self.assertEqual(set(probabilities), set(sim.STAGE_DIMENSIONS["storyboard"]))
+        self.assertTrue(all(0 < value < 1 for value in probabilities.values()))
+        self.assertGreater(sum(probabilities.values()), 1.0)
+        self.assertLess(sum(probabilities.values()), 1.45)
+
+    def test_quality_dimensions_are_bounded_and_randomized(self):
+        results = [
+            sim.run_once(self.people, "all_staff", 30, 14, "work_and_quality", seed)
+            for seed in range(20, 60)
+        ]
+        self.assertEqual(set(results[0]["quality"]), set(sim.DIMENSIONS))
+        for result in results:
+            for value in result["quality"].values():
+                self.assertGreaterEqual(value, 0)
+                self.assertLessEqual(value, 100)
+        self.assertGreater(len({r["quality"]["art"] for r in results}), 1)
 
 if __name__ == "__main__":
     unittest.main()
