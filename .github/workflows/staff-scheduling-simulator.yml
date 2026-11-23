@@ -4,7 +4,9 @@ on:
     paths:
       - "scripts/staff_scheduling_simulator.py"
       - "scripts/tests/test_staff_scheduling_simulator.py"
+      - "scripts/tests/test_staff_template_experiments.py"
       - "scripts/fixtures/staff_templates.json"
+      - "scripts/fixtures/staff_template_experiments*.json"
   workflow_dispatch:
 jobs:
   test:
@@ -14,5 +16,6 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: python -m unittest scripts.tests.test_staff_scheduling_simulator -v
-      - run: python scripts/staff_scheduling_simulator.py --deadline 14 --workloads 30,60,90,120
+      - run: python -m unittest scripts.tests.test_staff_scheduling_simulator scripts.tests.test_staff_template_experiments -v
+      - run: python scripts/staff_scheduling_simulator.py --staff-file scripts/fixtures/staff_templates.json --deadline 14 --workloads 30,60,90,120
+      - run: python scripts/staff_scheduling_simulator.py --staff-file scripts/fixtures/staff_template_experiments_15.json --deadline 14 --workloads 30,60,90,120
