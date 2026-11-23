@@ -1,0 +1,23 @@
+name: Stochastic production experiment
+on:
+  pull_request:
+    paths:
+      - "scripts/stochastic_production_simulator.py"
+      - "scripts/tests/test_stochastic_production_simulator.py"
+      - "scripts/staff_scheduling_simulator.py"
+      - "scripts/fixtures/staff_templates.json"
+  workflow_dispatch:
+jobs:
+  experiment:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m unittest scripts.tests.test_stochastic_production_simulator -v
+      - run: python scripts/stochastic_production_simulator.py --staff-file scripts/fixtures/staff_templates.json --workloads 30,60,90 --runs 200 --deadline 14 --seed 20261123 --out simulation-output/stochastic-production.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: stochastic-production-results
+          path: simulation-output/stochastic-production.json
