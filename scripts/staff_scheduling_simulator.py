@@ -82,7 +82,7 @@ def simulate(strategy,people,workloads,deadline):
     return Result(strategy,done,outcome,weeks,deadline,total,round(avg,2),stage_weeks,stage_quality,fatigue,morale,usage)
 
 def main():
-    ap=argparse.ArgumentParser(); ap.add_argument("--staff-file",type=Path,default=Path("staff_templates.json"))
+    ap=argparse.ArgumentParser(); ap.add_argument("--staff-file",type=Path,default=Path("scripts/fixtures/staff_templates.json"))
     ap.add_argument("--deadline",type=int,default=14); ap.add_argument("--workload",type=int,default=30)
     ap.add_argument("--out",type=Path,default=Path("simulation-output/staff-scheduling")); a=ap.parse_args()
     people=load_staff(a.staff_file); workloads={s:a.workload for s,_,_ in STAGES}
