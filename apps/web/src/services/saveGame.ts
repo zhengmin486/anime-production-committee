@@ -21,15 +21,28 @@ function openDatabase(): Promise<IDBDatabase> {
   })
 }
 
-export async function saveGame(state: GameState): Promise<void> {
+export type SaveOutcome = 'saved' | 'occupied'
+
+// 单槽手动存档：槽位已被占用时默认不覆盖，存在性检查与写入在同一事务内完成。
+export async function saveGame(state: GameState, overwrite = false): Promise<SaveOutcome> {
   if (!isGameState(state)) throw new Error('经营数据无效，无法保存。')
+  const record = { version: 3, savedAt: new Date().toISOString(), state } satisfies SaveRecord
   const database = await openDatabase()
   try {
-    await new Promise<void>((resolve, reject) => {
+    return await new Promise<SaveOutcome>((resolve, reject) => {
       const transaction = database.transaction(storeName, 'readwrite')
-      transaction.objectStore(storeName).put({ version: 3, savedAt: new Date().toISOString(), state } satisfies SaveRecord, 'current')
-      transaction.oncomplete = () => resolve()
-      transaction.onabort = () => reject(transaction.error ?? new Error('保存失败'))
+      const store = transaction.objectStore(storeName)
+      const existing = store.get('current')
+      let occupied = false
+      existing.onsuccess = () => {
+        occupied = existing.result !== undefined
+        if (occupied && !overwrite) transaction.abort()
+        else store.put(record, 'current')
+      }
+      transaction.oncomplete = () => resolve('saved')
+      transaction.onabort = () => occupied && !overwrite
+        ? resolve('occupied')
+        : reject(transaction.error ?? new Error('保存失败'))
       transaction.onerror = () => reject(transaction.error ?? new Error('保存失败'))
     })
   } finally {
