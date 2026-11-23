@@ -958,12 +958,12 @@ describe('M2 契约扩展第二批：企划槽位、委员会渠道、成本类�
 
   it('报价的拟定阵容与渠道潜力、成绩解锁字段执行结构约束', () => {
     const offer = baseOffer()
-    expect(isProjectOffer({ ...offer, committee_members: [member('m1', 50, ['toy']), member('m2', 40, ['publisher', 'tv_broadcast'])] })).toBe(true)
-    expect(isProjectOffer({ ...offer, allowed_modes: ['contract'], committee_members: [member('m1', 50, ['toy'])] })).toBe(false)
+    expect(isProjectOffer({ ...offer, committee_members: [member('m1', 'toy'), member('m2', 'publisher')] })).toBe(true)
+    expect(isProjectOffer({ ...offer, allowed_modes: ['contract'], committee_members: [member('m1', 'toy')] })).toBe(false)
     expect(isProjectOffer({ ...offer, committee_members: [] })).toBe(false)
-    expect(isProjectOffer({ ...offer, committee_members: [member('m1', 50, ['bd'])] })).toBe(false)
-    expect(isProjectOffer({ ...offer, committee_members: [member('m1', 0, ['toy'])] })).toBe(false)
-    expect(isProjectOffer({ ...offer, committee_members: [member('m1', 50, ['toy']), member('m1', 40, ['music'])] })).toBe(false)
+    expect(isProjectOffer(changed({ ...offer, committee_members: [member('m1', 'toy')] }, 'committee_members.0.channel', 'bd'))).toBe(false)
+    expect(isProjectOffer(changed({ ...offer, committee_members: [member('m1', 'toy')] }, 'committee_members.0.share_percent', 50))).toBe(false)
+    expect(isProjectOffer({ ...offer, committee_members: [member('m1', 'toy'), member('m1', 'music')] })).toBe(false)
     expect(isProjectOffer({ ...offer, channel_potentials: { bd: 60 } })).toBe(true)
     expect(isProjectOffer({ ...offer, channel_potentials: { bd: 60, publisher: 99, toy: 0, music: 40, tv_broadcast: 10 } })).toBe(true)
     expect(isProjectOffer({ ...offer, channel_potentials: { toy: 30 } })).toBe(false)
