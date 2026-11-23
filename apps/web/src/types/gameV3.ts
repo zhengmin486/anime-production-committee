@@ -81,6 +81,14 @@ export interface Staff {
   departure_warning: boolean
 }
 
+// 声望历史：追加式账本，每条记录一次业务动作的实际生效变化。见 DATA_MODEL Company.reputation_log。
+export interface ReputationChange {
+  week: number
+  reason: string
+  delta: number
+  reputation_after: number
+}
+
 // M2 扩展字段（origin/style/min_reputation/scout_pity 及 V3.7 渠道/槽位字段）在 #6/#7/#8
 // 核心实现落地前可选：缺省按旧语义解释，M1 核心输出与既有 v3 存档保持合法。见 DATA_MODEL V3.6/V3.7。
 export interface Company {
@@ -93,6 +101,7 @@ export interface Company {
   staff: Staff[]
   finance: Finance
   scout_pity?: { since_sr: number; since_ssr: number }
+  reputation_log?: ReputationChange[]
 }
 
 export interface ProjectOffer {
@@ -390,12 +399,32 @@ export function isStaff(value: unknown): value is Staff {
     && score(value.fatigue) && score(value.morale) && bool(value.departure_warning)
 }
 
+export const isReputationChange = (value: unknown): value is ReputationChange =>
+  isRecord(value) && week(value.week) && isText(value.reason) && signed(value.delta) && value.delta !== 0 && integer(value.reputation_after)
+
+// 声望账本按追加顺序校验：周次不回退、逐笔前后值衔接、末笔结果等于当前声望；字段缺席即没有历史。
+export function isReputationLog(value: unknown, reputation: number): boolean {
+  if (!arrayOf(value, isReputationChange)) return false
+  let expected = reputation
+  let latest = 520
+  for (let index = value.length - 1; index >= 0; --index) {
+    const entry = value[index]
+    if (entry.week > latest || entry.reputation_after !== expected) return false
+    const before = expected - entry.delta
+    if (!Number.isSafeInteger(before) || before < 0) return false
+    expected = before
+    latest = entry.week
+  }
+  return true
+}
+
 export function isCompany(value: unknown): value is Company {
   if (!isRecord(value) || !week(value.week) || !choice(value.status, ['running', 'closing', 'ended'])
     || !integer(value.initial_funds) || !signed(value.funds) || !integer(value.reputation)
     || !arrayOf(value.staff, isStaff) || !uniqueIds(value.staff) || !value.staff.every((staff) => staff.employment === 'core')
     || !isFinance(value.finance)
-    || !(value.scout_pity === undefined || (isRecord(value.scout_pity) && integer(value.scout_pity.since_sr) && integer(value.scout_pity.since_ssr)))) return false
+    || !(value.scout_pity === undefined || (isRecord(value.scout_pity) && integer(value.scout_pity.since_sr) && integer(value.scout_pity.since_ssr)))
+    || !(value.reputation_log === undefined || isReputationLog(value.reputation_log, value.reputation))) return false
   if (value.status === 'running') return value.end_reason === null && value.funds >= 0 && value.week < 520
   return isCompanyEndReason(value.end_reason) && (value.funds >= 0 || value.end_reason === 'bankrupt')
     && (value.end_reason !== 'time_limit' || value.week === 520)

@@ -10,7 +10,7 @@ V2 是旧版纵向切片；V3 是当前目标协议。M1 已在 C++/WASM 实现�
 
 | 导出 | 请求 | 成功响应 | 条件 |
 | --- | --- | --- | --- |
-| initialize_game | `{seed}` | `{state,message}` | 根据 seed 创建新公司，week=0、running/idle、四企划；返回生成后的 seed |
+| initialize_game | `{seed}` | `{state,message}` | 根据 seed 创建新公司，week=0、running/idle、四企划、声望 100 与空 reputation_log；返回生成后的 seed |
 | start_project | `{state,offer_id,mode,investment_percent}` | `{state,message}` | running idle；报价必须在当前四个市场选项或 custom_offer 槽（未采纳的员工提案不可直接接）。contract 投资 0；committee 投资整数 10–100；原创只能 committee |
 | apply_decision | `{state,decision}` | `{state,message}` | 按下表分支校验，不存在通用任意改字段接口 |
 | advance_week | `{state}` | `{state,report}` | running idle，或 producing 且当前阶段 active；推进恰一周，费用不足转关闭成功响应，不伪造已完成一周 |
@@ -78,6 +78,12 @@ V2 是旧版纵向切片；V3 是当前目标协议。M1 已在 C++/WASM 实现�
 | closing 且 project=null | calculate_result(company) | ended/company_ended，永久总结；不能接企划、推进或再次结算 |
 
 关闭状态的优先级见 GAME_RULES。company_ended 只能由 UI 保存/读取/返回首页/明确新开公司；这些不是修改终局的核心经营动作。纯函数核心无法阻止调用者重放旧快照，但同一返回状态不可二次结算，store 仍须 busy 防重复并整体替换。
+
+### 声望写入边界（2026-11-23，#4 公司经营层）
+
+公司声望只有公司经营层能改。核心内唯一入口 `change_reputation(state, delta, reason)`：先算前后值，负向变化向下钳到 0，正向不设数值上限（仍受安全整数约束），钳制后没有实际变化就不写记录；生效的变化以 `{week, reason, delta, reputation_after}` 追加进 `company.reputation_log`，`delta` 是实际生效值而非请求值。M1 已接通的写入节点是 `calculate_result(scope=project)`：`completed` 且达 `target_quality` 记 `project_settled_success`，未达记 `project_settled_below_target`，`deadline` 记 `project_settled_deadline`，`company_closed` 按 GAME_RULES V3.9 §1 不产生声望变化。三档数值仍是 `game_rules.hpp` 的 M1 暂定值，待 #6/#8 平衡评审。
+
+其它模块只能在自身结算节点给出 `reputation_delta` 与原因，由该入口统一入账，不得直接写 `company.reputation`，也不得改动其它模块状态。同一 `project_ready` 快照不可二次结算，因此一次交付不会重复记账。事件结果、企划生成、招募、供应商解锁与委员会融资规模等声望影响路径尚未实现。
 
 ## V3.4 跨端样例与交接
 

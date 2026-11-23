@@ -23,7 +23,7 @@
 | 对象 | 必填字段 | 产生时机与约束 |
 | --- | --- | --- |
 | GameState | version=3, seed, phase, company, offers, recruitment_pool, suppliers, project, pending_event, history, last_project_id, company_result, preview | 初始化建立全部字段；无项目/事件/最近结算/总结/预览时用 null。历史与外部资源池可空；running idle 恰有四企划；可选 custom_offer/pending_proposal 独立槽位不占市场四槽（V3.7） |
-| Company | week, status, end_reason, initial_funds, funds, reputation, staff, finance；可选 scout_pity | status=running/closing/ended；仅 running 的理由为 null，其他为 time_limit/bankrupt/voluntary；核心名册可空，人数与能力不固定；初始化名册由核心生成；scout_pity={since_sr,since_ssr} 非负整数保底计数，缺省按 0/0 |
+| Company | week, status, end_reason, initial_funds, funds, reputation, staff, finance；可选 scout_pity, reputation_log | status=running/closing/ended；仅 running 的理由为 null，其他为 time_limit/bankrupt/voluntary；核心名册可空，人数与能力不固定；初始化名册由核心生成；reputation 初始化 100、下限 0、不设数值上限、不随时间衰减；scout_pity={since_sr,since_ssr} 非负整数保底计数，缺省按 0/0 |
 | Finance | contract_received, investment_paid, commercial_share_received, costs；可选 success_reward_received | 均为非负实际累计收支；success_reward_received 为委托方支付的承制成功奖励，缺省按 0 兼容旧状态，委员会项目为 0；投资不再计入成本。公司层全生命周期、项目层项目区间，同一笔交易的两个汇总视图，不重复改变现金 |
 | Costs | salary, operations, production, temporary, outsourcing, events, extension, penalty；可选 development, distribution | 八类均出现，无支出填 0；依次为核心工资、固定运营、阶段直接费用、临时合同、外包、独立付费事件、延期费、扣罚。同一笔只归一类。M2 可选 development（前期开发费）与 distribution（付费播出发行支出），核心落地前缺省按 0，见 V3.7 |
 | Staff | id, name, role, employment, abilities, experience, potential, revealed_potential, talent_type, clues, traits, weekly_salary, project_fee, fatigue, morale, departure_warning | employment=core/temporary；核心 project_fee=0，临时 weekly_salary=0。前三个能力对象含六项数值，revealed_potential 含六个布尔值；潜力不低于当前能力，线索 1–2 条，traits 可空；warning 仅预警 |
@@ -76,9 +76,12 @@
 | style | ProjectOffer / WorkRecord | 'normal'\|'meme'\|'ai'，缺省 normal | 非 normal 必须 origin=custom；meme 限定 scale=short；市场/上门/提案报价恒 normal |
 | min_reputation | ProjectOffer | 非负整数，缺省 0 | 声望不足仍展示并锁定；running idle 至少 2 个报价 min_reputation≤声望（守卫强制，执行 #1 决策 1） |
 | scout_pity | Company | {since_sr,since_ssr} 非负整数，缺省 0/0 | 抽卡保底计数，随存档持久，终局不重置；普池与定向池共享 |
+| reputation_log | Company | {week, reason, delta, reputation_after}[] 追加式，缺省无历史 | 声望唯一写入点入账：delta 是钳到 0 之后实际生效的变化的非零值，reason 为稳定 ID 字符串；末笔 reputation_after 必须等于当前声望，逐笔前后值衔接、周次不回退。2026-11-23 #4 负责人批准的声望基础机制已在 C++ 与两端守卫落地，缺席的旧 v3 存档仍合法、不迁移 |
 | scout / targeted_scout | Decision | scout 无参数；targeted_scout 的 role 与 focus_ability 二选一 | 仅 running idle 或 project_settled（与 hire_core 同经营窗口）；费用、稀有度阈值、保底次数进 game_rules.hpp，不在契约 |
 
 **可选字段纪律（修订 V3.2「均必填」）：** 上表字段在 #6/#7 核心实现落地前可选，缺省按表内语义解释。理由：契约先行冻结目标形状，M1 核心输出与既有 v3 存档必须保持合法，不引入存档迁移。核心实现落地后应统一输出这些字段；守卫对存在值执行完整校验。除此之外不得自行新增可选状态字段；V3.7 的第二批字段为负责人 2026-11-22 裁定的已批准扩展，沿用同一纪律。
+
+表内 `reputation_log` 的核心实现已于 2026-11-23 落地：`initialize_game` 输出空数组，此后只在声望发生实际变化的结算节点追加，字段写法只有缺席与数组两种，null 不合法（与 `scout_pity` 同一口径）；表内其余字段仍按上述纪律保持可选。
 
 **暂缓与待决（已由 V3.7 处置）：** 本节的 create_custom_offer 决策、员工提案采纳/拒绝、自定/提案企划的状态存放与生命周期、前期开发费用 ledger 归属、成绩类解锁字段与 09:16 渠道框架对分成语义的修订，负责人 2026-11-22 裁定「全部按新口径」，已在 V3.7 落地为可选契约字段，规则口径见 GAME_RULES V3.8。仍待定的是全部数值平衡与 #6/#7/#8 核心行为。
 

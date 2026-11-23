@@ -4,7 +4,7 @@ import {
   ABILITIES, CORE_METHODS, COST_CATEGORIES, STAGES, isCompanyResult, isCoreError, isCoreRequest, isCoreResponse,
   isDecision, isGameState, isOutsourceTask, isProjectOffer, isStageConfiguration, isStateResponse, isSupplier, isWeekReport, isWorkRecord,
 } from './gameV3'
-import type { CommitteeMember, CoreMethod, CoreRequests, CoreResponses, Decision, GameState, OutsourceTask, StageConfiguration, Staff } from './gameV3'
+import type { CommitteeMember, CoreMethod, CoreRequests, CoreResponses, Decision, GameState, OutsourceTask, ReputationChange, StageConfiguration, Staff } from './gameV3'
 
 // 以 unknown 构造损坏的外部 JSON；不修改夹具本身，也不强转为被测模型。
 function changed(source: unknown, path: string, value: unknown, remove = false): unknown {
@@ -769,6 +769,77 @@ describe('周回执与手算现金账（不在生产 validator 复制规则）',
   })
 })
 
+describe('公司声望基础机制：初始 100、下限 0、无上限与追加式账本', () => {
+  const entry = (week: number, reason: string, delta: number, reputation_after: number): ReputationChange => ({ week, reason, delta, reputation_after })
+  // 历史是 optional 字段，基础样本不预置；需要账本时按结算结果显式追加。
+  function settledLogged(...extra: ReputationChange[]): GameState {
+    const state = v3SettledState()
+    state.company.reputation_log = [entry(5, 'project_settled_success', 10, 110), ...extra]
+    return state
+  }
+
+  it('初始样本 100；负数与非法数值拒绝，安全整数上限不是额外封顶', () => {
+    expect(v3IdleState().company.reputation).toBe(100)
+    for (const invalid of [-1, -100, 0.5, NaN, '100', null]) {
+      expect(isGameState(changed(v3IdleState(), 'company.reputation', invalid)), String(invalid)).toBe(false)
+    }
+    // 声望规则变更之前写出的存档仍可读取，不要求迁移。
+    expect(isGameState(changed(v3IdleState(), 'company.reputation', 0))).toBe(true)
+    expect(isGameState(changed(v3IdleState(), 'company.reputation', Number.MAX_SAFE_INTEGER))).toBe(true)
+  })
+
+  it('账本逐笔衔接：末笔等于当前声望，周次不回退，原因非空且 delta 非零', () => {
+    const state = settledLogged()
+    expect(isGameState(state)).toBe(true)
+    expect(state.company.reputation_log).toEqual([entry(5, 'project_settled_success', 10, 110)])
+    expect(isGameState(changed(state, 'company.reputation_log.0.reputation_after', 109))).toBe(false)
+    expect(isGameState(changed(state, 'company.reputation_log.0.delta', 0))).toBe(false)
+    expect(isGameState(changed(state, 'company.reputation_log.0.reason', '   '))).toBe(false)
+    expect(isGameState(changed(state, 'company.reputation_log.0.week', 521))).toBe(false)
+    expect(isGameState(changed(state, 'company.reputation_log.0.week', -1))).toBe(false)
+    for (const key of ['week', 'reason', 'delta', 'reputation_after']) {
+      expect(isGameState(changed(state, `company.reputation_log.0.${key}`, undefined, true)), key).toBe(false)
+    }
+    // 空账本只表示没有记账；字段缺席兼容旧存档；null 不是可选字段的合法写法。
+    expect(isGameState(changed(state, 'company.reputation_log', []))).toBe(true)
+    expect(isGameState(changed(state, 'company.reputation_log', undefined, true))).toBe(true)
+    expect(isGameState(changed(state, 'company.reputation_log', null))).toBe(false)
+    expect(isGameState(changed(state, 'company.reputation_log', {}))).toBe(false)
+    expect(isGameState(changed(state, 'company.reputation_log.0', 'x'))).toBe(false)
+  })
+
+  it('多笔历史按追加顺序回溯，插队、乱序或越出下限一律拒绝', () => {
+    const state = settledLogged(entry(5, 'project_settled_deadline', -5, 105))
+    state.company.reputation = 105
+    expect(isGameState(state)).toBe(true)
+    const swapped = settledLogged()
+    swapped.company.reputation = 105
+    swapped.company.reputation_log = [entry(5, 'project_settled_deadline', -5, 105), entry(5, 'project_settled_success', 10, 110)]
+    expect(isGameState(swapped)).toBe(false)
+    const regressed = settledLogged(entry(4, 'project_settled_deadline', -5, 105))
+    regressed.company.reputation = 105
+    expect(isGameState(regressed)).toBe(false)
+    // 记录暗示的变更前值不得为负，也不得越出安全整数。
+    const belowZero = v3IdleState()
+    belowZero.company.reputation = 5
+    belowZero.company.reputation_log = [entry(5, 'project_settled_success', 10, 5)]
+    expect(isGameState(belowZero)).toBe(false)
+    const aboveCeiling = v3IdleState()
+    aboveCeiling.company.reputation = Number.MAX_SAFE_INTEGER
+    aboveCeiling.company.reputation_log = [entry(5, 'project_settled_deadline', -Number.MAX_SAFE_INTEGER, Number.MAX_SAFE_INTEGER)]
+    expect(isGameState(aboveCeiling)).toBe(false)
+  })
+
+  it('声望只在结算节点变化：制作中与交付样本不带未衔接的历史', () => {
+    expect(v3ProducingState().company.reputation_log).toBeUndefined()
+    expect(v3ReadyState().company.reputation_log).toBeUndefined()
+    const ready = v3ReadyState()
+    ready.company.reputation_log = [entry(5, 'project_settled_success', 10, 110)]
+    expect(isGameState(ready)).toBe(false)
+    expect(isGameState(changed(settledLogged(), 'company.reputation_log.0.reason', 'event:v3_event'))).toBe(true)
+  })
+})
+
 describe('M2 契约扩展：origin/style/min_reputation/scout（可选字段与缺省语义）', () => {
   function extendedIdle(): GameState {
     const state = v3IdleState()
@@ -811,12 +882,12 @@ describe('M2 契约扩展：origin/style/min_reputation/scout（可选字段与�
     const state = v3IdleState()
     state.offers[0].min_reputation = 0
     state.offers[1].min_reputation = 0
-    state.offers[2].min_reputation = 10
-    state.offers[3].min_reputation = 20
+    state.offers[2].min_reputation = 120
+    state.offers[3].min_reputation = 200
     expect(isGameState(state)).toBe(true)
-    state.offers[1].min_reputation = 5
+    state.offers[1].min_reputation = 110
     expect(isGameState(state)).toBe(false)
-    state.company.reputation = 20
+    state.company.reputation = 200
     expect(isGameState(state)).toBe(true)
   })
 

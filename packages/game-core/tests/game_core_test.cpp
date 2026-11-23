@@ -208,7 +208,8 @@ TEST(Initialize, V3CompanyStateAndFourOffers) {
         EXPECT_EQ(state.at("company").at("week"), 0); EXPECT_EQ(state.at("company").at("status"), "running");
         EXPECT_TRUE(state.at("company").at("end_reason").is_null());
         EXPECT_EQ(state.at("company").at("funds"), 2000000); EXPECT_EQ(state.at("company").at("initial_funds"), 2000000);
-        EXPECT_EQ(state.at("company").at("reputation"), 0); EXPECT_EQ(state.at("company").at("staff").size(), 4U);
+        EXPECT_EQ(state.at("company").at("reputation"), 100); EXPECT_EQ(state.at("company").at("staff").size(), 4U);
+    EXPECT_TRUE(state.at("company").at("reputation_log").is_array()); EXPECT_TRUE(state.at("company").at("reputation_log").empty());
         EXPECT_EQ(state.at("offers").size(), 4U); EXPECT_TRUE(state.at("project").is_null());
         EXPECT_TRUE(state.at("pending_event").is_null()); EXPECT_TRUE(state.at("history").empty());
         EXPECT_TRUE(state.at("recruitment_pool").empty()); EXPECT_TRUE(state.at("suppliers").empty());
@@ -419,7 +420,8 @@ TEST(CalculateResult, DeadlinePenaltyGolden) {
     EXPECT_EQ(receipt.at("id"), "proj_ova_01");
     EXPECT_EQ(receipt.at("team").size(), 4U);
     EXPECT_EQ(output.at("state").at("company").at("funds"), 4780000);
-    EXPECT_EQ(output.at("state").at("company").at("reputation"), 0);
+    EXPECT_EQ(output.at("state").at("company").at("reputation"), 95);
+    EXPECT_EQ(output.at("state").at("company").at("reputation_log").size(), 1U);
     EXPECT_EQ(output.at("state").at("phase"), "project_settled");
     EXPECT_TRUE(output.at("state").at("project").is_null());
     EXPECT_EQ(output.at("state").at("last_project_id"), "proj_ova_01");
@@ -445,6 +447,230 @@ TEST(CalculateResult, InvariantsAndReturnToMarket) {
     expect_error(apc::calculate_result(Json{{"state", start()}, {"scope", "company"}}.dump()), "INVALID_PHASE");
     expect_error(apc::calculate_result(Json{{"state", initialize()}, {"scope", "unknown"}}.dump()), "INVALID_INPUT");
     expect_error(apc::calculate_result(Json{{"state", initialize()}, {"scope", "company"}}.dump()), "INVALID_PHASE");
+}
+namespace {
+// 五阶段各 1 工作量、19 周工期：能在截止周前跑完全部阶段，交付原因为 completed。
+Json completed_ready(std::uint32_t seed = 12345, const char* id = "dynamic_reputation", int target_quality = 1) {
+    auto idle = initialize(seed);
+    auto offer = dynamic_offer(id);
+    offer["target_quality"] = target_quality;
+    idle["offers"][0] = offer;
+    expect_validation(idle, true);
+    const auto state = call(apc::start_project, {{"state", idle}, {"offer_id", id}, {"mode", "contract"}, {"investment_percent", 0}}).at("state");
+    return play_until_ready(state);
+}
+// 两周工期配实际需要的周数：必然按 deadline 违约交付，用于覆盖负向变化。
+Json deadline_ready(Json idle = initialize()) {
+    auto state = configure(call(apc::start_project, {{"state", idle}, {"offer_id", "proj_ova_01"}, {"mode", "contract"}, {"investment_percent", 0}}).at("state"));
+    state["project"]["deadline_week"] = 2;
+    state["project"]["offer"]["duration_weeks"] = 2;
+    return play_weeks(state, 2);
+}
+Json closed_ready() {
+    auto state = play_weeks(configure(start()), 1);
+    return call(apc::apply_decision, {{"state", state}, {"decision", {{"type", "end_company"}}}}).at("state");
+}
+}
+TEST(Reputation, InitialValueIsOneHundred) {
+    for (auto seed : {0U, 12345U, 0xffffffffU}) {
+        const auto state = initialize(seed);
+        EXPECT_EQ(state.at("company").at("reputation"), 100);
+        expect_validation(state, true);
+    }
+}
+TEST(Reputation, CompletedSettlementAboveTargetAddsTen) {
+    const auto ready = completed_ready();
+    EXPECT_EQ(ready.at("project").at("delivery_reason"), "completed");
+    const auto output = call(apc::calculate_result, {{"state", ready}, {"scope", "project"}});
+    EXPECT_GE(output.at("result").at("quality_score"), 1);
+    EXPECT_EQ(output.at("state").at("company").at("reputation"), 110);
+    expect_validation(output.at("state"), true);
+}
+TEST(Reputation, CompletedSettlementBelowTargetAddsThree) {
+    const auto ready = completed_ready(12345, "dynamic_below_target", 100);
+    EXPECT_EQ(ready.at("project").at("delivery_reason"), "completed");
+    const auto output = call(apc::calculate_result, {{"state", ready}, {"scope", "project"}});
+    EXPECT_LT(output.at("result").at("quality_score"), 100);
+    EXPECT_EQ(output.at("state").at("company").at("reputation"), 103);
+    expect_validation(output.at("state"), true);
+}
+TEST(Reputation, DeadlineSettlementSubtractsFive) {
+    const auto ready = deadline_ready();
+    EXPECT_EQ(ready.at("project").at("delivery_reason"), "deadline");
+    const auto output = call(apc::calculate_result, {{"state", ready}, {"scope", "project"}});
+    EXPECT_EQ(output.at("state").at("company").at("reputation"), 95);
+    expect_validation(output.at("state"), true);
+}
+TEST(Reputation, ClosedDeliveryHasNoReputationRuleAndStaysUnchanged) {
+    const auto ready = closed_ready();
+    EXPECT_EQ(ready.at("project").at("delivery_reason"), "company_closed");
+    const auto output = call(apc::calculate_result, {{"state", ready}, {"scope", "project"}});
+    EXPECT_EQ(output.at("state").at("company").at("reputation"), 100);
+    EXPECT_TRUE(output.at("state").at("company").at("reputation_log").empty());
+    expect_validation(output.at("state"), true);
+}
+TEST(Reputation, FloorAtZeroNeverNegative) {
+    for (auto start_value : {0, 3, 5}) {
+        SCOPED_TRACE(start_value);
+        auto ready = deadline_ready();
+        ready["company"]["reputation"] = start_value;
+        ready["company"]["reputation_log"] = Json::array();
+        expect_validation(ready, true);
+        const auto output = call(apc::calculate_result, {{"state", ready}, {"scope", "project"}});
+        EXPECT_EQ(output.at("state").at("company").at("reputation"), 0);
+        expect_validation(output.at("state"), true);
+        const auto& log = output.at("state").at("company").at("reputation_log");
+        EXPECT_EQ(log.size(), start_value == 0 ? 0U : 1U);
+        if (start_value != 0) EXPECT_EQ(log.at(0).at("delta"), -start_value);
+    }
+}
+TEST(Reputation, NoUpperCapBeforeTheSafeIntegerCeiling) {
+    for (auto start_value : {max_i - 10, std::int64_t{9007199254740000}}) {
+        SCOPED_TRACE(start_value);
+        auto ready = completed_ready();
+        ready["company"]["reputation"] = start_value;
+        ready["company"]["reputation_log"] = Json::array();
+        expect_validation(ready, true);
+        const auto output = call(apc::calculate_result, {{"state", ready}, {"scope", "project"}});
+        EXPECT_EQ(output.at("state").at("company").at("reputation"), start_value + 10);
+        expect_validation(output.at("state"), true);
+    }
+    auto idle = initialize();
+    idle["company"]["reputation"] = max_i;
+    idle["company"]["reputation_log"] = Json::array();
+    expect_validation(idle, true);
+}
+TEST(Reputation, SafeIntegerCeilingOverflowIsRejectedAtomically) {
+    auto ready = completed_ready();
+    ready["company"]["reputation"] = max_i;
+    ready["company"]["reputation_log"] = Json::array();
+    expect_validation(ready, true);
+    const auto before = ready.dump();
+    expect_error(apc::calculate_result(Json{{"state", ready}, {"scope", "project"}}.dump()), "INVALID_INPUT");
+    EXPECT_EQ(ready.dump(), before);
+}
+TEST(Reputation, InvalidReputationInputsWriteNothing) {
+    expect_invalid_mutations(initialize(), {
+        [](Json& s) { s["company"]["reputation"] = -1; },
+        [](Json& s) { s["company"]["reputation"] = -max_i; },
+        [](Json& s) { s["company"]["reputation"] = 1.5; },
+        [](Json& s) { s["company"]["reputation"] = nullptr; },
+        [](Json& s) { s["company"]["reputation"] = "100"; },
+        [](Json& s) { s["company"]["reputation"] = max_i + 1; }
+    });
+}
+TEST(Reputation, DoesNotChangeWithoutASettlement) {
+    auto state = initialize();
+    for (int week = 1; week <= 8; ++week) {
+        state = advance(state).at("state");
+        EXPECT_EQ(state.at("company").at("week"), week);
+        EXPECT_EQ(state.at("company").at("reputation"), 100);
+        EXPECT_TRUE(state.at("company").at("reputation_log").empty());
+    }
+    const auto producing = play_weeks(configure(start()), 3);
+    EXPECT_EQ(producing.at("company").at("week"), 3);
+    EXPECT_EQ(producing.at("company").at("reputation"), 100);
+    EXPECT_TRUE(producing.at("company").at("reputation_log").empty());
+}
+TEST(Reputation, LogRecordsReasonAndEffectiveDelta) {
+    const auto output = call(apc::calculate_result, {{"state", completed_ready(7)}, {"scope", "project"}});
+    const auto& log = output.at("state").at("company").at("reputation_log");
+    ASSERT_EQ(log.size(), 1U);
+    EXPECT_EQ(log.at(0).at("week"), output.at("state").at("company").at("week"));
+    EXPECT_EQ(log.at(0).at("reason"), "project_settled_success");
+    EXPECT_EQ(log.at(0).at("delta"), 10);
+    EXPECT_EQ(log.at(0).at("reputation_after"), 110);
+    const auto below = call(apc::calculate_result, {{"state", completed_ready(7, "dynamic_log_below", 100)}, {"scope", "project"}});
+    EXPECT_EQ(below.at("state").at("company").at("reputation_log").at(0).at("reason"), "project_settled_below_target");
+    EXPECT_EQ(below.at("state").at("company").at("reputation_log").at(0).at("delta"), 3);
+    const auto late = call(apc::calculate_result, {{"state", deadline_ready()}, {"scope", "project"}});
+    EXPECT_EQ(late.at("state").at("company").at("reputation_log").at(0).at("reason"), "project_settled_deadline");
+    EXPECT_EQ(late.at("state").at("company").at("reputation_log").at(0).at("delta"), -5);
+    expect_validation(late.at("state"), true);
+}
+TEST(Reputation, LogAccumulatesAcrossProjects) {
+    const auto first = call(apc::calculate_result, {{"state", completed_ready()}, {"scope", "project"}}).at("state");
+    auto market = call(apc::apply_decision, {{"state", first}, {"decision", {{"type", "return_to_market"}}}}).at("state");
+    EXPECT_EQ(market.at("company").at("reputation_log").size(), 1U);
+    market["offers"][0] = dynamic_offer("dynamic_reputation_second");
+    expect_validation(market, true);
+    const auto again = call(apc::start_project, {{"state", market}, {"offer_id", "dynamic_reputation_second"}, {"mode", "contract"}, {"investment_percent", 0}}).at("state");
+    const auto output = call(apc::calculate_result, {{"state", play_until_ready(again)}, {"scope", "project"}});
+    const auto& log = output.at("state").at("company").at("reputation_log");
+    ASSERT_EQ(log.size(), 2U);
+    EXPECT_EQ(log.at(1).at("reason"), "project_settled_success");
+    EXPECT_EQ(log.at(1).at("reputation_after"), 120);
+    EXPECT_GE(log.at(1).at("week").get<std::int64_t>(), log.at(0).at("week").get<std::int64_t>());
+    EXPECT_EQ(output.at("state").at("company").at("reputation"), 120);
+    expect_validation(output.at("state"), true);
+}
+TEST(Reputation, MissingLogIsAValidLegacySaveAndRegrowsOnSettlement) {
+    auto ready = deadline_ready();
+    ready["company"].erase("reputation_log");
+    expect_validation(ready, true);
+    // optional 字段只有缺席与数组两种合法写法，null 不是"没有历史"的合法拼写（同 scout_pity）。
+    auto nulled = ready;
+    nulled["company"]["reputation_log"] = nullptr;
+    expect_invalid_state(nulled);
+    // 空账本只表示没有记账，校验器不会用它反推声望应当是多少。
+    auto blank = ready;
+    blank["company"]["reputation_log"] = Json::array();
+    expect_validation(blank, true);
+    const auto output = call(apc::calculate_result, {{"state", ready}, {"scope", "project"}});
+    const auto& log = output.at("state").at("company").at("reputation_log");
+    ASSERT_EQ(log.size(), 1U);
+    EXPECT_EQ(log.at(0).at("reason"), "project_settled_deadline");
+    EXPECT_EQ(log.at(0).at("reputation_after"), 95);
+    expect_validation(output.at("state"), true);
+    // 初始值调整之前写出的存档（声望 0、无日志）仍然合法并继续记账。
+    auto legacy = deadline_ready();
+    legacy["company"]["reputation"] = 0;
+    legacy["company"].erase("reputation_log");
+    expect_validation(legacy, true);
+    EXPECT_EQ(call(apc::calculate_result, {{"state", legacy}, {"scope", "project"}}).at("state").at("company").at("reputation"), 0);
+}
+TEST(Reputation, LogTamperingIsRejectedWithoutAnyWrite) {
+    const auto settled = call(apc::calculate_result, {{"state", completed_ready()}, {"scope", "project"}}).at("state");
+    auto base = settled;
+    base["company"]["reputation"] = 120;
+    base["company"]["reputation_log"].push_back({{"week", 5}, {"reason", "project_settled_success"}, {"delta", 10}, {"reputation_after", 120}});
+    expect_validation(base, true);
+    expect_invalid_mutations(base, {
+        [](Json& s) { s["company"]["reputation_log"] = nullptr; },
+        [](Json& s) { s["company"]["reputation_log"] = Json::object(); },
+        [](Json& s) { s["company"]["reputation_log"] = Json::array({Json::object()}); },
+        [](Json& s) { s["company"]["reputation_log"][0].erase("reason"); },
+        [](Json& s) { s["company"]["reputation_log"][0].erase("delta"); },
+        [](Json& s) { s["company"]["reputation_log"][0]["reason"] = ""; },
+        [](Json& s) { s["company"]["reputation_log"][0]["reason"] = nullptr; },
+        [](Json& s) { s["company"]["reputation_log"][0]["delta"] = 0; },
+        [](Json& s) { s["company"]["reputation_log"][0]["delta"] = 1.5; },
+        [](Json& s) { s["company"]["reputation_log"][0]["delta"] = max_i + 1; },
+        [](Json& s) { s["company"]["reputation_log"][0]["week"] = -1; },
+        [](Json& s) { s["company"]["reputation_log"][0]["week"] = 521; },
+        [](Json& s) { s["company"]["reputation_log"][0]["reputation_after"] = 119; },
+        [](Json& s) { s["company"]["reputation_log"][0]["reputation_after"] = -1; },
+        // 末笔必须等于当前声望，且逐笔前后值衔接。
+        [](Json& s) { s["company"]["reputation"] = 121; },
+        [](Json& s) { s["company"]["reputation_log"][1]["reputation_after"] = 131; },
+        [](Json& s) { s["company"]["reputation_log"][1]["delta"] = 11; },
+        // 周次只能前进。
+        [](Json& s) { s["company"]["reputation_log"][1]["week"] = 4; },
+        // 追加序列只能挂在末尾：把后一笔插到前面会打断周次与前后值衔接。
+        [](Json& s) { auto entry = s["company"]["reputation_log"][1]; s["company"]["reputation_log"].erase(1); s["company"]["reputation_log"].insert(s["company"]["reputation_log"].begin(), entry); },
+        // 声望降到钳制线以下没有合法记录可表达。
+        [](Json& s) { s["company"]["reputation"] = 110; s["company"]["reputation_log"][1]["reputation_after"] = 110; s["company"]["reputation_log"][1]["delta"] = 0; }
+    });
+}
+TEST(Reputation, SameSeedAndActionsProduceSameResult) {
+    for (auto seed : {0U, 12345U, 0xffffffffU}) {
+        const auto first = Json::parse(apc::calculate_result(Json{{"state", completed_ready(seed)}, {"scope", "project"}}.dump()));
+        play_until_ready(configure(start(4242)));
+        const auto second = Json::parse(apc::calculate_result(Json{{"state", completed_ready(seed)}, {"scope", "project"}}.dump()));
+        EXPECT_EQ(first, second) << "seed " << seed;
+        EXPECT_EQ(second.at("state").at("company").at("reputation"), 110);
+        EXPECT_EQ(second.at("state").at("company").at("reputation_log").size(), 1U);
+    }
 }
 TEST(Endings, VoluntaryEndSettlesPendingProjectThenSummary) {
     auto state = play_weeks(configure(start()), 1);
@@ -828,8 +1054,8 @@ TEST(ValidatorCompatibility, OptionalOfferCompanyAndCostFields) {
     offer["committee_members"] = Json::array({committee_member("publisher_a", "publisher"), committee_member("publisher_b", "music")});
     offer["channel_potentials"] = {{"bd", 0}, {"publisher", 100}, {"toy", 20}, {"music", 30}, {"tv_broadcast", 40}};
     offer["required_works"] = Json::array({{{"rating", "A"}}, {{"rating", "A"}, {"source", "game"}}});
-    state["offers"][2]["min_reputation"] = 100;
-    state["offers"][3]["min_reputation"] = 200;
+    state["offers"][2]["min_reputation"] = 200;
+    state["offers"][3]["min_reputation"] = 300;
     state["company"]["finance"]["costs"]["development"] = 123;
     state["company"]["finance"]["costs"]["distribution"] = 456;
     expect_invalid_mutations(state, {
@@ -842,7 +1068,7 @@ TEST(ValidatorCompatibility, OptionalOfferCompanyAndCostFields) {
         [](Json& s) { s["custom_offer"]["origin"] = "market"; },
         [](Json& s) { s["custom_offer"]["scale"] = "tv"; },
         [](Json& s) { s["custom_offer"]["min_reputation"] = -1; },
-        [](Json& s) { s["offers"][1]["min_reputation"] = 1; },
+        [](Json& s) { s["offers"][1]["min_reputation"] = 1000; },
         [](Json& s) { s["custom_offer"]["committee_members"] = Json::array(); },
         [](Json& s) { s["custom_offer"]["allowed_modes"] = Json::array({"contract"}); },
         [](Json& s) { s["custom_offer"]["committee_members"][1]["id"] = "publisher_a"; },

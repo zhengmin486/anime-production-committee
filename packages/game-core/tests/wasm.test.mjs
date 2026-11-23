@@ -406,3 +406,88 @@ test('六接口的状态顺序校验', () => {
   expectError(call('start_project', { state: producing, offer_id: 'proj_ova_01', mode: 'contract', investment_percent: 0 }), 'INVALID_PHASE')
   expectError(call('apply_decision', { state: producing, decision: { type: 'return_to_market' } }), 'INVALID_PHASE')
 })
+
+// 五阶段各 1 工作量：截止前跑完全部阶段，交付原因必为 completed。
+function completedReady(module = core) {
+  const idle = initial(12345, module)
+  for (const stage of stageOrder) idle.offers[0].workloads[stage] = 1
+  let state = ok('start_project', { state: idle, offer_id: idle.offers[0].id, mode: 'contract', investment_percent: 0 }, module).state
+  for (let index = 0; index < 6 && state.phase === 'producing'; index++) {
+    if (state.project.stages[state.project.current_stage].status === 'ready') state = configure(state, 'balanced', module)
+    state = advance(state, module).state
+  }
+  assert.equal(state.project.delivery_reason, 'completed')
+  return state
+}
+
+// 两周工期小于实际所需周数：必然按 deadline 违约交付，用于覆盖负向变化。
+function deadlineReady(module = core) {
+  let state = configure(start(12345, module), 'balanced', module)
+  state.project.deadline_week = 2
+  state.project.offer.duration_weeks = 2
+  for (let index = 0; index < 3 && state.phase === 'producing'; index++) {
+    if (state.project.stages[state.project.current_stage].status === 'ready') state = configure(state, 'balanced', module)
+    state = advance(state, module).state
+  }
+  assert.equal(state.project.delivery_reason, 'deadline')
+  return state
+}
+
+test('声望初始 100、空闲周不衰减，交付结算按目标线分档记账', () => {
+  let idle = initial()
+  assert.equal(idle.company.reputation, 100)
+  assert.deepEqual(idle.company.reputation_log, [])
+  probeValidation(idle)
+  for (let week = 1; week <= 8; week++) {
+    idle = advance(idle).state
+    assert.equal(idle.company.week, week)
+    assert.equal(idle.company.reputation, 100)
+    assert.deepEqual(idle.company.reputation_log, [])
+  }
+
+  const ready = completedReady()
+  const settled = ok('calculate_result', { state: ready, scope: 'project' })
+  const gain = settled.result.quality_score >= ready.project.offer.target_quality ? 10 : 3
+  assert.equal(settled.state.company.reputation, 100 + gain)
+  assert.deepEqual(settled.state.company.reputation_log, [{
+    week: settled.state.company.week, delta: gain, reputation_after: 100 + gain,
+    reason: gain === 10 ? 'project_settled_success' : 'project_settled_below_target',
+  }])
+  probeValidation(settled.state)
+})
+
+test('声望向下变化钳到零，只有实际生效的数值才写入账本', () => {
+  const pending = deadlineReady()
+  const penalty = ok('calculate_result', { state: pending, scope: 'project' }).state
+  assert.equal(penalty.company.reputation, 95)
+  assert.deepEqual(penalty.company.reputation_log, [{ week: penalty.company.week, delta: -5, reputation_after: 95, reason: 'project_settled_deadline' }])
+  probeValidation(penalty)
+  for (const before of [0, 3]) {
+    const floored = structuredClone(pending)
+    floored.company.reputation = before
+    floored.company.reputation_log = []
+    probeValidation(floored)
+    const after = ok('calculate_result', { state: floored, scope: 'project' }).state
+    assert.equal(after.company.reputation, 0)
+    assert.equal(after.company.reputation_log.length, before === 0 ? 0 : 1)
+    if (before !== 0) assert.equal(after.company.reputation_log[0].delta, -before)
+    probeValidation(after)
+  }
+})
+
+test('声望账本兼容旧存档缺席，并在两个独立 WASM 实例给出相同结果', async () => {
+  const legacy = deadlineReady()
+  delete legacy.company.reputation_log
+  probeValidation(legacy)
+  const regrown = ok('calculate_result', { state: legacy, scope: 'project' }).state
+  assert.equal(regrown.company.reputation, 95)
+  assert.equal(regrown.company.reputation_log.length, 1)
+  probeValidation(regrown)
+
+  const other = await createGameCore()
+  assert.deepEqual(
+    ok('calculate_result', { state: completedReady(), scope: 'project' }, other),
+    ok('calculate_result', { state: completedReady(), scope: 'project' }, core),
+  )
+  assert.deepEqual(ok('initialize_game', { seed: 777 }, other).state.company, initial(777).company)
+})

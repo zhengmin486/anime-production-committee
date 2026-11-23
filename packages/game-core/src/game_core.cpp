@@ -143,6 +143,21 @@ void add_cost(Json& finance, const char* category, Integer amount) {
     check_costs(finance.at("costs"));
 }
 
+// 公司声望的唯一写入点：向下钳到 0、不设数值上限，实际生效的变化连同原因与结果值追加进 company.reputation_log。
+// 钳制后没有实际变化时不写记录；声望不随时间衰减，只有经营行为与结算节点调用本函数。
+void change_reputation(Json& state, Integer delta, const std::string& reason) {
+    require(!reason.empty());
+    auto& company = state["company"];
+    const auto before = num(company.at("reputation"));
+    const auto after = delta >= 0 ? add(before, delta) : std::max<Integer>(0, before + delta);
+    if (after == before) return;
+    company["reputation"] = after;
+    if (!company.contains("reputation_log")) company["reputation_log"] = Json::array();
+    company["reputation_log"].push_back({
+        {"week", num(company, "week")}, {"reason", reason}, {"delta", after - before}, {"reputation_after", after}
+    });
+}
+
 Json make_staff(const rules::StaffSpec& spec) {
     Json abilities = Json::object(), potential = Json::object(), revealed = Json::object(), experience = Json::object();
     for (std::size_t i = 0; i < rules::abilities.size(); ++i) {
@@ -528,6 +543,25 @@ void check_work_record(const Json& work) {
         require(channels.count("bd") && revenue == num(work, "commercial_revenue") && received == num(work.at("finance"), "commercial_share_received"));
     }
 }
+// 声望历史是追加式账本：周次不回退，逐笔前后值衔接，末笔结果必须等于当前声望。
+// 字段缺席表示本特性之前写出的 v3 存档，按空历史解释；存在即整体校验，不做迁移。
+void check_reputation_log(const Json& entries, Integer reputation) {
+    require(entries.is_array());
+    auto expected = reputation;
+    auto next_week = static_cast<Integer>(rules::max_weeks);
+    for (auto entry = entries.rbegin(); entry != entries.rend(); ++entry) {
+        require(entry->is_object());
+        const auto week = number(entry->at("week"), rules::max_weeks);
+        require(week <= next_week);
+        next_week = week;
+        require(!nonempty_text(entry->at("reason")).empty());
+        const auto delta = signed_number(entry->at("delta"));
+        require(delta != 0);
+        require(number(entry->at("reputation_after")) == expected);
+        require(delta > 0 ? expected >= delta : expected <= rules::max_integer + delta);
+        expected -= delta;
+    }
+}
 void check_state_entities(const Json& state) {
     require(state.is_object() && num(state, "version") == rules::version);
     number(state.at("seed"), rules::max_seed);
@@ -536,6 +570,7 @@ void check_state_entities(const Json& state) {
     require(company.is_object() && one_of(company.at("status"), {"running", "closing", "ended"}));
     number(company.at("week"), rules::max_weeks); number(company.at("initial_funds"));
     signed_number(company.at("funds")); number(company.at("reputation")); check_finance(company.at("finance"));
+    if (company.contains("reputation_log")) check_reputation_log(company.at("reputation_log"), num(company, "reputation"));
     require(company.at("end_reason").is_null() || one_of(company.at("end_reason"), {"time_limit", "bankrupt", "voluntary"}));
     if (company.contains("scout_pity")) {
         const auto& pity = company.at("scout_pity");
@@ -810,7 +845,7 @@ std::string initialize_game(std::string input) {
             {"company", {
                 {"week", 0}, {"status", "running"}, {"end_reason", nullptr},
                 {"initial_funds", rules::initial_funds}, {"funds", rules::initial_funds},
-                {"reputation", rules::initial_reputation}, {"staff", staff}, {"finance", empty_finance()}
+                {"reputation", rules::initial_reputation}, {"staff", staff}, {"finance", empty_finance()}, {"reputation_log", Json::array()}
             }},
             {"offers", offers}, {"recruitment_pool", Json::array()}, {"suppliers", Json::array()},
             {"project", nullptr}, {"pending_event", nullptr}, {"history", Json::array()},
@@ -1133,11 +1168,9 @@ std::string calculate_result(std::string input) {
                 add_cost(state["project"]["finance"], "penalty", penalty);
             }
             const auto target = number(offer.at("target_quality"), 100);
-            Integer reputation_delta = 0;
-            if (reason == "completed") reputation_delta = quality >= target ? rules::success_reputation : rules::below_target_reputation;
-            else if (reason == "deadline") reputation_delta = rules::deadline_reputation;
-            const auto reputation = num(state.at("company").at("reputation"));
-            state["company"]["reputation"] = reputation_delta >= 0 ? add(reputation, reputation_delta) : std::max<Integer>(0, reputation + reputation_delta);
+            if (reason == "completed" && quality >= target) change_reputation(state, rules::success_reputation, "project_settled_success");
+            else if (reason == "completed") change_reputation(state, rules::below_target_reputation, "project_settled_below_target");
+            else if (reason == "deadline") change_reputation(state, rules::deadline_reputation, "project_settled_deadline");
             auto finance = project.at("finance");
             Json team = Json::array();
             std::set<std::string> seen;
