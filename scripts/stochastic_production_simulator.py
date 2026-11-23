@@ -78,7 +78,8 @@ def pick_dimensions(stage, person, rng):
     return chosen
 
 def run_once(people, strategy, workload, deadline, mode, seed, ability_model="multi"):
-    rng = random.Random(seed)
+    work_rng = random.Random(seed)
+    quality_rng = random.Random(seed + 1_000_003)
     overtime = strategy.endswith("_deadline")
     policy = base.POLICIES["deadline" if overtime else "balanced"]
     fatigue = {p["id"]: int(p.get("fatigue", 0)) for p in people}
@@ -114,7 +115,7 @@ def run_once(people, strategy, workload, deadline, mode, seed, ability_model="mu
                     stage, ability_model, coordination
                 )
                 if mode in ("work_only", "work_and_quality"):
-                    points_float = points * work_multiplier(skill, rng)
+                    points_float = points * work_multiplier(skill, work_rng)
                 else:
                     points_float = float(points)
                 weekly_work_float += points_float
@@ -126,7 +127,7 @@ def run_once(people, strategy, workload, deadline, mode, seed, ability_model="mu
                 for p, points_float in worker_rows:
                     share = points_float / weekly_work_float
                     if mode == "work_and_quality":
-                        selected = pick_dimensions(stage, p, rng)
+                        selected = pick_dimensions(stage, p, quality_rng)
                         probabilities = {dim: 1.0 for dim in selected}
                     else:
                         # Deterministic control uses the expected inclusion chance,
@@ -135,7 +136,7 @@ def run_once(people, strategy, workload, deadline, mode, seed, ability_model="mu
                     for dim, probability in probabilities.items():
                         dim_skill = int(p["abilities"][DIMENSION_ABILITY[dim]])
                         quality_delta[dim] += share * probability * quality_gain(
-                            dim_skill, rng, mode == "work_and_quality"
+                            dim_skill, quality_rng, mode == "work_and_quality"
                         )
                 for dim, delta in quality_delta.items():
                     quality[dim] = min(100.0, quality[dim] + delta)
