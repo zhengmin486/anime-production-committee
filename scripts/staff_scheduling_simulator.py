@@ -50,8 +50,11 @@ def simulate(strategy,people,workloads,deadline):
     usage={p["id"]:0 for p in people}; stage_weeks={}; stage_quality={}; total=weeks=0
     for ix,(stage,ability,default) in enumerate(STAGES):
         remaining=int(workloads.get(stage,default)); qsum=0; qwork=0; start=weeks
+        # Fixed strategies lock a team for the whole stage; dynamic strategies re-rank weekly.
+        fixed_team=None if strategy in ("dynamic_pair","dynamic_trio") else choose(strategy,ability,people,morale,fatigue)
         while remaining>0 and weeks<deadline:
-            workers=choose(strategy,ability,people,morale,fatigue); ids={p["id"] for p in workers}; work=quality=0
+            workers=choose(strategy,ability,people,morale,fatigue) if fixed_team is None else fixed_team
+            ids={p["id"] for p in workers}; work=quality=0
             for p in workers:
                 points=speed(p,ability,morale[p["id"]],fatigue[p["id"]])*policy_speed//1000
                 fit=SPECIALTY_FIT if p["specialty"]==ability else NONSPECIALTY_FIT
