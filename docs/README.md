@@ -26,6 +26,7 @@
 - [M0–M7 开发路线与里程碑](DEVELOPMENT_ROADMAP.md)
 - [制作蓝图规范](BLUEPRINT_SPEC.md)
 - [权威决策登记册](DECISION_LOG.md)
+- [游戏愿景与产品方向](GAME_VISION.md)：产品定位、核心体验、设计支柱、复杂度预算与成品成功标准；具体规则以决策登记册为准。
 - [研究与审计成果目录](RESEARCH_CATALOG.md)
 - [领域架构设计](DOMAIN_ARCHITECTURE.md)
 - [核心玩法重构框架](CORE_GAMEPLAY_REBUILD_FRAMEWORK.md)
