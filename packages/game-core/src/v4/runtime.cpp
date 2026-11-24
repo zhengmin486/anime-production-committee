@@ -309,6 +309,11 @@ std::string state_hash(const GameState& state) {
             }
         }
     }
+    std::sort(copy.finance.entries.begin(), copy.finance.entries.end(),
+              [](const LedgerEntry& a, const LedgerEntry& b) {
+                  if (a.week != b.week) return a.week < b.week;
+                  return a.id < b.id;
+              });
     Json encoded = copy;
     return hex64(fnv1a64(encoded.dump()));
 }
@@ -523,9 +528,62 @@ std::string advance_week(const std::string& input) {
         Json works_report = Json::array();
         std::map<std::string, int> produced_by_staff;
 
+        // 结算内一律按 id 排序遍历：账本条目顺序、随机坐标都不能受数组顺序影响。
         std::vector<Project*> ordered;
         for (auto& work : state.works) ordered.push_back(&work);
         std::sort(ordered.begin(), ordered.end(), [](const Project* a, const Project* b) { return a->id < b->id; });
+        std::vector<const Staff*> ordered_staff;
+        for (const auto& member : state.staff) ordered_staff.push_back(&member);
+        std::sort(ordered_staff.begin(), ordered_staff.end(),
+                  [](const Staff* a, const Staff* b) { return a->id < b->id; });
+
+        // ---- 阶段 5：强制费用预检（M1 最小切片：工资 + 运营 + 制作费）----
+        // 预检失败一律整周不提交：不推进、不记账、不生产。危机路径是 M2.5，
+        // 此处只保证"钱不够时周不会假装过完"。
+        std::map<std::string, int> assigned_count;
+        for (const Staff* member : ordered_staff) {
+            if (member->assignment_work_id) ++assigned_count[*member->assignment_work_id];
+        }
+        int64_t salary_total = 0;
+        for (const Staff* member : ordered_staff) {
+            if (member->employment == "core") salary_total += member->weekly_salary;
+        }
+        const int64_t operations_total = kernel::weekly_operations_cost();
+        int64_t production_total = 0;
+        for (const Project* work : ordered) {
+            if (work->status != "producing") continue;
+            if (assigned_count[work->id] == 0) continue;   // 没人做就不开工，也不计制作费
+            production_total += kernel::weekly_production_cost(work->plan.intensity);
+        }
+        const int64_t total_cost = salary_total + operations_total + production_total;
+        if (state.finance.balance < total_cost) {
+            const int64_t gap = total_cost - state.finance.balance;
+            return encode(Json{{"error",
+                                {{"code", "INSUFFICIENT_FUNDS"},
+                                 {"message", "本周强制费用不足，缺口 " + std::to_string(gap) + " 日元"},
+                                 {"gap", gap}}}});
+        }
+
+        // ---- 阶段 6：原子记账（唯一账本，逐条可归因）----
+        auto spend = [&state, week](const std::string& entry_id, std::optional<std::string> work_id,
+                                    const char* category, int64_t amount, const std::string& memo) {
+            if (amount <= 0) return;
+            state.finance.entries.push_back(
+                LedgerEntry{entry_id, week, std::move(work_id), category, -amount, std::nullopt, memo});
+            state.finance.balance -= amount;
+        };
+        for (const Staff* member : ordered_staff) {
+            if (member->employment != "core") continue;
+            spend("w" + std::to_string(week) + ".salary." + member->id, std::nullopt, "salary",
+                  member->weekly_salary, member->id);
+        }
+        spend("w" + std::to_string(week) + ".operations", std::nullopt, "operations", operations_total, "公司运营");
+        for (const Project* work : ordered) {
+            if (work->status != "producing" || assigned_count[work->id] == 0) continue;
+            const int64_t cost = kernel::weekly_production_cost(work->plan.intensity);
+            spend("w" + std::to_string(week) + ".production." + work->id, work->id, "production", cost,
+                  work->plan.intensity);
+        }
 
         for (Project* work : ordered) {
             if (work->status != "producing") continue;
@@ -593,7 +651,14 @@ std::string advance_week(const std::string& input) {
                 items.push_back(item_reports[id]);
                 total_points += item_reports[id]["points"].get<int>();
             }
-            works_report.push_back(Json{{"work_id", work->id}, {"items", items}, {"total_points", total_points}});
+            // 质量聚合：工作项 → 阶段 → 单集 → 作品，让"随机提升若干质量项"变成玩家看得见的数
+            const auto aggregated = kernel::aggregate_work(*work);
+            Json dims = Json::object();
+            for (int i = 0; i < kDimensionCount; ++i) dims[kDimensions[static_cast<std::size_t>(i)]] = aggregated.dims[static_cast<std::size_t>(i)];
+            works_report.push_back(Json{{"work_id", work->id},
+                                        {"items", items},
+                                        {"total_points", total_points},
+                                        {"quality", Json{{"dims", dims}, {"mean", aggregated.mean}}}});
         }
 
         // 人员状态结算（每人每周一次）
@@ -616,7 +681,14 @@ std::string advance_week(const std::string& input) {
         const auto post_errors = validate(state);
         if (!post_errors.empty()) return encode(error_body("INTERNAL_ERROR", "结算后状态非法: " + post_errors.front()));
 
-        Json report = Json{{"week", week}, {"works", works_report}, {"staff", staff_report}};
+        Json report = Json{{"week", week},
+                           {"works", works_report},
+                           {"staff", staff_report},
+                           {"funds", Json{{"delta", -total_cost},
+                                          {"balance", state.finance.balance},
+                                          {"costs", Json{{"salary", salary_total},
+                                                         {"operations", operations_total},
+                                                         {"production", production_total}}}}}};
         return encode(Json{{"state", state}, {"report", report}});
     } catch (const Json::exception&) {
         return encode(error_body("INVALID_INPUT", "JSON 或字段类型无效"));

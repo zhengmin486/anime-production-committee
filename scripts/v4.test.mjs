@@ -90,11 +90,32 @@ test('首周产出与独立手算逐项一致', () => {
   assert.equal(common.work_done, 80)
   assert.equal(script.work_done, 80)
 
-  // 质量由累计工作量派生：80 点 × 100‰ = 8，不再按每周增量截断
+  // 质量与工作量分离：同样点数，能力高的人质量增量更高
+  //   common：anim(planning 40→700‰) 64 点 → 45；dir(planning 60→800‰) 16 点 → 13  ⇒ 58
+  //   script：dir(planning 60→800‰) 50 点 → 40；ka(planning 45→725‰) 30 点 → 22    ⇒ 62
   const commonQuality = Object.values(common.quality).reduce((sum, value) => sum + value, 0)
   const scriptQuality = Object.values(script.quality).reduce((sum, value) => sum + value, 0)
-  assert.equal(commonQuality, 8)
-  assert.equal(scriptQuality, 8)
+  assert.equal(commonQuality, 58)
+  assert.equal(scriptQuality, 62)
+
+  // 周结算同时记账：工资 120000 + 运营 30000 + 制作 60000 = 210000
+  assert.equal(advanced.report.funds.costs.salary, 120000)
+  assert.equal(advanced.report.funds.costs.operations, 30000)
+  assert.equal(advanced.report.funds.costs.production, 60000)
+  assert.equal(advanced.report.funds.delta, -210000)
+  assert.equal(advanced.report.funds.balance, 1790000)
+  assert.equal(advanced.state.finance.balance, 1790000)
+  const ledgerSum = advanced.state.finance.entries.reduce((sum, entry) => sum + entry.amount, 0)
+  assert.equal(advanced.state.finance.opening_funds + ledgerSum, advanced.state.finance.balance)
+  assert.equal(advanced.state.finance.entries.length, 5)   // 3 工资 + 1 运营 + 1 制作
+  assert.ok(advanced.state.finance.entries.some((entry) => entry.category === 'production' && entry.work_id === 'work_01'))
+
+  // 质量聚合进入回执：工作项 → 阶段 → 单集 → 作品
+  const aggregated = advanced.report.works[0].quality
+  const aggregatedSum = Object.values(aggregated.dims).reduce((sum, value) => sum + value, 0)
+  assert.ok(aggregatedSum > 0, '作品层质量不应为空')
+  assert.ok(Object.values(aggregated.dims).filter((value) => value > 0).length <= 2, '只有脚本产出了质量')
+  assert.equal(aggregated.mean, Math.round(aggregatedSum / 6))
 
   const fatigue = Object.fromEntries(advanced.state.staff.map((member) => [member.id, member.fatigue]))
   const morale = Object.fromEntries(advanced.state.staff.map((member) => [member.id, member.morale]))
@@ -244,4 +265,70 @@ test('计划枚举非法取值被拒绝且状态不变', () => {
     const result = call('set_plan', { state, work_id: 'work_01', plan })
     assert.equal(result.error?.code, 'INVALID_INPUT', `plan=${JSON.stringify(plan)} 应被拒绝`)
   }
+})
+
+test('现金不足时整周不提交，状态与流水都不变', () => {
+  let state = setupTiny()
+  for (const staffId of ['staff_dir', 'staff_ka', 'staff_anim']) {
+    state = ok('assign_staff', { state, staff_id: staffId, work_id: 'work_01' }).state
+  }
+  // 本周需要 210000，只留 100000
+  state.finance.opening_funds = 100000
+  state.finance.balance = 100000
+  const before = ok('hash_state', { state }).hash
+
+  const result = call('advance_week', { state })
+  assert.equal(result.error.code, 'INSUFFICIENT_FUNDS')
+  assert.equal(result.error.gap, 110000)
+  assert.equal(ok('hash_state', { state }).hash, before, '失败不得留下半结算')
+  assert.equal(state.company.week, 0)
+  assert.equal(state.finance.entries.length, 0)
+  assert.equal(findItem(state, 'work_01', 'common.series_comp').work_done, 0)
+})
+
+test('双项目隔离：产出不串项目，作者不串项目', () => {
+  let state = ok('initialize', { seed: 5 }).state
+  state = ok('instantiate_work', { state, blueprint: tiny, work_id: 'work_a', duration_weeks: 26 }).state
+  state = ok('instantiate_work', { state, blueprint: tiny, work_id: 'work_b', duration_weeks: 26 }).state
+  state = ok('assign_staff', { state, staff_id: 'staff_ka', work_id: 'work_a' }).state
+  state = ok('assign_staff', { state, staff_id: 'staff_dir', work_id: 'work_b' }).state
+  const advanced = ok('advance_week', { state })
+
+  const aItems = allItems(advanced.state, 'work_a')
+  const bItems = allItems(advanced.state, 'work_b')
+  // 只有各自项目的员工出现在 contributors 里
+  for (const item of aItems) {
+    for (const id of item.contributors) assert.equal(id, 'staff_ka', `work_a 出现了 ${id}`)
+  }
+  for (const item of bItems) {
+    for (const id of item.contributors) assert.equal(id, 'staff_dir', `work_b 出现了 ${id}`)
+  }
+  // 两个项目的产出都必须 >0，且没有互相抵消
+  assert.ok(aItems.some((item) => item.work_done > 0))
+  assert.ok(bItems.some((item) => item.work_done > 0))
+  // 每人本周产出不超过自身产能（不会被算两次）
+  const produced = Object.fromEntries(advanced.report.staff.map((entry) => [entry.staff_id, entry.produced]))
+  assert.ok(produced.staff_ka <= 100 && produced.staff_dir <= 100)
+  const sumA = aItems.reduce((sum, item) => sum + item.work_done, 0)
+  const sumB = bItems.reduce((sum, item) => sum + item.work_done, 0)
+  assert.equal(sumA + sumB, produced.staff_ka + produced.staff_dir)
+})
+
+test('随机性进入制作结果：换 seed 改变质量落维，同 seed 可复现', () => {
+  const run = (seed) => {
+    let state = ok('initialize', { seed }).state
+    state = ok('instantiate_work', { state, blueprint: tiny, work_id: 'work_01', duration_weeks: 26 }).state
+    for (const staffId of ['staff_dir', 'staff_ka', 'staff_anim']) {
+      state = ok('assign_staff', { state, staff_id: staffId, work_id: 'work_01' }).state
+    }
+    const advanced = ok('advance_week', { state })
+    const script = findItem(advanced.state, 'work_01', 'ep01.script')
+    const dim = Object.entries(script.quality).find(([, value]) => value > 0)?.[0]
+    return { dim, hash: ok('hash_state', { state: advanced.state }).hash }
+  }
+  const first = run(21)
+  assert.deepEqual(run(21), first, '同 seed 必须逐字段复现')
+  const dims = new Set()
+  for (let seed = 0; seed < 12; seed++) dims.add(run(seed).dim)
+  assert.ok(dims.size > 1, '不同 seed 应落到不同质量维度，否则随机性没有进入结果')
 })

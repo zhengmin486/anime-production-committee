@@ -17,7 +17,6 @@ constexpr int kFatiguePerPoint = 4;          // 疲劳 0 → 1.00，100 → 0.60
 constexpr int kFitMatch = 1000;
 constexpr int kFitMismatch = 800;
 constexpr int kPointsPerStaffWeek = 100;     // 1 人周 = 100 工作点
-constexpr int kQualityRate = 100;            // 每 1000 点产出 → 100 点质量
 constexpr int kHandoverLoss = 250;           // 接手磨合：该员工在该项产出扣 25%
 constexpr int kSupervisorSwitchLoss = 100;   // 监督换项目：团队级扣 10%
 
@@ -257,13 +256,11 @@ ProductionResult apply_production(WorkItem& item, const Staff& staff, int points
         item.contributors.push_back(staff.id);
     }
 
-    // 质量总量由"累计工作量"派生，而不是逐周累加每周增量：
-    // 逐周截断会把每周的小数部分全部丢掉（80 点 → 每周 0 点是常态），
-    // 派生口径下质量只取决于 work_done，读档重算也不会漂。
-    int current_quality = 0;
-    for (const int value : item.quality.dims) current_quality += value;
-    const int quality_target = item.work_done * kQualityRate / 1000;
-    const int quality_total = std::max(0, quality_target - current_quality);
+    // 质量与工作量分离：工作量由"投入了多少点"决定，质量由"谁在做"决定。
+    // 同样的点数，能力高的员工质量增量更高；能力低的正好相反。
+    // 量纲：一个 100 点的工作项由能力 1.00 的人做满 → 该维 100 分。
+    const int ability_q = kAbilityBase + ability_value(staff, item.ability) * kAbilityPerPoint;   // 500..1000
+    const int quality_total = (gain * ability_q + 500) / 1000;                                     // 四舍五入
     result.quality_gain = 0;
     if (quality_total <= 0) return result;
 
@@ -311,6 +308,85 @@ int supervisor_switch_penalty(int points) { return points * kSupervisorSwitchLos
 
 int team_capacity_permille(bool supervisor_switched_in) {
     return supervisor_switched_in ? 1000 - kSupervisorSwitchLoss : 1000;
+}
+
+// ---------------- 质量聚合 ----------------
+
+namespace {
+
+int mean_of(const std::array<int, kDimensionCount>& dims) {
+    int sum = 0;
+    for (const int value : dims) sum += value;
+    return (sum + kDimensionCount / 2) / kDimensionCount;
+}
+
+}  // namespace
+
+AggregatedQuality aggregate_stage(const EpisodeStage& stage) {
+    AggregatedQuality result;
+    int weight_total = 0;
+    for (const auto& item : stage.items) {
+        const int weight = std::max(item.work_total, 0);
+        weight_total += weight;
+        for (int i = 0; i < kDimensionCount; ++i) {
+            result.dims[static_cast<std::size_t>(i)] +=
+                item.quality.dims[static_cast<std::size_t>(i)] * weight;
+        }
+    }
+    if (weight_total > 0) {
+        for (int i = 0; i < kDimensionCount; ++i) {
+            result.dims[static_cast<std::size_t>(i)] =
+                (result.dims[static_cast<std::size_t>(i)] + weight_total / 2) / weight_total;
+        }
+    }
+    result.mean = mean_of(result.dims);
+    return result;
+}
+
+AggregatedQuality aggregate_episode(const Episode& episode) {
+    AggregatedQuality result;
+    // M1 用阶段等权；六阶段模板权重属于内容配置，等平衡阶段再定
+    if (episode.stages.empty()) return result;
+    for (const auto& stage : episode.stages) {
+        const auto stage_quality = aggregate_stage(stage);
+        for (int i = 0; i < kDimensionCount; ++i) {
+            result.dims[static_cast<std::size_t>(i)] += stage_quality.dims[static_cast<std::size_t>(i)];
+        }
+    }
+    const int count = static_cast<int>(episode.stages.size());
+    for (int i = 0; i < kDimensionCount; ++i) {
+        result.dims[static_cast<std::size_t>(i)] =
+            (result.dims[static_cast<std::size_t>(i)] + count / 2) / count;
+    }
+    result.mean = mean_of(result.dims);
+    return result;
+}
+
+AggregatedQuality aggregate_work(const Project& work) {
+    AggregatedQuality result;
+    if (work.episodes.empty()) return result;
+    for (const auto& episode : work.episodes) {
+        const auto episode_quality = aggregate_episode(episode);
+        for (int i = 0; i < kDimensionCount; ++i) {
+            result.dims[static_cast<std::size_t>(i)] += episode_quality.dims[static_cast<std::size_t>(i)];
+        }
+    }
+    const int count = static_cast<int>(work.episodes.size());
+    for (int i = 0; i < kDimensionCount; ++i) {
+        result.dims[static_cast<std::size_t>(i)] =
+            (result.dims[static_cast<std::size_t>(i)] + count / 2) / count;
+    }
+    result.mean = mean_of(result.dims);
+    return result;
+}
+
+int64_t weekly_operations_cost() { return 30000; }
+
+int64_t weekly_production_cost(const std::string& intensity) {
+    const int64_t base = 60000;
+    if (intensity == "low") return base * 800 / 1000;
+    if (intensity == "high") return base * 1300 / 1000;
+    return base;
 }
 
 }  // namespace apc::v4::kernel

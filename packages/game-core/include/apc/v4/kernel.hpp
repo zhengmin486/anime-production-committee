@@ -92,4 +92,21 @@ int supervisor_switch_penalty(int points);
 // 系数只在这里定义一次，避免 runtime 与内核各写一份而漂移。
 int team_capacity_permille(bool supervisor_switched_in);
 
+// ---- 质量聚合（§7.3.4）----
+// 工作项 → 阶段（按 work_total 加权）→ 单集（阶段等权）→ 作品（单集等权）。
+// 质量与工作量不是一个东西：工作项没做完时聚合值会偏低，这是刻意的——
+// 玩家看到的是"目前这部作品的质量"，而不是"已投入部分的平均"。
+struct AggregatedQuality {
+    std::array<int, kDimensionCount> dims{};
+    int mean = 0;   // 六维均值，供总览显示；最终评级由 evaluation 决定（M5）
+};
+
+AggregatedQuality aggregate_stage(const EpisodeStage& stage);
+AggregatedQuality aggregate_episode(const Episode& episode);
+AggregatedQuality aggregate_work(const Project& work);
+
+// ---- 费用（周结算的强制成本，[PLACEHOLDER] 数值）----
+int64_t weekly_operations_cost();
+int64_t weekly_production_cost(const std::string& intensity);
+
 }  // namespace apc::v4::kernel
