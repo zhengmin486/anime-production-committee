@@ -68,18 +68,28 @@ std::vector<ItemAssignment> allocate(const Project& work, const std::vector<cons
 // ---- 产出与质量 ----
 struct ProductionResult {
     int points = 0;                                  // 实际写入工作项的点数
-    int quality_gain = 0;                            // 新增质量总量（六维之和）
+    int quality_gain = 0;                            // 本次质量变化（六维之和，可为负）
     std::array<int, kDimensionCount> quality_by_dim{};
 };
 
-// 阶段维度权重（和为 1000）；公共制作按能力主维度返回
+// 阶段维度权重（和为 1000）；公共制作按能力主维度返回。
+// 这些数值是抽样权重：700/300 意味着本周质量落点有 70% 概率落在前者。
 std::array<int, kDimensionCount> dimension_weights(const std::string& stage_key, const std::string& ability);
 
-// 把产出写入工作项：累加 work_done、按维度分配质量、记录参与者。
-// 质量由累计工作量派生，随机坐标只取 (seed, week, quality, hash(item|staff), 0)，
-// 因此与分派顺序、同期员工数量无关。
+// 质量传递上限（架构 §7.3.4）：某工作项上限 = min(已交付依赖项质量) × 600‰ + 40。
+// 依赖项含公共制作时，公共资产质量低会压低下游项上限——这是公共制作影响作品质量
+// 的通道；上限不引入"公共制作单独作品分"，避免同一质量出现两套数字。
+std::array<int, kDimensionCount> quality_caps(const Project& work, const WorkItem& item);
+
+// 把产出写入工作项：累加 work_done、按维度写入质量评级、记录参与者。
+//
+// 质量是"评级"而不是"工作量换算"：每次投入给出一个 0..100 的质量样本，
+// 样本只由员工能力、专业适配与该周独立随机决定；工作项记录的是样本的逐步逼近值，
+// 因此投入点数翻倍不会让质量翻倍，同一工作量也会因人和随机得到不同结果。
+// 随机坐标取 (seed, week, quality, hash(item|staff), 0)，与分派顺序、同期人数无关。
 ProductionResult apply_production(WorkItem& item, const Staff& staff, int points, bool hands_over,
-                                  std::uint32_t seed, int week, const std::string& stage_key);
+                                  std::uint32_t seed, int week, const std::string& stage_key,
+                                  const std::array<int, kDimensionCount>& caps);
 
 // ---- 磨合 ----
 bool is_supervisor(const std::string& role);
@@ -94,8 +104,9 @@ int team_capacity_permille(bool supervisor_switched_in);
 
 // ---- 质量聚合（§7.3.4）----
 // 工作项 → 阶段（按 work_total 加权）→ 单集（阶段等权）→ 作品（单集等权）。
-// 质量与工作量不是一个东西：工作项没做完时聚合值会偏低，这是刻意的——
-// 玩家看到的是"目前这部作品的质量"，而不是"已投入部分的平均"。
+// 未接触过的工作项质量记 0，所以开发中期的作品质量会随覆盖面扩大而上升；
+// 这是"目前这部作品的质量档案"，不是"已投入部分的平均"。
+// 公共制作不单独出作品分：它通过依赖门槛与 quality_caps 影响下游工作项上限。
 struct AggregatedQuality {
     std::array<int, kDimensionCount> dims{};
     int mean = 0;   // 六维均值，供总览显示；最终评级由 evaluation 决定（M5）

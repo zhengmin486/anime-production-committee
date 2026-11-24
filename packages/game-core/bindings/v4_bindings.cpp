@@ -6,9 +6,14 @@
 #include "apc/v4/runtime.hpp"
 
 EMSCRIPTEN_BINDINGS(apc_v4) {
+    // 内部/测试入口（M1）：可以用于构造夹具，不等于 M0 冻结的玩家命令。
     emscripten::function("initialize", &apc::v4::initialize);
     emscripten::function("instantiate_work", &apc::v4::instantiate_work);
     emscripten::function("set_plan", &apc::v4::set_plan);
+    // M0 契约名适配入口：M2 起客户端只应使用这两个名字。
+    emscripten::function("initialize_game", &apc::v4::initialize_game);
+    emscripten::function("set_work_plan", &apc::v4::set_work_plan);
+    // 已对齐 M0 语义的命令。
     emscripten::function("assign_staff", &apc::v4::assign_staff);
     emscripten::function("advance_week", &apc::v4::advance_week);
     emscripten::function("hash_state", &apc::v4::hash_state);

@@ -19,6 +19,9 @@ constexpr int kFitMismatch = 800;
 constexpr int kPointsPerStaffWeek = 100;     // 1 人周 = 100 工作点
 constexpr int kHandoverLoss = 250;           // 接手磨合：该员工在该项产出扣 25%
 constexpr int kSupervisorSwitchLoss = 100;   // 监督换项目：团队级扣 10%
+constexpr int kQualityApproach = 300;        // 质量评级向本周样本靠拢 30%
+constexpr int kCarryOverPermille = 600;      // 质量传递上限：依赖质量的 60%
+constexpr int kCarryOverOffset = 40;         // 质量传递上限：+40
 
 int clamp(int value, int low, int high) { return std::max(low, std::min(high, value)); }
 
@@ -134,6 +137,32 @@ int points_from_capacity(int capacity_permille_value) {
 }
 
 namespace {
+
+// 质量样本：能力（0..100）+ 专业适配 ±4 + 独立随机 ±5。
+// 与投入点数无关——同一份工作量，不同的人、不同的周得到不同质量。
+int quality_sample(const Staff& staff, const std::string& ability, std::uint32_t seed, int week,
+                   std::uint32_t purpose, int dimension) {
+    const int base = ability_value(staff, ability);
+    const int fit = staff_specialty(staff) == ability ? 4 : -4;
+    const std::uint32_t jitter =
+        draw_below(seed, week, Stream::quality, purpose, static_cast<std::uint32_t>(dimension + 1), 11);
+    return clamp(base + fit + static_cast<int>(jitter) - 5, 0, 100);
+}
+
+// 按权重抽取维度：700/300 真的按 7:3，不是"在非零维度里等概率"。
+int weighted_dimension(const std::array<int, kDimensionCount>& weights, int roll) {
+    for (int i = 0; i < kDimensionCount; ++i) {
+        const int weight = weights[static_cast<std::size_t>(i)];
+        if (weight <= 0) continue;
+        if (roll < weight) return i;
+        roll -= weight;
+    }
+    for (int i = kDimensionCount - 1; i >= 0; --i) {
+        if (weights[static_cast<std::size_t>(i)] > 0) return i;
+    }
+    return -1;
+}
+
 }  // namespace
 
 bool is_unlocked(const Project& work, const WorkItem& item) {
@@ -242,7 +271,8 @@ std::array<int, kDimensionCount> dimension_weights(const std::string& stage_key,
 }
 
 ProductionResult apply_production(WorkItem& item, const Staff& staff, int points, bool hands_over,
-                                  std::uint32_t seed, int week, const std::string& stage_key) {
+                                  std::uint32_t seed, int week, const std::string& stage_key,
+                                  const std::array<int, kDimensionCount>& caps) {
     ProductionResult result;
     int effective = points;
     if (hands_over) effective = points * (1000 - kHandoverLoss) / 1000;
@@ -256,34 +286,46 @@ ProductionResult apply_production(WorkItem& item, const Staff& staff, int points
         item.contributors.push_back(staff.id);
     }
 
-    // 质量与工作量分离：工作量由"投入了多少点"决定，质量由"谁在做"决定。
-    // 同样的点数，能力高的员工质量增量更高；能力低的正好相反。
-    // 量纲：一个 100 点的工作项由能力 1.00 的人做满 → 该维 100 分。
-    const int ability_q = kAbilityBase + ability_value(staff, item.ability) * kAbilityPerPoint;   // 500..1000
-    const int quality_total = (gain * ability_q + 500) / 1000;                                     // 四舍五入
-    result.quality_gain = 0;
-    if (quality_total <= 0) return result;
-
-    // 在阶段权重非零的维度里随机挑一个：落实"随机提升若干质量项"。
-    // 随机坐标取 (seed, week, quality, hash(item|staff), 0)：
-    // 只依赖"谁在哪一周做了什么项"，与分派顺序、员工数量无关。
+    // 质量是评级，不是工作量换算：
+    // - 每次投入给出一个"这批活做得怎么样"的样本，样本只由能力、专业适配与独立随机决定；
+    // - 工作项记录样本的逐步逼近值，因此工作量翻倍不会让质量翻倍；
+    // - 工作量的作用只体现在 work_done / 解锁 / 交付，不进入质量公式。
     const auto weights = dimension_weights(stage_key, item.ability);
-    std::array<int, kDimensionCount> available{};
-    int available_count = 0;
-    for (int i = 0; i < kDimensionCount; ++i) {
-        if (weights[static_cast<std::size_t>(i)] > 0) available[static_cast<std::size_t>(available_count++)] = i;
-    }
-    if (available_count == 0) return result;
+    int total_weight = 0;
+    for (int i = 0; i < kDimensionCount; ++i) total_weight += std::max(weights[static_cast<std::size_t>(i)], 0);
+    if (total_weight <= 0) return result;
 
+    // 落点按权重抽取：700/300 意味着 70% / 30%，而不是"非零维度里等概率"。
     const std::uint32_t purpose = hash_text(item.id + "|" + staff.id);
-    const std::uint32_t pick = draw_below(seed, week, Stream::quality, purpose, 0, static_cast<std::uint32_t>(available_count));
-    const int dim = available[static_cast<std::size_t>(pick)];
+    const int roll = static_cast<int>(draw_below(seed, week, Stream::quality, purpose, 0,
+                                                 static_cast<std::uint32_t>(total_weight)));
+    const int dim = weighted_dimension(weights, roll);
+    if (dim < 0) return result;
+
+    const int sample = quality_sample(staff, item.ability, seed, week, purpose, dim);
     const int before = item.quality.dims[static_cast<std::size_t>(dim)];
-    const int after = std::min(100, before + quality_total);
+    int after = before <= 0
+                    ? sample
+                    : before + (sample - before) * kQualityApproach / 1000;
+    after = clamp(after, 0, std::min(caps[static_cast<std::size_t>(dim)], 100));
     item.quality.dims[static_cast<std::size_t>(dim)] = after;
     result.quality_by_dim[static_cast<std::size_t>(dim)] = after - before;
     result.quality_gain = after - before;
     return result;
+}
+
+std::array<int, kDimensionCount> quality_caps(const Project& work, const WorkItem& item) {
+    std::array<int, kDimensionCount> caps;
+    caps.fill(100);
+    for (const auto& dep_id : item.deps) {
+        const WorkItem* dep = find_item(work, dep_id);
+        if (dep == nullptr || !dep->delivered()) continue;
+        for (int i = 0; i < kDimensionCount; ++i) {
+            const int cap = dep->quality.dims[static_cast<std::size_t>(i)] * kCarryOverPermille / 1000 + kCarryOverOffset;
+            caps[static_cast<std::size_t>(i)] = std::min(caps[static_cast<std::size_t>(i)], std::min(cap, 100));
+        }
+    }
+    return caps;
 }
 
 bool is_supervisor(const std::string& role) {

@@ -16,11 +16,18 @@ std::vector<std::string> validate(const GameState& state);
 std::string state_hash(const GameState& state);
 
 // JSON 命令入口。成功返回 {"state": ..., ...}，失败返回 {"error": {"code","message"}}。
-std::string initialize(const std::string& input);       // {seed, company_name?}
-std::string instantiate_work(const std::string& input);  // {state, blueprint, work_id, duration_weeks?}
-std::string set_plan(const std::string& input);          // {state, work_id, plan}
-std::string assign_staff(const std::string& input);      // {state, staff_id, work_id|null}
-std::string advance_week(const std::string& input);      // {state}
+//
+// 命名说明：M1 的 initialize / instantiate_work / set_plan 是内部/测试入口，
+// 不等同于 M0 冻结的玩家命令；正式语义由下面两个适配入口承担，M2 起统一走契约名。
+std::string initialize(const std::string& input);        // 内部/测试：{seed, company_name?}
+std::string instantiate_work(const std::string& input);  // 内部/测试：{state, blueprint, work_id, duration_weeks?}
+std::string set_plan(const std::string& input);          // 内部/测试：{state, work_id, plan}
+std::string assign_staff(const std::string& input);      // M0 命令 4：{state, staff_id, work_id|null}
+std::string advance_week(const std::string& input);      // M0 命令 18：{state}
 std::string hash_state(const std::string& input);        // {state}
+
+// M0 契约名适配层（薄封装，不改变语义）：
+std::string initialize_game(const std::string& input);   // M0 命令 1：{seed}
+std::string set_work_plan(const std::string& input);     // M0 命令 3：{state, work_id, plan}
 
 }  // namespace apc::v4

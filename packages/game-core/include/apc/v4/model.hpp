@@ -128,10 +128,14 @@ struct Target {
 };
 
 struct WorkPlan {
+    // 生效状态（M1）：
+    // - intensity：已生效，决定每周制作费；
+    // - focus：部分生效，schedule/cost 影响同阶段工作项排序，quality 仅保存（质量落点由阶段权重决定）；
+    // - outsourcing / overtime：仅保存，等 M2/M3 外包与加班规则接入后才有效果。
     std::string intensity = "standard";   // low / standard / high
     std::string focus = "quality";        // quality / schedule / cost
-    std::string outsourcing = "gap_fill"; // none / gap_fill / aggressive
-    bool overtime = false;
+    std::string outsourcing = "gap_fill"; // none / gap_fill / aggressive（M3）
+    bool overtime = false;                // M2
     std::optional<Target> target;
 };
 

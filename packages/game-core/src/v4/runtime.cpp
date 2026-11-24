@@ -102,10 +102,12 @@ bool instantiate(const Json& blueprint, const std::string& work_id, int opened_w
         return false;
     }
 
-    auto map_dep = [](const std::string& dep, const std::string& episode_prefix) -> std::string {
+    // INV-02 要求实体 id 全局唯一：工作项 id 必须带项目前缀，
+    // 否则两个项目都会出现 "common.series_comp" / "ep01.script"。
+    auto map_dep = [&work_id](const std::string& dep, const std::string& episode_prefix) -> std::string {
         const std::string prefix = "common:";
-        if (dep.rfind(prefix, 0) == 0) return "common." + dep.substr(prefix.size());
-        return episode_prefix + dep;
+        if (dep.rfind(prefix, 0) == 0) return work_id + ".common." + dep.substr(prefix.size());
+        return work_id + "." + episode_prefix + dep;
     };
 
     out = Project{};
@@ -124,7 +126,7 @@ bool instantiate(const Json& blueprint, const std::string& work_id, int opened_w
             error = "common 项缺少 key";
             return false;
         }
-        item.id = "common." + item.key;
+        item.id = work_id + ".common." + item.key;
         item.ability = raw.value("ability", std::string{});
         item.work_total = raw.value("work_total", 0);
         item.deliver_at = raw.value("deliver_at", 1000);
@@ -159,7 +161,7 @@ bool instantiate(const Json& blueprint, const std::string& work_id, int opened_w
                 error = "episode 项缺少 key";
                 return false;
             }
-            item.id = prefix + item.key;
+            item.id = work_id + "." + prefix + item.key;
             item.ability = raw.value("ability", std::string{});
             item.work_total = raw.value("work_total", 0);
             item.deliver_at = raw.value("deliver_at", 1000);
@@ -174,6 +176,69 @@ bool instantiate(const Json& blueprint, const std::string& work_id, int opened_w
     return true;
 }
 
+// 必填字段检查：from_json 的默认值会把"缺字段的坏存档"读成"合法但错误的状态"，
+// 所以命令入口先确认结构，再交给反序列化。缺失一律 INVALID_INPUT，不落库、不静默修复。
+GameState decode_state(const Json& request) {
+    if (!request.contains("state") || !request.at("state").is_object()) {
+        throw Json::type_error::create(302, "state 必须是对象", nullptr);
+    }
+    const Json& state = request.at("state");
+    const auto require = [](const Json& object, const char* key, const std::string& where) {
+        if (!object.is_object() || !object.contains(key)) {
+            throw Json::type_error::create(302, "缺少必填字段 " + where + "." + key, nullptr);
+        }
+    };
+    require(state, "company", "state");
+    require(state, "staff", "state");
+    require(state, "works", "state");
+    require(state, "finance", "state");
+    require(state.at("company"), "id", "company");
+    require(state.at("company"), "week", "company");
+    require(state.at("company"), "status", "company");
+    require(state.at("finance"), "opening_funds", "finance");
+    require(state.at("finance"), "balance", "finance");
+    require(state.at("finance"), "entries", "finance");
+    if (!state.at("staff").is_array() || !state.at("works").is_array()) {
+        throw Json::type_error::create(302, "staff / works 必须是数组", nullptr);
+    }
+    for (const auto& member : state.at("staff")) {
+        require(member, "id", "staff[]");
+        require(member, "role", "staff[]");
+        require(member, "abilities", "staff[]");
+    }
+    for (const auto& work : state.at("works")) {
+        require(work, "id", "works[]");
+        require(work, "status", "works[]");
+        require(work, "common", "works[]");
+        require(work, "episodes", "works[]");
+        require(work.at("common"), "items", "works[].common");
+        if (!work.at("common").at("items").is_array() || !work.at("episodes").is_array()) {
+            throw Json::type_error::create(302, "items / episodes 必须是数组", nullptr);
+        }
+        for (const auto& item : work.at("common").at("items")) {
+            require(item, "id", "item");
+            require(item, "ability", "item");
+            require(item, "work_total", "item");
+        }
+        for (const auto& episode : work.at("episodes")) {
+            require(episode, "id", "episode");
+            require(episode, "stages", "episode");
+            if (!episode.at("stages").is_array()) throw Json::type_error::create(302, "stages 必须是数组", nullptr);
+            for (const auto& stage : episode.at("stages")) {
+                require(stage, "key", "stage");
+                require(stage, "items", "stage");
+                if (!stage.at("items").is_array()) throw Json::type_error::create(302, "stage.items 必须是数组", nullptr);
+                for (const auto& item : stage.at("items")) {
+                    require(item, "id", "item");
+                    require(item, "ability", "item");
+                    require(item, "work_total", "item");
+                }
+            }
+        }
+    }
+    return state.get<GameState>();
+}
+
 }  // namespace
 
 // ---------------- 校验 ----------------
@@ -181,14 +246,29 @@ std::vector<std::string> validate(const GameState& state) {
     std::vector<std::string> errors;
     auto error = [&errors](const std::string& message) { errors.push_back(message); };
 
+    // INV-02：实体 id 全局唯一，不是"同类唯一"。staff / work / item / 账本条目
+    // 共用一个集合，重复即报错。
+    std::set<std::string> entity_ids;
+    auto claim_id = [&entity_ids, &error](const std::string& id, const char* kind) {
+        if (id.empty()) {
+            error(std::string("INV-02 ") + kind + " id 不能为空");
+            return;
+        }
+        if (!entity_ids.insert(id).second) error(std::string("INV-02 id 全局重复: ") + id);
+    };
+
     if (state.version != kContractVersion) error("INV-01 version 必须为 4");
     if (state.company.week < 0 || state.company.week > kMaxWeek) error("INV-21 company.week 必须在 0..520");
+    if (state.company.status == "running" && state.company.week >= kMaxWeek) {
+        error("INV-21 running 状态下 week 必须小于 520");
+    }
     if (state.company.status != "running" && state.company.status != "closing" && state.company.status != "ended") {
         error("INV-01 company.status 非法");
     }
 
     std::set<std::string> staff_ids;
     for (const auto& member : state.staff) {
+        claim_id(member.id, "staff");
         if (!staff_ids.insert(member.id).second) error("INV-02 staff.id 重复: " + member.id);
         for (int i = 0; i < kAbilityCount; ++i) {
             const int value = member.abilities[static_cast<std::size_t>(i)];
@@ -196,20 +276,43 @@ std::vector<std::string> validate(const GameState& state) {
         }
         if (member.fatigue < 0 || member.fatigue > 100) error("INV-01 staff.fatigue 越界: " + member.id);
         if (member.morale < 0 || member.morale > 100) error("INV-01 staff.morale 越界: " + member.id);
-        if (member.last_participation && member.last_participation->week > state.company.week) {
-            error("INV-11 last_participation.week 不能晚于当前周: " + member.id);
+        if (member.last_participation) {
+            // INV-11：参与记录严格是"上一周"或 null。跨周保留会让磨合判定
+            // 与存档校验各有一套时间语义，所以周结算里没产出就清空。
+            if (state.company.week == 0 || member.last_participation->week != state.company.week - 1) {
+                error("INV-11 last_participation.week 必须是上一周或 null: " + member.id);
+            }
         }
     }
 
     std::set<std::string> work_ids;
     for (const auto& work : state.works) {
+        claim_id(work.id, "work");
         if (!work_ids.insert(work.id).second) error("INV-02 work.id 重复: " + work.id);
         if (work.episodes.empty()) error("INV-06 项目没有单集: " + work.id);
+        if (!work.common.id.empty()) claim_id(work.common.id, "common");
 
+        // INV-03：公共制作与单集工作项走同一套校验，不能只查单集。
         std::set<std::string> item_ids;
-        for (const auto& item : work.common.items) {
+        const auto check_item = [&](const WorkItem& item) {
+            claim_id(item.id, "item");
             if (!item_ids.insert(item.id).second) error("INV-02 工作项 id 重复: " + item.id);
-        }
+            if (ability_index(item.ability) < 0) error("INV-01 工作项 ability 非法: " + item.id);
+            if (item.work_total <= 0) error("INV-03 work_total 必须为正: " + item.id);
+            if (item.work_done < 0 || item.work_done > item.work_total) error("INV-03 work_done 越界: " + item.id);
+            if (item.deliver_at < 1 || item.deliver_at > 1000) error("INV-03 deliver_at 越界: " + item.id);
+            // INV-12：无重复、引用有效、未开工项不得有参与者（"只增不删"需要历史，单状态无法判定）
+            std::set<std::string> contributors;
+            for (const auto& id : item.contributors) {
+                if (!contributors.insert(id).second) error("INV-12 contributors 重复: " + item.id + "/" + id);
+                if (staff_ids.find(id) == staff_ids.end()) error("INV-12 contributors 引用不存在员工: " + item.id + "/" + id);
+            }
+            if (item.work_done == 0 && !item.contributors.empty()) {
+                error("INV-12 未开工工作项不能有参与者: " + item.id);
+            }
+        };
+        for (const auto& item : work.common.items) check_item(item);
+
         for (const auto& episode : work.episodes) {
             if (episode.stages.size() != static_cast<std::size_t>(kStageCount)) {
                 error("INV-06 单集阶段数必须为 6: " + work.id + "/" + episode.id);
@@ -221,10 +324,7 @@ std::vector<std::string> validate(const GameState& state) {
                     error("INV-06 阶段顺序非法: " + work.id + "/" + episode.id + "/" + stage.key);
                 }
                 for (const auto& item : stage.items) {
-                    if (!item_ids.insert(item.id).second) error("INV-02 工作项 id 重复: " + item.id);
-                    if (item.work_total <= 0) error("INV-03 work_total 必须为正: " + item.id);
-                    if (item.work_done < 0 || item.work_done > item.work_total) error("INV-03 work_done 越界: " + item.id);
-                    if (item.deliver_at < 1 || item.deliver_at > 1000) error("INV-03 deliver_at 越界: " + item.id);
+                    check_item(item);
                     if (item.is_gate) {
                         ++gate_count;
                         if (stage.key != kStages[static_cast<std::size_t>(kStageCount - 1)]) {
@@ -268,16 +368,24 @@ std::vector<std::string> validate(const GameState& state) {
         if (has_cycle(work)) error("INV-04 依赖成环: " + work.id);
     }
 
-    // 归属必须指向存在的项目
+    // INV-09：归属必须指向存在且仍在 producing 的项目
     for (const auto& member : state.staff) {
-        if (member.assignment_work_id && work_ids.find(*member.assignment_work_id) == work_ids.end()) {
+        if (!member.assignment_work_id) continue;
+        const Project* assigned = find_work(state, *member.assignment_work_id);
+        if (assigned == nullptr) {
             error("INV-09 assignment_work_id 指向不存在的项目: " + member.id);
+        } else if (assigned->status != "producing") {
+            error("INV-09 assignment_work_id 必须指向 producing 项目: " + member.id);
         }
     }
 
     // 财务恒等式
     std::int64_t sum = 0;
-    for (const auto& entry : state.finance.entries) sum += entry.amount;
+    for (const auto& entry : state.finance.entries) {
+        claim_id(entry.id, "ledger");
+        if (entry.week < 0 || entry.week > kMaxWeek) error("INV-01 流水周数越界: " + entry.id);
+        sum += entry.amount;
+    }
     if (state.finance.balance != state.finance.opening_funds + sum) error("INV-16 余额不等于期初加流水合计");
     if (state.finance.balance < 0 && state.finance.solvency.state != "crisis" && state.company.status == "running") {
         error("INV-25 正常经营下余额不能为负");
@@ -375,7 +483,7 @@ std::string initialize(const std::string& input) {
 std::string instantiate_work(const std::string& input) {
     try {
         const Json request = Json::parse(input);
-        GameState state = request.at("state").get<GameState>();
+        GameState state = decode_state(request);
         const Json blueprint = request.at("blueprint");
         const std::string work_id = request.value("work_id", std::string("work_01"));
         const int duration_weeks = request.value("duration_weeks", 26);
@@ -404,7 +512,7 @@ std::string instantiate_work(const std::string& input) {
 std::string set_plan(const std::string& input) {
     try {
         const Json request = Json::parse(input);
-        GameState state = request.at("state").get<GameState>();
+        GameState state = decode_state(request);
         const std::string work_id = request.at("work_id").get<std::string>();
         const Json plan = request.at("plan");
 
@@ -485,20 +593,31 @@ std::string set_plan(const std::string& input) {
 std::string assign_staff(const std::string& input) {
     try {
         const Json request = Json::parse(input);
-        GameState state = request.at("state").get<GameState>();
+        GameState state = decode_state(request);
+        if (!request.contains("staff_id") || !request.at("staff_id").is_string()) {
+            return encode(error_body("INVALID_INPUT", "staff_id 必须是字符串"));
+        }
+        if (!request.contains("work_id")) {
+            return encode(error_body("INVALID_INPUT", "work_id 必填；取消分配请显式传 null"));
+        }
         const std::string staff_id = request.at("staff_id").get<std::string>();
 
         Staff* member = find_staff(state, staff_id);
         if (member == nullptr) return encode(error_body("NOT_FOUND", "员工不存在"));
 
-        if (request.contains("work_id") && request.at("work_id").is_string()) {
+        // M0 命令 4 的语义是 assign_staff(staff_id, work_id|null)。
+        // 非法类型不能被静默解释成"取消分配"——那会让客户端一个拼写错误改变玩家归属。
+        if (request.at("work_id").is_null()) {
+            member->assignment_work_id.reset();
+        } else if (request.at("work_id").is_string()) {
             const std::string work_id = request.at("work_id").get<std::string>();
+            if (work_id.empty()) return encode(error_body("INVALID_INPUT", "work_id 不能为空字符串"));
             const Project* work = find_work(state, work_id);
             if (work == nullptr) return encode(error_body("NOT_FOUND", "项目不存在"));
             if (work->status != "producing") return encode(error_body("INVALID_PHASE", "只有制作中的项目可以分配人员"));
             member->assignment_work_id = work_id;
         } else {
-            member->assignment_work_id.reset();
+            return encode(error_body("INVALID_INPUT", "work_id 必须是字符串或 null"));
         }
 
         const auto errors = validate(state);
@@ -514,7 +633,7 @@ std::string assign_staff(const std::string& input) {
 std::string advance_week(const std::string& input) {
     try {
         const Json request = Json::parse(input);
-        GameState state = request.at("state").get<GameState>();
+        GameState state = decode_state(request);
 
         if (state.company.status != "running") return encode(error_body("COMPANY_ENDED", "公司已结束"));
         if (state.company.week >= kMaxWeek) return encode(error_body("INVALID_PHASE", "已达经营上限"));
@@ -623,8 +742,9 @@ std::string advance_week(const std::string& input) {
                                         snapshot->second.count(member->id) > 0;
                 }
                 const bool hands_over = kernel::hands_over_item(prior.first, item->work_total, prior_contributed, member->role);
+                const auto caps = kernel::quality_caps(*work, *item);
                 const auto result = kernel::apply_production(*item, *member, assignment.points, hands_over, state.seed,
-                                                             week, assignment.stage_key);
+                                                             week, assignment.stage_key, caps);
                 produced_by_staff[member->id] += result.points;
                 if (item_reports.find(item->id) == item_reports.end()) {
                     order.push_back(item->id);
@@ -671,6 +791,9 @@ std::string advance_week(const std::string& input) {
             } else {
                 member.fatigue = clamp_int(member.fatigue - kFatigueRestLoss, 0, 100);
                 member.morale = clamp_int(member.morale + kMoraleRestGain, 0, 100);
+                // INV-11：参与记录只允许是"上周"或 null。本周没产出就清空，
+                // 不能留着两周前的记录让校验器与磨合判定各说一套。
+                member.last_participation.reset();
             }
             staff_report.push_back(Json{{"staff_id", member.id}, {"produced", produced},
                                         {"fatigue", member.fatigue}, {"morale", member.morale}});
@@ -697,10 +820,28 @@ std::string advance_week(const std::string& input) {
     }
 }
 
+// M0 契约名适配：薄封装，避免测试入口被误当成正式命令。
+std::string initialize_game(const std::string& input) {
+    try {
+        const Json request = Json::parse(input);
+        const bool valid_seed = request.contains("seed") &&
+            (request.at("seed").is_number_unsigned() ||
+             (request.at("seed").is_number_integer() && request.at("seed").get<std::int64_t>() >= 0));
+        if (!valid_seed) return encode(error_body("INVALID_INPUT", "seed 必须是非负整数"));
+        return initialize(input);
+    } catch (const Json::exception&) {
+        return encode(error_body("INVALID_INPUT", "JSON 或字段类型无效"));
+    } catch (...) {
+        return encode(error_body("INTERNAL_ERROR", "内部错误"));
+    }
+}
+
+std::string set_work_plan(const std::string& input) { return set_plan(input); }
+
 std::string hash_state(const std::string& input) {
     try {
         const Json request = Json::parse(input);
-        const GameState state = request.at("state").get<GameState>();
+        const GameState state = decode_state(request);
         return encode(Json{{"hash", state_hash(state)}});
     } catch (const Json::exception&) {
         return encode(error_body("INVALID_INPUT", "JSON 或字段类型无效"));
