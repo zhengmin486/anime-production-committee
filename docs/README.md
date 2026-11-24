@@ -19,6 +19,7 @@
 - [架构评审记录（2026-11-24）](ARCHITECTURE_REVIEW_2026-11-24.md)：架构评审结论、整改状态与 M0 契约核验。
 
 - [M0 契约冻结](M0_CONTRACT_FREEZE.md)
+- [M0–M7 开发路线与里程碑](DEVELOPMENT_ROADMAP.md)
 - [制作蓝图规范](BLUEPRINT_SPEC.md)
 - [权威决策登记册](DECISION_LOG.md)
 - [研究与审计成果目录](RESEARCH_CATALOG.md)
