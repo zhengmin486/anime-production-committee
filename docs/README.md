@@ -56,6 +56,17 @@
 
 审计文档可能引用特定分支、提交和旧规则。使用时必须核对其审计基线，不得把其中的历史状态直接描述为当前实现。
 
+## 历史研究与评审归档
+
+以下材料来自未合并研究/设计分支，现仅保留为历史证据与讨论记录；不具有规则、接口、人员分工或开发计划的权威性。使用前必须与当前决策登记册、架构契约和 GitHub Issue 状态核对。
+
+- [愿景深化复核与三方建议汇编](archive/reviews/VISION_DEEPENING_REVIEW_2026-11-24.md)
+- [独立游戏设计评审报告](archive/reviews/2026-11-24-independent-game-design-review.md)
+- [独立评审后续讨论记录](archive/reviews/2026-11-24-review-follow-up-decisions.md)
+- [全仓库设计重新审查报告](archive/reviews/FULL_DESIGN_REAUDIT_2026-11-25.md)
+- [员工与组织系统设计研究稿](archive/reviews/STAFF_ORG_SYSTEM_DESIGN_2026-11-24.md)
+- [模块依赖与并行开发矩阵（历史版本）](archive/reviews/MODULE_DEPENDENCY_MATRIX_2026-11-24.md)
+
 ## 候选设计与计划
 
 这些文档包含设计判断、候选规则、架构建议或工作拆分。这些文件用于理解设计演进和历史审查；当前研究阶段已结束，后续以架构实现、模拟验证和试玩反馈为主：
