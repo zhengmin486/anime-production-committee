@@ -1,4 +1,4 @@
- # 本轮分工（V1.0 迁移）
+# 本轮分工（V1.0 迁移）
 
 > 历史分工记录：本文记录旧版 V2/V3 模块分工与 M2 任务安排，不代表当前实施阶段。现行决策以 [DECISION_LOG.md](DECISION_LOG.md) 为准，目标架构以 [DOMAIN_ARCHITECTURE.md](DOMAIN_ARCHITECTURE.md) 为准。当前先由单一主架构智能体完成整体架构设计，再按稳定边界拆分开发任务。
 
