@@ -4,13 +4,13 @@ ANIME PRODUCTION COMMITTEE · 动画制作公司经营模拟游戏
 
 《动画制作委员会》目标形态是参考开罗游戏的轻量经营模拟：公司可并行经营多部作品，项目制作由项目级公共制作与单集六阶段组成；单集工作按依赖、最低交付和并行关系推进。核心玩法决策见 [docs/DECISION_LOG.md](docs/DECISION_LOG.md)，目标领域架构见 [docs/DOMAIN_ARCHITECTURE.md](docs/DOMAIN_ARCHITECTURE.md)。
 
-> **当前代码仍是旧版运行时。** 本仓库中的 V2/V3 页面、数据结构、五阶段与单项目测试记录描述历史纵向切片，不能代表目标玩法已实现。研究阶段已结束，当前进入整体架构设计与迁移准备；架构、规则、代码和测试状态见 [docs/PROGRESS.md](docs/PROGRESS.md)。
+> **当前开发状态：M0 已完成，M1 v4 runtime 基础切片已合入 main，M2 正在推进。** V2/V3 页面、数据结构、五阶段与单项目测试记录属于历史纵向切片；v3 仍保留作迁移参照，正式运行时切换安排在 M6。目标规则、当前实现和验收状态见 [docs/PROGRESS.md](docs/PROGRESS.md)。
 
-## M0/M1 历史契约与验收记录
+## M0 契约与 M1 v4 runtime
 
-v3 目标结构、合法动作、周结算顺序、同周破产优先级、承制/委员会手算账与旧档拒绝策略见 [DATA_MODEL](docs/DATA_MODEL.md)、[API](docs/API.md)、[GAME_RULES](docs/GAME_RULES.md) 的 V3 部分。可编译契约与校验在 [gameV3.ts](apps/web/src/types/gameV3.ts)，静态夹具与契约测试供后续前后端独立开发。交接与尚未实现项见 [TEAM_PLAN](docs/TEAM_PLAN.md)。
+v4 目标结构、合法动作、周结算与危机边界、存档策略见 [DATA_MODEL](docs/DATA_MODEL.md)、[API](docs/API.md)、[GAME_RULES](docs/GAME_RULES.md) 的 V3 部分。可编译契约与校验在 [gameV3.ts](apps/web/src/types/gameV3.ts)，静态夹具与契约测试供后续前后端独立开发。交接与尚未实现项见 [TEAM_PLAN](docs/TEAM_PLAN.md)。
 
-**以下是历史验收记录。** M1 曾将 C++/WASM 核心切到 V3，随后完成前端接入；这些验收针对旧单项目/五阶段运行时。当前目标玩法尚未按新架构实现，进度见 [docs/PROGRESS.md](docs/PROGRESS.md)。
+**以下 V2/V3 验收记录属于历史运行时证据。** M1 v4 runtime 已通过 PR #66 合入 main，但完整事件闭环、存档恢复、M2 单项目纵向闭环及 M6 前端切换仍按路线推进；不能把 M1 合入描述为目标玩法全部完成。
 
 ## 旧运行时已实现内容（不代表目标玩法）
 
