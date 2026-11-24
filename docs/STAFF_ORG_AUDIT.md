@@ -3,7 +3,7 @@
 > 审计日期：2026-11-24
 > 审计对象：`zhengmin486/anime-production-committee`，main @ `a74c23a`（205 commits，2026-11-20 ~ 24）
 > 证据来源：正式文档、DATA_MODEL/API 契约、核心 C++ 代码、Issue #7 全部 17 条评论、提交历史、未合入分支 `research/core-gameplay-architecture` 与 `sim/staff-scheduling-v0.1`
-> 文档性质：审计报告（审计产物，非项目正式规则，不修改任何现有代码/文档/契约）
+> 文档性质：历史审计报告（审计产物，非项目正式规则）。本文关于旧契约和员工跨项目能力的描述是审计时点事实；当前核心员工每周严格单项目分配已由 [DECISION_LOG.md](DECISION_LOG.md) 确认，不能再据此提出支援机制作为待决问题。
 > 历史对话库无该项目记录（检索返回 0），故结论全部以仓库证据为准
 
 ## 审计方法与证据等级
