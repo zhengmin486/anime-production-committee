@@ -217,6 +217,7 @@ Sites 官方插件本地打包约束：单文件不超过 50 MiB，整体发布 
 - [本轮分工（V1.0 迁移）](docs/TEAM_PLAN.md)
 - [制作事件模块设计（M2 提案）](docs/EVENT_MODULE_DESIGN.md)
 - [事件内容填写指南](docs/EVENT_CONTENT_GUIDE.md)
+- [事件域迁移提案（多项目）](docs/EVENT_DOMAIN_MIGRATION_PROPOSAL.md)
 - [当前进度与方向](docs/PROGRESS.md)
 
 ## 当前范围与未完项
