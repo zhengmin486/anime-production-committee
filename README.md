@@ -1,10 +1,10 @@
 # 动画制作委员会
 
-ANIME PRODUCTION COMMITTEE · 浏览器经营模拟游戏最小纵向切片 · v2 状态协议
+ANIME PRODUCTION COMMITTEE · 动画制作公司经营模拟游戏
 
-当前范围是初始化公司、选择企划、安排团队、推进制作、处理事件、结算并接取下一部的最小循环，不是完整游戏或最终平衡版本。React 通过 Emscripten 的真实 WebAssembly 调用 C++ 六接口；没有用 TypeScript 伪造核心计算，也没有独立后端。
+《动画制作委员会》目标形态是参考开罗游戏的轻量经营模拟：公司可并行经营多部作品，项目制作由项目级公共制作与单集六阶段组成；单集工作按依赖、最低交付和并行关系推进。核心玩法决策见 [docs/DECISION_LOG.md](docs/DECISION_LOG.md)，目标领域架构见 [docs/DOMAIN_ARCHITECTURE.md](docs/DOMAIN_ARCHITECTURE.md)。
 
-> **V1.0 迁移进行中。** 下面的玩法、协议与验收描述的是已合入的 v2 纵向切片，仍然准确，但不是目标形态。《游戏设计总案 V1.0》要求周制经营、五阶段、企划市场、委员会投资、六能力用工与公司终局，差距见 [docs/V1_GAP_REVIEW.md](docs/V1_GAP_REVIEW.md)，本轮分工与顺序见 [docs/TEAM_PLAN.md](docs/TEAM_PLAN.md)，任务在 [议题 #1](https://github.com/zhengmin486/anime-production-committee/issues/1) 与 #2–#9。
+> **当前代码仍是旧版运行时。** 本仓库中的 V2/V3 页面、数据结构、五阶段与单项目测试记录描述历史纵向切片，不能代表目标玩法已实现。研究阶段已结束，当前进入整体架构设计与迁移准备；架构、规则、代码和测试状态见 [docs/PROGRESS.md](docs/PROGRESS.md)。
 
 ## M0 契约交付
 
