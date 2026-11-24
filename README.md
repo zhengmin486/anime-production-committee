@@ -204,6 +204,10 @@ Sites 官方插件本地打包约束：单文件不超过 50 MiB，整体发布 
 
 ## 文档
 
+- [权威决策登记册](docs/DECISION_LOG.md)：负责人已确认的当前玩法规则，智能体开始工作前必须核对。
+- [研究与审计成果目录](docs/RESEARCH_CATALOG.md)：研究报告、系统审计、模拟与实验材料索引。
+- [核心玩法重构框架](docs/CORE_GAMEPLAY_REBUILD_FRAMEWORK.md)：当前玩法基线。
+
 - [贡献与协作指南](CONTRIBUTING.md)
 - [核心玩法重构框架（当前设计基线）](docs/CORE_GAMEPLAY_REBUILD_FRAMEWORK.md)
 - [2026-11-24 仓库审查与合并登记](docs/REBUILD_REVIEW_AND_MERGE_REGISTER_2026-11-24.md)
