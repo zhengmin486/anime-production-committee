@@ -159,7 +159,26 @@ pending
 3. **事件收入**：`funds_gain` 是否允许，以及归入哪个 Finance 分类；在决定前，卡片中相关选项不实现。
 4. **每周上限**：M0 未写「每周最多一条」；§9.2 阶段 11 输出「至多一个待处理事件」，可理解为自然上限，需确认是否还要 `last_event_week` 去重。
 
-## 10. 明确不做
+## 10. 与 M1 运行时骨架的对接点
+
+对照 PR #42（`feat/v4-m1-runtime`）的 `runtime.cpp` / `model.hpp`：
+
+| 对接点 | 现状 | M2 需要的改动 |
+| --- | --- | --- |
+| `events` 占位 | `model.hpp` 里是 `Json events` | 换成强类型 `EventState`，或先在 `event.hpp` 定义再替换 |
+| `advance_week` 守卫 | 已有 `events.pending != null → INVALID_PHASE`（第 516 行） | 不改，与 M0 命令 18 一致 |
+| 抽取位置 | 制作→人员→`company.week = week + 1`（第 614 行） | 在第 614 行**之前**插入第 11 阶段事件抽取 |
+| 周回执 | `report = {week, works, staff}` | 增加 `report.events = {drawn, event_id?, dropped_*}` |
+| 命令分发 | 无 `resolve_event` | 新增 `event.hpp/.cpp`，`runtime.cpp` 只加一行分发 |
+| `state_hash` | 整份 GameState 规范化 JSON | 自动覆盖 `events`；要求选项数组按目录顺序生成，不能按 map 遍历顺序拼 |
+
+文件边界建议（避免与 #42 作者互相覆盖）：
+
+- 新增 `include/apc/v4/event.hpp`、`src/v4/event.cpp`：目录、触发、优先级、选项快照、效果意图；
+- `model.hpp` 的 `Json events` 强类型替换等 #42 合入后再做；
+- `runtime.cpp` 只允许两处改动：第 614 行前的一次抽取调用、dispatch 的一行 `resolve_event`。
+
+## 11. 明确不做
 
 - 不在 v4 代码里复活 `phase`、顶层 `pending_event`、`project.event_state`。
 - 不直接 cherry-pick #19/#24 的运行时补丁。
