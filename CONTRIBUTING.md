@@ -1,6 +1,8 @@
 # 贡献指南
 
-本项目采用三人小团队协作：先确定最小范围和接口，再分工实现，通过 Pull Request 集成。以下是协作约定，不代表已经配置 GitHub 分支保护、自动评审或 CI。
+> 当前产品决策见 [docs/DECISION_LOG.md](docs/DECISION_LOG.md)，目标领域架构见 [docs/DOMAIN_ARCHITECTURE.md](docs/DOMAIN_ARCHITECTURE.md)。仓库中 V2/V3 与 M0/M1/M2 的旧任务说明属于历史实现记录；当前先完成整体架构设计，再按稳定边界拆分实现，不得按旧五阶段/单项目规则直接开发。
+
+本项目采用异步协作：先明确产品方向和架构边界，再由模块负责人自主完成专业设计与实现，通过 Pull Request 集成。以下协作约定不代表已经配置 GitHub 分支保护、自动评审或 CI。
 
 ## 开始之前
 
@@ -13,7 +15,7 @@
 | [API.md](docs/API.md) | 当前前端与 C++ 的输入、输出和错误契约 |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | 分支、提交、PR、评审与协作流程 |
 
-玩法细节见 [GAME_DESIGN.md](docs/GAME_DESIGN.md)，规则与暂定参数见 [GAME_RULES.md](docs/GAME_RULES.md)，现行 v2 数据结构见 [DATA_MODEL.md](docs/DATA_MODEL.md)。模型、API、实现与测试应同步更新，不各自维护不同含义的同名字段。
+玩法细节见 [GAME_DESIGN.md](docs/GAME_DESIGN.md)，现行决策见 [DECISION_LOG.md](docs/DECISION_LOG.md)，目标架构见 [DOMAIN_ARCHITECTURE.md](docs/DOMAIN_ARCHITECTURE.md)。[DATA_MODEL.md](docs/DATA_MODEL.md) 与 [API.md](docs/API.md) 仍描述旧 V3 契约，不能当成新架构的最终接口。模型、API、实现与测试应同步更新，不各自维护不同含义的同名字段。
 
 当前最小纵向切片已实现六个 C++ 接口，React 通过真实 WASM 完成初始化、接取企划、决策、日结、事件与结算；本地验收记录见 README。固定名册、目录、事件和系数仍是暂定参数，经济口径与最终平衡待团队复核。新增玩法前，在 Issue 中确认范围、接口与验收标准；不要把计划中的能力描述成已实现。
 
