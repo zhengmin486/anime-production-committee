@@ -1,5 +1,8 @@
 # 游戏设计总览（V1.0 目标）
 
+> **状态说明（2026-11-24）：** 本文是旧 V1.0 目标玩法说明，保留作历史设计与迁移参考。其内容不一定覆盖当前已确认的新规则；冲突时以 [DECISION_LOG.md](DECISION_LOG.md) 和 [DOMAIN_ARCHITECTURE.md](DOMAIN_ARCHITECTURE.md) 为准。
+
+
 > 本文是 V1.0 的整体玩法说明。旧版 v2 的按天推进、三工序、固定三报价等内容仅作为历史纵向切片保留，不再作为新玩法设计依据。当前实现进度见 [PROGRESS.md](PROGRESS.md)，具体规则以 [GAME_RULES.md](GAME_RULES.md)、[DATA_MODEL.md](DATA_MODEL.md) 和 [API.md](API.md) 为准。
 
 ## 1. 产品核心
