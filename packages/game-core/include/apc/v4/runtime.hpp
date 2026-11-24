@@ -24,6 +24,7 @@ std::string instantiate_work(const std::string& input);  // 内部/测试：{sta
 std::string set_plan(const std::string& input);          // 内部/测试：{state, work_id, plan}
 std::string assign_staff(const std::string& input);      // M0 命令 4：{state, staff_id, work_id|null}
 std::string advance_week(const std::string& input);      // M0 命令 18：{state}
+std::string resolve_event(const std::string& input);  // M0 命令 19：{state, event_id, option_id}
 std::string hash_state(const std::string& input);        // {state}
 
 // M0 契约名适配层（薄封装，不改变语义）：

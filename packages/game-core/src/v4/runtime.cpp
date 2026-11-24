@@ -1,4 +1,5 @@
 #include "apc/v4/runtime.hpp"
+#include "apc/v4/event.hpp"
 
 #include <algorithm>
 #include <cstdio>
@@ -799,6 +800,9 @@ std::string advance_week(const std::string& input) {
                                         {"fatigue", member.fatigue}, {"morale", member.morale}});
         }
 
+        // ---- 阶段 11：事件抽取（读本周已提交的结果，不碰账）----
+        const Json events_report = event::draw(state, week);
+
         state.company.week = week + 1;
 
         const auto post_errors = validate(state);
@@ -807,6 +811,7 @@ std::string advance_week(const std::string& input) {
         Json report = Json{{"week", week},
                            {"works", works_report},
                            {"staff", staff_report},
+                           {"events", events_report},
                            {"funds", Json{{"delta", -total_cost},
                                           {"balance", state.finance.balance},
                                           {"costs", Json{{"salary", salary_total},
@@ -837,6 +842,143 @@ std::string initialize_game(const std::string& input) {
 }
 
 std::string set_work_plan(const std::string& input) { return set_plan(input); }
+
+namespace {
+
+void apply_quality(Project& work, const std::string& stage_key, int delta) {
+    auto apply_item = [delta](WorkItem& item) {
+        for (auto& value : item.quality.dims) {
+            value = std::clamp(value + delta, 0, 100);
+        }
+    };
+    if (stage_key.empty()) {
+        for (auto& item : work.common.items) apply_item(item);
+        for (auto& episode : work.episodes) {
+            for (auto& stage : episode.stages) {
+                for (auto& item : stage.items) apply_item(item);
+            }
+        }
+        return;
+    }
+    for (auto& episode : work.episodes) {
+        for (auto& stage : episode.stages) {
+            if (stage.key != stage_key) continue;
+            for (auto& item : stage.items) apply_item(item);
+        }
+    }
+}
+
+// 把进度点按 id 顺序灌入未完成项，确定性且不跨阶段。
+void apply_points(Project& work, const std::string& stage_key, int points) {
+    if (points <= 0) return;
+    std::vector<WorkItem*> items;
+    for (auto& episode : work.episodes) {
+        for (auto& stage : episode.stages) {
+            if (!stage_key.empty() && stage.key != stage_key) continue;
+            for (auto& item : stage.items) {
+                if (item.is_gate || item.work_done >= item.work_total) continue;
+                items.push_back(&item);
+            }
+        }
+    }
+    std::sort(items.begin(), items.end(), [](const WorkItem* a, const WorkItem* b) { return a->id < b->id; });
+    for (WorkItem* item : items) {
+        if (points <= 0) break;
+        const int add = std::min(points, item->work_total - item->work_done);
+        item->work_done += add;
+        points -= add;
+    }
+}
+
+// 应用层：把事件选项的效果翻译成 Project/Staff 的公开操作。
+void apply_event_effects(GameState& state, Project& work, const event::OptionSpec& option) {
+    std::vector<Staff*> targets;
+    for (auto& member : state.staff) {
+        if (member.assignment_work_id && *member.assignment_work_id == work.id) targets.push_back(&member);
+    }
+    if (targets.empty()) {
+        for (auto& member : state.staff) {
+            if (member.employment == "core") targets.push_back(&member);
+        }
+    }
+    for (const auto& effect : option.effects) {
+        if (effect.scope == "stage" && effect.target == "quality") {
+            apply_quality(work, effect.stage, effect.value);
+            continue;
+        }
+        if (effect.scope == "stage" && effect.target == "work_done") {
+            apply_points(work, effect.stage, effect.value);
+            continue;
+        }
+        if (effect.scope == "instant" && effect.target == "fatigue") {
+            for (Staff* member : targets) member->fatigue = std::clamp(member->fatigue + effect.value, 0, 100);
+            continue;
+        }
+        if (effect.scope == "instant" && effect.target == "morale") {
+            for (Staff* member : targets) member->morale = std::clamp(member->morale + effect.value, 0, 100);
+        }
+    }
+}
+
+}  // namespace
+
+std::string resolve_event(const std::string& input) {
+    try {
+        const Json request = Json::parse(input);
+        GameState state = decode_state(request);
+        if (state.company.status != "running") return encode(error_body("COMPANY_ENDED", "公司已结束"));
+        if (!request.contains("event_id") || !request.contains("option_id")) {
+            return encode(error_body("INVALID_INPUT", "缺少 event_id 或 option_id"));
+        }
+        const std::string event_id = request.at("event_id").get<std::string>();
+        const std::string option_id = request.at("option_id").get<std::string>();
+        const auto pre_errors = validate(state);
+        if (!pre_errors.empty()) return encode(error_body("INVALID_STATE", pre_errors.front()));
+
+        const auto resolution = event::inspect(state, event_id, option_id);
+        if (resolution.spec == nullptr || resolution.option == nullptr) {
+            return encode(error_body(resolution.code.c_str(), resolution.message));
+        }
+        const std::string work_id = state.events.at("pending").at("work_id").get<std::string>();
+        Project* work = nullptr;
+        for (auto& item : state.works) {
+            if (item.id == work_id) work = &item;
+        }
+        if (work == nullptr) return encode(error_body("NOT_FOUND", "事件归属项目不存在"));
+
+        const int week = state.company.week;
+        if (resolution.option->cost > 0) {
+            if (state.finance.balance < resolution.option->cost) {
+                return encode(error_body("INSUFFICIENT_FUNDS", "现金不足以支付该选项"));
+            }
+            state.finance.entries.push_back(LedgerEntry{
+                "w" + std::to_string(week) + ".events." + event_id, week, work_id, "events",
+                -resolution.option->cost, std::nullopt, event_id});
+            state.finance.balance -= resolution.option->cost;
+        }
+        apply_event_effects(state, *work, *resolution.option);
+
+        auto& entry = state.events["per_work"][work_id];
+        if (!entry.is_object()) entry = Json::object();
+        if (!entry.contains("cooldowns") || !entry.at("cooldowns").is_object()) entry["cooldowns"] = Json::object();
+        if (resolution.spec->cooldown_weeks > 0) {
+            entry["cooldowns"][resolution.spec->id] = week + resolution.spec->cooldown_weeks;
+        }
+        if (resolution.spec->once_per_project) {
+            if (!entry.contains("major_seen") || !entry.at("major_seen").is_array()) entry["major_seen"] = Json::array();
+            entry["major_seen"].push_back(resolution.spec->id);
+        }
+        state.events["pending"] = nullptr;
+
+        const auto post_errors = validate(state);
+        if (!post_errors.empty()) return encode(error_body("INTERNAL_ERROR", "处理后状态非法: " + post_errors.front()));
+        return encode(Json{{"state", state}, {"message", "已处理「" + resolution.spec->name + "」"}});
+    } catch (const Json::exception&) {
+        return encode(error_body("INVALID_INPUT", "JSON 或字段类型无效"));
+    } catch (...) {
+        return encode(error_body("INTERNAL_ERROR", "内部错误"));
+    }
+}
 
 std::string hash_state(const std::string& input) {
     try {

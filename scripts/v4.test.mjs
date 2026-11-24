@@ -234,9 +234,9 @@ test('门槛优先级高于质量取向（回归：已过门槛的项不得吸�
     for (const staffId of ['staff_dir', 'staff_ka', 'staff_anim']) {
       state = ok('assign_staff', { state, staff_id: staffId, work_id: 'work_01' }).state
     }
-    state = ok('advance_week', { state }).state
+    state = ok('advance_week', { state: clearPendingEvent(state) }).state
     // 第 1 周：公共项已过门槛但仍未完成，脚本尚未开工 —— 应当轮到脚本
-    const advanced = ok('advance_week', { state })
+    const advanced = ok('advance_week', { state: clearPendingEvent(state) })
     const script = findItem(advanced.state, 'work_01', 'ep01.script')
     const common = findItem(advanced.state, 'work_01', 'common.series_comp')
     assert.ok(common.work_done > 150 && common.work_done < 1000, `${focus}: 公共项应已过门槛但未完成`)
@@ -345,6 +345,15 @@ const assign = (state, staffId, workId = 'work_01') =>
 
 const meanOf = (dims) => Math.round(Object.values(dims).reduce((sum, value) => sum + value, 0) / 6)
 
+// M1 的周结算会抽事件；跨周用例先处理掉待处理事件，避免被 INVALID_PHASE 挡住。
+function clearPendingEvent(state) {
+  const pending = state.events?.pending
+  if (!pending) return state
+  const usable = pending.options.filter((entry) => entry.disabled_reason == null)
+  const option = usable.find((entry) => entry.cost === 0) ?? usable[0]
+  return ok('resolve_event', { state, event_id: pending.event_id, option_id: option.id }).state
+}
+
 function singleItemBlueprint(workTotal, overrides = {}) {
   return {
     ...tiny,
@@ -406,7 +415,7 @@ test('质量：未开工为 0，部分完成是评级，完成后不越界', () 
 
   // 同一员工跨专业投入按 800‰ 折算，需要几周才能做满；逐周确认质量始终是评级。
   for (let guard = 0; guard < 6; guard++) {
-    state = ok('advance_week', { state }).state
+    state = ok('advance_week', { state: clearPendingEvent(state) }).state
     const item = findItem(state, 'work_01', 'common.series_comp')
     assert.ok(Object.values(item.quality).every((value) => value >= 0 && value <= 100))
     if (item.work_done === item.work_total) break
@@ -505,7 +514,7 @@ test('参与记录：未产出周清空，满足 INV-11', () => {
   state = ok('advance_week', { state }).state
   assert.equal(state.staff.find((entry) => entry.id === 'staff_dir').last_participation.week, 0)
   state = ok('assign_staff', { state, staff_id: 'staff_dir', work_id: null }).state
-  state = ok('advance_week', { state }).state
+  state = ok('advance_week', { state: clearPendingEvent(state) }).state
   assert.equal(state.staff.find((entry) => entry.id === 'staff_dir').last_participation, null)
   ok('assign_staff', { state, staff_id: 'staff_dir', work_id: 'work_01' })
 })
@@ -545,4 +554,66 @@ test('契约名适配：initialize_game / set_work_plan 与内部入口等价', 
   const viaInternal = ok('set_plan', { state: base, work_id: 'work_01', plan }).state
   const viaContract = ok('set_work_plan', { state: base, work_id: 'work_01', plan }).state
   assert.equal(ok('hash_state', { state: viaInternal }).hash, ok('hash_state', { state: viaContract }).hash)
+})
+
+// ---- 事件 M2 最小闭环 ----
+
+function degradeQuality(state, workId) {
+  for (const item of allItems(state, workId)) {
+    for (const dim of Object.keys(item.quality)) item.quality[dim] = 0
+  }
+  return state
+}
+
+test('事件：表现条件成立时在周结算后抽取，待处理阻塞下一次推进', () => {
+  let state = degradeQuality(setupTiny(7), 'work_01')
+  const advanced = ok('advance_week', { state })
+  state = advanced.state
+  assert.equal(advanced.report.events.drawn, true)
+  assert.equal(state.events.pending.event_id, 'key_cut_rework')
+  assert.equal(state.events.pending.work_id, 'work_01')
+
+  const blocked = call('advance_week', { state })
+  assert.equal(blocked.error.code, 'INVALID_PHASE')
+
+  const resolved = ok('resolve_event', { state, event_id: 'key_cut_rework', option_id: 'accept' })
+  assert.equal(resolved.state.events.pending, null)
+  const next = ok('advance_week', { state: resolved.state })
+  assert.equal(next.state.company.week, state.company.week + 1)
+})
+
+test('事件：付费选项只扣一次款，记入 events 流水并写冷却', () => {
+  let state = degradeQuality(setupTiny(7), 'work_01')
+  state = ok('advance_week', { state }).state
+  const balance = state.finance.balance
+  const fatigue = state.staff.map((member) => member.fatigue)
+  const resolved = ok('resolve_event', { state, event_id: 'key_cut_rework', option_id: 'rework' }).state
+  assert.equal(resolved.finance.balance, balance - 180000)
+  assert.equal(resolved.finance.entries.at(-1).category, 'events')
+  assert.equal(resolved.finance.entries.at(-1).amount, -180000)
+  assert.deepEqual(
+    resolved.staff.map((member) => member.fatigue),
+    fatigue.map((value) => Math.min(100, value + 6)),
+  )
+  assert.equal(resolved.events.per_work.work_01.cooldowns.key_cut_rework, resolved.company.week + 6)
+})
+
+test('事件：非法选项与无待处理事件都返回 NOT_FOUND 且状态不变', () => {
+  let state = degradeQuality(setupTiny(7), 'work_01')
+  state = ok('advance_week', { state }).state
+  const before = ok('hash_state', { state }).hash
+  const bad = call('resolve_event', { state, event_id: 'key_cut_rework', option_id: 'nope' })
+  assert.equal(bad.error.code, 'NOT_FOUND')
+  assert.equal(ok('hash_state', { state }).hash, before)
+
+  const resolved = ok('resolve_event', { state, event_id: 'key_cut_rework', option_id: 'accept' }).state
+  const again = call('resolve_event', { state: resolved, event_id: 'key_cut_rework', option_id: 'accept' })
+  assert.equal(again.error.code, 'NOT_FOUND')
+})
+
+test('事件：同 seed 同状态抽取结果与哈希一致', () => {
+  const first = ok('advance_week', { state: degradeQuality(setupTiny(11), 'work_01') })
+  const second = ok('advance_week', { state: degradeQuality(setupTiny(11), 'work_01') })
+  assert.deepEqual(first.report.events, second.report.events)
+  assert.equal(ok('hash_state', { state: first.state }).hash, ok('hash_state', { state: second.state }).hash)
 })

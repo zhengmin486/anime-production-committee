@@ -16,5 +16,6 @@ EMSCRIPTEN_BINDINGS(apc_v4) {
     // 已对齐 M0 语义的命令。
     emscripten::function("assign_staff", &apc::v4::assign_staff);
     emscripten::function("advance_week", &apc::v4::advance_week);
+    emscripten::function("resolve_event", &apc::v4::resolve_event);
     emscripten::function("hash_state", &apc::v4::hash_state);
 }
