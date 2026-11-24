@@ -42,16 +42,17 @@
 - [跨模块账目一致性审计脚本](../scripts/audit-ledger-consistency.mjs)：PR #21 已合并，提供只读财务核验方法；适配的是旧 V3 状态结构，迁移时需重写输入适配。
 
 - [事件域迁移提案 PR #33](https://github.com/zhengmin486/anime-production-committee/pull/33)：记录事件域迁移设计及仍需裁决的范围问题；以 PR 页面实时状态为准，不将提案内容自动视为已确认规则。
-- [领域边界与数据所有权草案](DOMAIN_BOUNDARIES_AND_DATA_OWNERSHIP_DRAFT_2026-11-24.md)：PR #34 的 WP0 历史草案，已由当前 [领域架构设计](DOMAIN_ARCHITECTURE.md) v1.3 取代。
+- [领域边界与数据所有权草案](DOMAIN_BOUNDARIES_AND_DATA_OWNERSHIP_DRAFT_2026-11-24.md)：PR #34 的 WP0 历史草案，已由当前 [领域架构设计](DOMAIN_ARCHITECTURE.md) v1.4 取代。
 
 ## 5. 研究之外的设计与工程材料
 
-- [架构评审记录](ARCHITECTURE_REVIEW_2026-11-24.md)：v1.3 架构评审发现、修正记录和 M0 验收前置项。
+- [架构评审记录](ARCHITECTURE_REVIEW_2026-11-24.md)：架构评审发现、修正记录和 M0 契约核验记录。
 - [制作蓝图规范](BLUEPRINT_SPEC.md)：公共制作、单集六阶段、工作项依赖和最低交付门槛的可检查内容契约。
+- [M0 契约冻结](M0_CONTRACT_FREEZE.md)：v4 状态、命令、错误码、危机白名单与存档契约。
 - [常规 TV 制作蓝图样例](blueprints/tv_standard.blueprint.json)：供 schema 与依赖校验使用的结构样例，数值仍是占位量级。
 
 - [核心玩法重构框架](CORE_GAMEPLAY_REBUILD_FRAMEWORK.md)：当前玩法基线。
-- [领域架构设计](DOMAIN_ARCHITECTURE.md)：当前架构设计 v1.3；遵循权威决策登记册。
+- [领域架构设计](DOMAIN_ARCHITECTURE.md)：当前架构设计 v1.4；遵循权威决策登记册。
 - [核心工作包拆分](CORE_GAMEPLAY_WORKSTREAM_BREAKDOWN_2026-11-24.md)：研究完成后的架构与实施工作拆分；早期 D1–D6 决策包已完成裁决，不能再次当作提问清单。
 - [统一重构审查清单](UNIFIED_REBUILD_REVIEW_CHECKLIST_2026-11-24.md)：历史问题和迁移检查。
 - [仓库审查与合并登记](REBUILD_REVIEW_AND_MERGE_REGISTER_2026-11-24.md)：PR、分支和材料状态。
