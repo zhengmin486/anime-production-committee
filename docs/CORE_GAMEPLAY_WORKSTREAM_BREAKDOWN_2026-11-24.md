@@ -6,6 +6,13 @@
 > 上位文档：[核心玩法重构框架](CORE_GAMEPLAY_REBUILD_FRAMEWORK.md)
 > 配套文档：[玩法痛点专项研究与验证计划](PLAYABILITY_FOCUSED_RESEARCH_AND_VALIDATION_2026-11-24.md)
 
+> **执行状态更新（2026-11-24，架构 v1.2 后）**
+> 本文主体是架构 v1.2 之前的工作包讨论稿，部分 WP0–WP11 依赖关系和“决策包/待负责人决定”措辞已经过时。当前执行路线以 [GitHub 里程碑总览 #1](https://github.com/zhengmin486/anime-production-committee/issues/1)、[架构评审整改 #37](https://github.com/zhengmin486/anime-production-committee/issues/37)、[M0 契约冻结 #38](https://github.com/zhengmin486/anime-production-committee/issues/38) 为准。
+>
+> 当前架构基线是 [领域架构 v1.2](DOMAIN_ARCHITECTURE.md)，产品规则以 [DECISION_LOG.md](DECISION_LOG.md) 为最高权威。旧版 WP0–WP11 细节可作为工作素材参考，但不得据此重新开启已确认规则，也不得按旧五阶段、旧支援份额、旧资金危机语义或旧 V3 API 开工。
+>
+> **当前可并行开工：** #13 内容与制作蓝图样例；#11 Event v4 领域设计；#6/#7 领域映射、fixture 和测试场景准备；#8 成长与 Archive 结构设计；#9 素材授权支线。正式运行时行为以 M0 #38 契约冻结为前置。
+
 ## 1. 拆分原则
 
 核心框架不再作为一个必须整体通过的“大方案”。拆成三类：
