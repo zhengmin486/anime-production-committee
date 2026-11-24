@@ -499,25 +499,29 @@ Project {
   tv_service: null | { purchased_week, cost }
   opened_week, deadline_week, extension: { used: 0|1, weeks: 0 }
   status: planning | producing | delivering | settled
-  units: Unit[]                 // V1 恒 1 个；§16 单集化接缝
+  common_production: ProjectCommonProduction
+  episodes: EpisodeProduction[] // 单集制作；每集独立六阶段与工作项依赖
   plan: WorkPlan
   risk: RiskSnapshot            // 派生，不持久化（§12.3）
   delivery: null | { reason, week, work_record_id }   // 结论与档案引用，不重复存金额
 }
 
-Unit {
-  id, kind: whole | episode, index, weight_permille
-  stages: Stage[5]              // 固定顺序，键为五阶段
+ProjectCommonProduction {
+  // 项目级公共制作；具体内容、工作项和状态结构由架构设计确定
+}
+
+EpisodeProduction {
+  id, episode_index
+  stages: Stage[6]              // 单集固定六阶段
 }
 
 Stage {
-  key: script|storyboard|key_animation|animation_check|postproduction
-  status: locked | ready | active | completed
-  work_total, work_done: >=0    // work_done <= work_total
-  quality: {story,direction,drawing,animation,art,sound}: 0..100   // 维度档案
-  started_week, completed_week
-  retake_count: 0               // 首版恒 0，§16 接入缝
-  result: null | { weeks_spent, quality, work_done, causes[] , team[] }
+  name: 单集内容设计 | 分镜与原画 | 动画制作 | 美术与视觉制作 | 摄影与剪辑 | 声音与最终交付
+  work_items: WorkItem[]        // 工作项依赖、最低交付门槛与并行关系
+}
+
+WorkItem {
+  // 具体字段由架构智能体设计；必须表达依赖、最低交付、持续完善和实际产出
 }
 
 WorkPlan {
@@ -525,17 +529,17 @@ WorkPlan {
   focus: quality | schedule | cost        // 取向
   outsourcing: none | gap_fill | aggressive
   overtime: off | conditional
-  auto_authorize: { outsource_week_cap, temporary_total_cap }   // §18-P4
+  // 自动计划只能使用已配置资源；不得自动招聘、签订外包或产生未授权支出
 }
 ```
 
-#### 7.3.2 为什么用 `units[]` 而不是直接 `stages[5]`
+#### 7.3.2 项目级公共制作与单集制作的模型要求
 
-单集化（框架保留、研究提案 C）目前未定案，但它是唯一会**改变推进层结构**的候选方向。若现在按 `stages[5]` 平铺，采纳 C 时需要重写：阶段容器、进度聚合、周结算遍历、事件作用域、UI 读模型、校验器与全部夹具。
+作品制作必须同时表达项目级公共制作与单集制作。六阶段属于每个单集；每个单集的阶段内部进一步细化为工作项依赖。
 
-`units[]` 把"作品由若干生产单元组成"这个层级先立起来，V1 恒为一个 `kind=whole` 的单元，成本是**一层嵌套**，收益是 C 落地时只需允许 `kind=episode` 且 `units.length>1`。
+**[已确认]** 下游工作项达到最低交付要求即可解锁；前序工作项达到最低交付后仍可继续完善；不互斥的工作项允许并行推进。不能用“整部作品的统一阶段状态”替代单集状态，也不能强制所有单集同步切换阶段。
 
-**代价必须写明**：所有聚合（作品工作量、作品质量、交付判定）都按 `weight_permille` 加权，而不是"唯一阶段集"。若负责人明确裁定首版永久不做单集化（§18-P1 选项 A'），可压平为 `stages[5]`，此时删除该层即可。
+上方结构仅表达必须具备的领域概念，不锁定最终字段命名、聚合边界、公共制作内容清单或工作项算法。主架构智能体应结合仓库研究与实际代码自主完成领域建模。
 
 #### 7.3.3 质量模型
 
@@ -546,8 +550,8 @@ WorkPlan {
 ```
 
 - 每周工作产生的是"若干维度上的增量"，而不是一个整体的质量增量。这直接落实框架 §5.4 [已确认方向]"从当前阶段相关的质量维度中抽取若干项改善"。
-- **阶段质量**（0–100）由该阶段相关的维度按配置权重加权得出，是派生值。
-- **作品最终质量**由五阶段质量按规模模板加权（[已确认] 前期到后期递减），并受质量传递上限约束：`阶段质量 ≤ 前阶段质量 × 60% + 40`。
+- **阶段质量**（0–100）由该单集阶段相关的维度按配置权重加权得出，是派生值。
+- **单集与作品最终质量**需要同时考虑项目级公共制作与各单集六阶段/工作项的完成和质量；具体聚合模型由架构智能体设计，并交由模拟验证，不得沿用“整部作品五阶段加权”的旧口径。
 - 企划适配度作为评价辅助项，只影响 S/A/B/C/D，不反向修改质量。
 
 **为什么值得这一层复杂度**：没有维度，"作画崩坏""剧情薄弱"这类题材特有叙事无法表达，周回执只能给出一个数字；而且"随机提升若干项"会退化为"随机加减一个总分"，玩家的因果理解会明显变差。维度集合是**内容配置**，不是领域硬编码，可增删而不改结构。
@@ -1005,7 +1009,7 @@ SaveRecord { version: 4, savedAt: ISO8601, rules_version, state: GameState }
 
 | 类别 | 内容 | 存放 | 变更影响 |
 | --- | --- | --- | --- |
-| 规则常量 | 五阶段权重、产能系数、质量传递上限、分账比例、费用 | `balance` 配置（编译进 WASM） | 影响平衡，需重跑基线与模拟 |
+| 规则常量 | 单集六阶段/工作项权重、产能系数、质量传递上限、分账比例、费用 | `balance` 配置（编译进 WASM） | 影响平衡，需重跑基线与模拟 |
 | 内容目录 | 企划样本、员工姓名与特质、事件卡、供应商、合作方、题材 | 内容 JSON（编译进 WASM 或随包） | 不影响存档结构 |
 | 结构常量 | 阶段键、能力键、渠道键、成本类别 | 代码内枚举 + 契约校验 | 变更即契约变更 |
 | 文本 | 事件文案、回执文案、原因 code → 中文 | 内容 JSON | 纯显示 |
@@ -1039,7 +1043,7 @@ SaveRecord { version: 4, savedAt: ISO8601, rules_version, state: GameState }
 | `company.finance` | Finance（流水） | **改造**：汇总改为由流水派生 |
 | `project`（单个） | Project[] | **结构性替换** |
 | `project.finance` | Finance 归因视图 | **删除字段**，改为按 work_id 过滤 |
-| `project.stages[*].status/work_done/quality` | Project.units[].stages[] | 迁移，quality 扩为六维 |
+| `project.stages[*].status/work_done/quality` | Project 的公共制作与单集六阶段/工作项模型 | 结构性重建；quality 扩为六维 |
 | `project.stages[*].configuration` | Project.plan + 分配 | **语义替换**：阶段首锁定 → 持续方针 |
 | `project.stages[*].result.costs` | 无 | **删除**（金额只在 Finance） |
 | `project.temporary_staff` | Staff（employment=temporary） | 迁移 |
@@ -1061,7 +1065,7 @@ SaveRecord { version: 4, savedAt: ISO8601, rules_version, state: GameState }
 | --- | --- | --- |
 | M0 契约冻结 | v4 状态形状、命令表、校验器骨架、夹具 | 契约测试通过；空实现命令返回 `NOT_IMPLEMENTED` |
 | M1 内核移植 | 把现有生产/评价/商业公式搬入纯函数，行为等价 | 与 v3 在同一场景下逐字段等价（回归样例） |
-| M2 单项目结算 | Project（units=1）+ Staff + Finance + 结算 13 阶段 | 与 v3 在单项目、无外包、承制模式下的输出等价；破产/到期/终局路径一致 |
+| M2 单项目结算 | Project（公共制作 + 至少一个单集）+ Staff + Finance + 结算 13 阶段 | 先验证单项目的公共制作、单集六阶段与工作项依赖；旧 V3 五阶段仅作历史行为参照，不要求玩法等价 |
 | M3 多项目与分配 | 分配求解、支援、管理跨度、费用预检 | 2–3 项目争抢员工的场景；乱序遍历结果一致；无半结算 |
 | M4 外部资源 | Vendor（合同/交付/失败）、Partnership（委员会/渠道）、Market（刷新/热度） | 外包产能不可双占；委员会分账对账通过 |
 | M5 商业与履历 | 商业结算、竞争排名、Archive、系列、公司结局 | 渠道对账恒等式；名次写入；结局评价可复现 |
@@ -1103,7 +1107,7 @@ SaveRecord { version: 4, savedAt: ISO8601, rules_version, state: GameState }
 
 | 方向 | 接入点 | 需要改动的地方 | 不需要改动的地方 |
 | --- | --- | --- | --- |
-| 单集化（研究方案 C） | `Project.units[]` 允许 `kind=episode` 且长度 >1 | 单元权重聚合、UI 集视图、事件作用域细化 | 结算 13 阶段、财务、人员、商业、存档骨架 |
+| retake（返工回路） | `Stage.retake_count` + 阶段完成判定 | 内核 production 增加检查门、周回执增加原因 | 阶段状态机、结算顺序 |
 | retake（返工回路） | `Stage.retake_count` + 阶段完成判定 | 内核 production 增加检查门、周回执增加原因 | 阶段状态机、结算顺序 |
 | 整集外包（グロス） | `OutsourceContract.mode` 增加 `gross` | Vendor 校验、交付粒度 | 合同模型、产能占用规则 |
 | 设施/组织能力 | `Company.facilities[]` | 内核读取修正系数 | 所有领域边界 |
@@ -1119,7 +1123,7 @@ SaveRecord { version: 4, savedAt: ISO8601, rules_version, state: GameState }
 | # | 风险 | 影响 | 缓解 |
 | --- | --- | --- | --- |
 | R1 | 结算服务变成"上帝对象"（13 阶段 × 9 领域） | 难维护、难测试 | 每阶段独立函数 + 快照只读 + 每阶段单独测试；禁止在编排里写公式 |
-| R2 | `units[]` 成为永远只有 1 个元素的死抽象 | 认知负担、评审质疑 | §18-P1 若确认不做单集化则压平；否则在文档标注"V1 常量 1" |
+| R2 | 项目级公共制作与单集工作项模型过度复杂 | 玩家理解与架构维护成本 | 保持项目级经营视图；工作项依赖和产出由系统处理，玩家不做逐项微操 |
 | R3 | 六维质量提高理解成本 | 玩家看不懂质量为什么低 | 只显示维度详情；总览只给阶段质量与最终质量；回执用文案解释而非罗列数值 |
 | R4 | 管理跨度惩罚调不出"可读的痛" | 多开退化为"多几条进度条" | WP4 对照实验；惩罚必须体现在回执原因里 |
 | R5 | 内容量不足（企划/事件/员工） | 玩法再对也不好玩的 | 这是内容工作包（WP5/6/7），不是架构问题；架构只保证能装下 |
