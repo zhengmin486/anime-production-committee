@@ -6,13 +6,13 @@ ANIME PRODUCTION COMMITTEE · 动画制作公司经营模拟游戏
 
 > **当前代码仍是旧版运行时。** 本仓库中的 V2/V3 页面、数据结构、五阶段与单项目测试记录描述历史纵向切片，不能代表目标玩法已实现。研究阶段已结束，当前进入整体架构设计与迁移准备；架构、规则、代码和测试状态见 [docs/PROGRESS.md](docs/PROGRESS.md)。
 
-## M0 契约交付
+## M0/M1 历史契约与验收记录
 
 v3 目标结构、合法动作、周结算顺序、同周破产优先级、承制/委员会手算账与旧档拒绝策略见 [DATA_MODEL](docs/DATA_MODEL.md)、[API](docs/API.md)、[GAME_RULES](docs/GAME_RULES.md) 的 V3 部分。可编译契约与校验在 [gameV3.ts](apps/web/src/types/gameV3.ts)，静态夹具与契约测试供后续前后端独立开发。交接与尚未实现项见 [TEAM_PLAN](docs/TEAM_PLAN.md)。
 
-**M0 没有更换运行时。** M1 已由 `9e2d023` 将 C++/WASM 核心切到 v3，但前端仍调用 v2 六接口；浏览器端没有 v3 端到端证据，由 #5 完成切换。当前进度见 [docs/PROGRESS.md](docs/PROGRESS.md)。
+**以下是历史验收记录。** M1 曾将 C++/WASM 核心切到 V3，随后完成前端接入；这些验收针对旧单项目/五阶段运行时。当前目标玩法尚未按新架构实现，进度见 [docs/PROGRESS.md](docs/PROGRESS.md)。
 
-## 当前可玩内容
+## 旧运行时已实现内容（不代表目标玩法）
 
 ```text
 新开公司 → 接手企划 → 排班 / 方针 / 外包 / 加班 → 推进一天
