@@ -1,4 +1,4 @@
- # 前端与 C++ 接口协议
+# 前端与 C++ 接口协议
 
 > 当前目标玩法与领域架构见 [DECISION_LOG.md](DECISION_LOG.md) 和 [DOMAIN_ARCHITECTURE.md](DOMAIN_ARCHITECTURE.md)。本文 V3 接口是旧单项目/五阶段运行时契约，供迁移核对，不是新架构的最终 API。新 API 必须支持多项目、项目级公共制作、单集六阶段与工作项依赖。
 
