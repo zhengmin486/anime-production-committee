@@ -193,8 +193,8 @@ V1.0 的核心方向和主要跨系统规则已形成明确口径；M1 的 C++/W
 ## 16. 事件模块 M2-a / M2-b 实现状态（2026-11-23）
 
 - **M2-a**（PR [#19](https://github.com/zhengmin486/anime-production-committee/pull/19)，分支 `feat/11-event-m2a-core`）：8 条事件目录（负面 5 / 正面 3 / 重大 2）、表现触发与随机池抽样、同周固定优先级、tag 冷却、重大事件同项目一次、`resolve_event` 结算、即时/阶段/项目效果、重大事件履历输入、事件面板与已知代价展示。抽样为 `next_seed(seed + week × 2654435761)` 的无状态混合，不推进 `GameState.seed`，M1 固定种子轨迹不变。
-- **M2-b**（PR [#24](https://github.com/zhengmin486/anime-production-committee/pull/24)，分支 `feat/11-event-m2b-deferred`，base 为 PR #19）：`resolve_event` 保留 `option_id="__defer__"` 放弃本周处理，事件完整进入 `project.event_state.deferred_event`；下一次 `advance_week` 在工资、运营、阶段完成与交付之前检查，未到期只推进周数并恢复事件，到期/超期先原子执行 `escalation` 再继续该周结算。两个槽位互斥，旧存档缺键仍合法。
+- **M2-b**（PR [#24](https://github.com/zhengmin486/anime-production-committee/pull/24)，分支 `feat/11-event-m2b-deferred`，base 为 PR #19）：`resolve_event` 保留 `option_id="__defer__"` 放弃本周处理，事件完整进入 `project.event_state.deferred_event`；下一次 `advance_week` 在工资、运营、阶段完成与交付之前检查，未到期仍结算工资与运营、只跳过制作与阶段结算（防止靠暂存跳过周成本），到期/超期先原子执行 `escalation` 再继续该周结算。两个槽位互斥，旧存档缺键仍合法。
 - **契约**：`GameEvent` 增加可选 `tier/polarity/expires_week/escalation_note`，`EventOption` 增加可选 `effects_preview`，`Project` 增加可选 `event_state`，`WorkRecord` 增加可选 `major_events`；全部为可选字段，M1 存档与夹具保持合法。
-- **两处实现口径待确认**：未到期恢复时该周不扣工资与运营（按设计第 5.2 节字面实现）；「放弃本周」使用保留 option_id，不新增第七个接口。
+- **两处实现口径**：未到期恢复仍结算工资与运营（按 2026-11-24 重构登记指出的「暂存跳过周成本」问题修正），只跳过制作与阶段结算；「放弃本周」使用保留 option_id，不新增第七个接口。
 - **验证边界**：`validate:events`（8 条目录、11 条夹具、9/9 覆盖）、`typecheck`、`test:unit` 247/247 通过；native / WASM / browser 未执行（本机缺 Emscripten，MSVC 受 `reg.exe` 安全策略影响未跑通），因此**不视为已验收**。
 - **M2-c 依赖**：#7 供应商池（应急外包）、#6 `request_extension`（委员会延期），当前以禁用原因呈现，未伪造效果。

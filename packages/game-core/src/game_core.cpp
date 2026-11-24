@@ -886,6 +886,9 @@ Json zero_report(const Json& state) {
 void close_bankrupt(Json& state) {
     clear_offer_slots(state);
     state["pending_event"] = nullptr;
+    if (state.at("project").is_object() && state.at("project").contains("event_state")
+        && state.at("project").at("event_state").contains("deferred_event"))
+        state["project"]["event_state"]["deferred_event"] = nullptr;
     state["company"]["status"] = "closing";
     state["company"]["end_reason"] = "bankrupt";
     state["preview"] = nullptr;
@@ -1343,11 +1346,23 @@ std::string advance_week(std::string input) {
                 escalate_deferred_event(state);
                 report["messages"].push_back(u8"暂存事件已到处理期限，先执行超时升级，再结算本周。");
             } else {
-                // 未到期：只推进周数并恢复事件，本周工资、运营与制作结算都不执行。
+                // 未到期：仍收固定工资与运营，只跳过制作与阶段结算，避免靠暂存跳过周成本。
+                const auto salaries = salary_total(state) - rules::operations_weekly;
+                const auto fixed = add(salaries, rules::operations_weekly);
+                if (num(state.at("company").at("funds")) < fixed) {
+                    close_bankrupt(state);
+                    report["messages"].push_back(u8"资金不足以支付暂存周的工资与运营，公司破产；事件不再恢复。");
+                    return Json{{"state", state}, {"report", report}};
+                }
+                state["company"]["funds"] = sub(num(state.at("company").at("funds")), fixed);
+                pay_weekly_costs(state, salaries, 0);
                 state["company"]["week"] = next_week;
                 restore_deferred_event(state);
                 report["week"] = next_week;
-                report["messages"].push_back(u8"暂存事件尚未到期，本周恢复处理，未执行工资、运营与制作结算。");
+                report["funds_delta"] = -fixed;
+                report["costs"]["salary"] = salaries;
+                report["costs"]["operations"] = rules::operations_weekly;
+                report["messages"].push_back(u8"暂存事件尚未到期，本周先恢复处理；只结算工资与运营，未执行制作与阶段结算。");
                 refresh_preview(state);
                 return Json{{"state", state}, {"report", report}};
             }

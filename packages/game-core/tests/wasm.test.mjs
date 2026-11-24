@@ -614,10 +614,15 @@ test('M2-b：放弃本周处理会完整暂存，下次推进优先恢复且不�
   assert.equal(deferred.project.event_state.deferred_event.id, 'key_cut_rework')
   assert.equal(deferred.project.event_state.deferred_event.expires_week, week + 2)
 
-  const restored = advanceRaw(deferred).state
+  const workBefore = deferred.project.stages.key_animation.work_done
+  const restoredResult = advanceRaw(deferred)
+  const restored = restoredResult.state
   assert.equal(restored.phase, 'event_pending')
   assert.equal(restored.company.week, week + 1)
-  assert.equal(restored.company.funds, funds, '未到期恢复时不得先扣工资与运营')
+  assert.ok(restored.company.funds < funds, '恢复周仍要结算工资与运营，不能靠暂存跳过周成本')
+  assert.ok(restoredResult.report.costs.salary > 0)
+  assert.equal(restoredResult.report.costs.production, 0)
+  assert.equal(restored.project.stages.key_animation.work_done, workBefore, '恢复周不推进制作')
   assert.equal(restored.pending_event.id, 'key_cut_rework')
   assert.equal(restored.project.event_state.deferred_event, null)
 })
