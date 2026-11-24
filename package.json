@@ -26,7 +26,8 @@
     "test:browser": "npm run build && node --test scripts/browser.test.mjs",
     "verify:dist": "node scripts/verify-dist.mjs",
     "validate:events": "node scripts/validate-event-catalog.mjs && node scripts/validate-event-fixtures.mjs",
-    "validate:blueprint": "node scripts/validate-blueprint.mjs docs/blueprints/tv_standard.blueprint.json"
+    "validate:blueprint": "node scripts/validate-blueprint.mjs docs/blueprints/tv_standard.blueprint.json",
+    "validate:handover": "node scripts/check-handover-cases.mjs docs/fixtures/handover_cases.json"
   },
   "devDependencies": {
     "playwright-core": "1.65.1"

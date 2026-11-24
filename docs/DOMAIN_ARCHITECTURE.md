@@ -62,6 +62,8 @@ v1.0 只给了骨架，并把"公共制作 + 单集 + 工作项"和"资金危机
 
 制作蓝图已从"待设计"变为"有可检查样例"：[蓝图规范](BLUEPRINT_SPEC.md) + [`tv_standard` 样例](blueprints/tv_standard.blueprint.json) + `npm run validate:blueprint`。
 
+**M0 契约已冻结**：[M0 契约冻结（v4.0）](M0_CONTRACT_FREEZE.md) 把状态形状、26 条不变式、22 个命令、16 个错误码、危机白名单与存档拒绝策略固化为可检查条目，并附两类校验器的运行记录。冻结后改契约需走变更说明。
+
 ---
 
 ## 1. 架构目标与边界

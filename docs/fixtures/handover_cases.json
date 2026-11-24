@@ -1,0 +1,116 @@
+{
+  "schema_version": 1,
+  "rule": "handover_loss",
+  "source": "DEC-STAFF-001；实现口径见 DOMAIN_ARCHITECTURE §7.2.1",
+  "notes": "每个用例声明输入与期望。check-handover-cases.mjs 内置规则参考实现，逐条比对；M1 的实现必须与这些期望一致。produced 表示该员工本周在该工作项上的原始产出（>0 才算参与）。",
+  "cases": [
+    {
+      "id": "HO-01",
+      "desc": "非监督人员接手他人已开工的工作项，应扣一次",
+      "staff": { "id": "s_b", "role": "key_animator", "employment": "core" },
+      "item": { "work_done": 30, "work_total": 100, "contributors": ["s_a"] },
+      "last_participation": { "work_id": "w1", "item_id": "layout", "week": 3 },
+      "current": { "work_id": "w1", "item_id": "key_animation", "week": 4, "produced": 40 },
+      "expect": { "item_loss": true, "supervisor_loss": false, "contributor_added": true }
+    },
+    {
+      "id": "HO-02",
+      "desc": "同一单集内接手尚未开始的工作项，不应扣（容器级判定的假阳性）",
+      "staff": { "id": "s_b", "role": "key_animator", "employment": "core" },
+      "item": { "work_done": 0, "work_total": 100, "contributors": [] },
+      "last_participation": { "work_id": "w1", "item_id": "layout", "week": 3 },
+      "current": { "work_id": "w1", "item_id": "background", "week": 4, "produced": 40 },
+      "expect": { "item_loss": false, "supervisor_loss": false, "contributor_added": true }
+    },
+    {
+      "id": "HO-03",
+      "desc": "员工回到自己参与过的工作项，不重复扣",
+      "staff": { "id": "s_b", "role": "animator", "employment": "core" },
+      "item": { "work_done": 80, "work_total": 100, "contributors": ["s_a", "s_b"] },
+      "last_participation": { "work_id": "w1", "item_id": "key_animation", "week": 5 },
+      "current": { "work_id": "w1", "item_id": "key_animation", "week": 7, "produced": 30 },
+      "expect": { "item_loss": false, "supervisor_loss": false, "contributor_added": true }
+    },
+    {
+      "id": "HO-04",
+      "desc": "员工在本集做过别的工作项，但接手他人已开工的另一个工作项，应扣（容器级判定的假阴性）",
+      "staff": { "id": "s_b", "role": "key_animator", "employment": "core" },
+      "item": { "work_done": 55, "work_total": 100, "contributors": ["s_a"] },
+      "last_participation": { "work_id": "w1", "item_id": "background", "week": 4 },
+      "current": { "work_id": "w1", "item_id": "key_animation", "week": 5, "produced": 35 },
+      "expect": { "item_loss": true, "supervisor_loss": false, "contributor_added": true }
+    },
+    {
+      "id": "HO-05",
+      "desc": "两人同周从零开始同一工作项，双方都不扣",
+      "staff": { "id": "s_c", "role": "animator", "employment": "core" },
+      "item": { "work_done": 0, "work_total": 100, "contributors": [] },
+      "last_participation": null,
+      "current": { "work_id": "w2", "item_id": "inbetween", "week": 1, "produced": 25 },
+      "expect": { "item_loss": false, "supervisor_loss": false, "contributor_added": true }
+    },
+    {
+      "id": "HO-06",
+      "desc": "临时人员接手已开工工作项，与核心员工同规则",
+      "staff": { "id": "s_temp", "role": "animator", "employment": "temporary" },
+      "item": { "work_done": 20, "work_total": 80, "contributors": ["s_a"] },
+      "last_participation": null,
+      "current": { "work_id": "w3", "item_id": "inbetween", "week": 2, "produced": 30 },
+      "expect": { "item_loss": true, "supervisor_loss": false, "contributor_added": true }
+    },
+    {
+      "id": "HO-07",
+      "desc": "监督人员切换项目，产生团队级一次性损失，且不重复计算个人项损失",
+      "staff": { "id": "s_dir2", "role": "animation_director", "employment": "core" },
+      "item": { "work_done": 45, "work_total": 100, "contributors": ["s_a"] },
+      "last_participation": { "work_id": "w1", "item_id": "storyboard", "week": 4 },
+      "current": { "work_id": "w2", "item_id": "storyboard", "week": 5, "produced": 50 },
+      "expect": { "item_loss": false, "supervisor_loss": true, "contributor_added": true }
+    },
+    {
+      "id": "HO-08",
+      "desc": "监督人员留在同一项目，不产生团队级损失",
+      "staff": { "id": "s_dir", "role": "director", "employment": "core" },
+      "item": { "work_done": 60, "work_total": 100, "contributors": ["s_a"] },
+      "last_participation": { "work_id": "w1", "item_id": "storyboard", "week": 4 },
+      "current": { "work_id": "w1", "item_id": "key_animation", "week": 5, "produced": 50 },
+      "expect": { "item_loss": false, "supervisor_loss": false, "contributor_added": true }
+    },
+    {
+      "id": "HO-09",
+      "desc": "经历资金危机（数周不生产）后恢复，继续做自己参与过的工作项，不扣",
+      "staff": { "id": "s_b", "role": "animator", "employment": "core" },
+      "item": { "work_done": 70, "work_total": 100, "contributors": ["s_b"] },
+      "last_participation": { "work_id": "w1", "item_id": "inbetween", "week": 6 },
+      "current": { "work_id": "w1", "item_id": "inbetween", "week": 11, "produced": 30 },
+      "expect": { "item_loss": false, "supervisor_loss": false, "contributor_added": true }
+    },
+    {
+      "id": "HO-10",
+      "desc": "工作项已完成，分配不到该工作项，不产生损失",
+      "staff": { "id": "s_b", "role": "animator", "employment": "core" },
+      "item": { "work_done": 100, "work_total": 100, "contributors": ["s_a"] },
+      "last_participation": null,
+      "current": { "work_id": "w1", "item_id": "inbetween", "week": 6, "produced": 0 },
+      "expect": { "item_loss": false, "supervisor_loss": false, "contributor_added": false }
+    },
+    {
+      "id": "HO-11",
+      "desc": "本周在该工作项上没有产出（产能被别处占满），不算参与，不扣",
+      "staff": { "id": "s_b", "role": "key_animator", "employment": "core" },
+      "item": { "work_done": 40, "work_total": 100, "contributors": ["s_a"] },
+      "last_participation": { "work_id": "w1", "item_id": "layout", "week": 3 },
+      "current": { "work_id": "w1", "item_id": "key_animation", "week": 4, "produced": 0 },
+      "expect": { "item_loss": false, "supervisor_loss": false, "contributor_added": false }
+    },
+    {
+      "id": "HO-12",
+      "desc": "监督人员切换项目但当周无产出，不产生团队级损失",
+      "staff": { "id": "s_dir2", "role": "production_manager", "employment": "core" },
+      "item": { "work_done": 10, "work_total": 100, "contributors": ["s_a"] },
+      "last_participation": { "work_id": "w1", "item_id": "script", "week": 3 },
+      "current": { "work_id": "w2", "item_id": "script", "week": 4, "produced": 0 },
+      "expect": { "item_loss": false, "supervisor_loss": false, "contributor_added": false }
+    }
+  ]
+}
