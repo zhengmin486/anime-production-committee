@@ -1,6 +1,6 @@
 # 项目文档导航
 
-本页用于区分资料性质、查找入口和阅读顺序。负责人已确认的当前玩法规则以 [DECISION_LOG.md](DECISION_LOG.md) 为准；当前领域架构以 [DOMAIN_ARCHITECTURE.md](DOMAIN_ARCHITECTURE.md) 为准。研究与审计报告提供证据和历史背景，不自动构成规则。
+本页用于区分资料性质、查找入口和阅读顺序。负责人已确认的当前玩法规则以 [DECISION_LOG.md](DECISION_LOG.md) 为准；当前领域架构以 [DOMAIN_ARCHITECTURE.md](DOMAIN_ARCHITECTURE.md) v1.4 为准，M0 契约以 [M0_CONTRACT_FREEZE.md](M0_CONTRACT_FREEZE.md) 为准。研究与审计报告提供证据和历史背景，不自动构成规则。
 
 ## 先判断自己要找什么
 
@@ -16,8 +16,10 @@
 
 ## 当前权威入口
 
-- [架构评审记录（2026-11-24）](ARCHITECTURE_REVIEW_2026-11-24.md)：v1.3 评审结论、整改状态与 M0 前置核验。
+- [架构评审记录（2026-11-24）](ARCHITECTURE_REVIEW_2026-11-24.md)：架构评审结论、整改状态与 M0 契约核验。
 
+- [M0 契约冻结](M0_CONTRACT_FREEZE.md)
+- [制作蓝图规范](BLUEPRINT_SPEC.md)
 - [权威决策登记册](DECISION_LOG.md)
 - [研究与审计成果目录](RESEARCH_CATALOG.md)
 - [领域架构设计](DOMAIN_ARCHITECTURE.md)
@@ -60,7 +62,7 @@
 - [重构审查与合并登记](REBUILD_REVIEW_AND_MERGE_REGISTER_2026-11-24.md)
 - [统一重构审查清单](UNIFIED_REBUILD_REVIEW_CHECKLIST_2026-11-24.md)
 
-以上文件的存在不代表其中所有提案均已生效；当前玩法以 DECISION_LOG.md、当前架构以 DOMAIN_ARCHITECTURE.md v1.3 为准，工作分工以 GitHub Issues 实时状态为准。
+以上文件的存在不代表其中所有提案均已生效；当前玩法以 DECISION_LOG.md、当前架构以 DOMAIN_ARCHITECTURE.md v1.4 为准，工作分工以 GitHub Issues 实时状态为准。
 
 ## 产品、规则与工程文档
 
