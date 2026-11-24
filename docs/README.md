@@ -31,6 +31,10 @@
 - [领域架构设计](DOMAIN_ARCHITECTURE.md)
 - [核心玩法重构框架](CORE_GAMEPLAY_REBUILD_FRAMEWORK.md)
 
+## 复盘与协作约定
+
+- [2026-11 重构复盘与协作约定](REBUILD_RETROSPECTIVE_AND_WORKING_RULES_2026-11-25.md)：记录本次架构纠偏暴露的问题、分支迁移原则、智能体协作要求和 PR 合并检查。
+
 ## 研究资料与外部证据
 
 - [研究资料总入口](research/README.md)：研究资料分类、两阶段研究机制和新研究成果存放规则。
