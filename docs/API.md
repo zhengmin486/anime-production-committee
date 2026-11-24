@@ -1,8 +1,6 @@
-# 前端与 C++ 接口协议
+ # 前端与 C++ 接口协议
 
-## 版本状态与 V3 目标接口
-
-V2 是旧版纵向切片；V3 是当前目标协议。M1 已在 C++/WASM 实现部分 V3 周制、五阶段与公司终局行为，但本节列出的完整 V3 接口清单仍是目标契约，不能据此认定所有导出和玩法均已接通。前端主流程仍需完成 V3 接入。
+> 当前目标玩法与领域架构见 [DECISION_LOG.md](DECISION_LOG.md) 和 [DOMAIN_ARCHITECTURE.md](DOMAIN_ARCHITECTURE.md)。本文 V3 接口是旧单项目/五阶段运行时契约，供迁移核对，不是新架构的最终 API。新 API 必须支持多项目、项目级公共制作、单集六阶段与工作项依赖。
 
 2026-11-21，议题 #2 的目标契约见 [gameV3.ts](../apps/web/src/types/gameV3.ts) 的 CoreRequests/CoreResponses 与 [DATA_MODEL](DATA_MODEL.md)。M0 提供类型、边界校验、静态夹具、只读 v3 存档入口；规则实现属于 #3/#4/#6/#7/#8。下面六个目标导出应在真实实现接入时同步替换，不将 advance_week 指向 advance_day，也不导出返回成功的空函数。
 
