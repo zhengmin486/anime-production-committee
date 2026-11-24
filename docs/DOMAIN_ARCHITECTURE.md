@@ -885,13 +885,13 @@ WorkRecord { id, name, ip_id, source, genre, scale, mode, investment_percent,
 | `start_work(offer_id, mode, percent, committee_partner_ids)` | Application | 公司 running；企划存在；声望与成绩条件；模式合法；现金足够支付投资 | Project 建立、委员会成立、Market 消费企划、Finance 记投资与合同预算、员工可归属 |
 | `set_work_plan(work_id, plan)` | Project | 公司 running；项目 producing | 更新计划，下个结算生效 |
 | `assign_staff(staff_id, work_id \| null)` | Staff | 项目存在且 producing；核心员工每周仅能归属一个项目；传 null 为撤出 | 更新唯一项目归属，下一次结算生效 |
-| `hire_core(staff_id)` / `scout(...)` / `dismiss_staff(staff_id)` | Staff + Finance | 招聘窗口；现金；名册上限（若有） | 名册变化、签约费/遣散费入账 |
+| `hire_core(staff_id)` / `scout(...)` / `dismiss_staff(staff_id)` | Staff + Finance | 公司 running；无待处理事件；非资金危机；现金；名册上限（若有）。不要求全公司空闲（DEC-PLAY-003） | 名册变化、签约费/遣散费入账 |
 | `hire_temporary(work_id, candidate_id)` | Staff + Finance | 项目 producing；现金 | 临时合同建立、项目费入账 |
 | `sign_outsourcing(work_id, item_id, supplier_id, work_total, mode)` | Vendor + Finance | 工作项已解锁；专业匹配；供应商产能余量；现金 | 合同建立、费用入账、占用产能 |
 | `deliver_work(work_id)` | Project + Application | 全部门槛项已交付；未过截止 | 转 delivering 并当次结清（§7.3.6） |
 | `abort_work(work_id)` | Project + Finance | 项目 producing | 项目终止、违约扣罚入账、释放人员与外包占用 |
-| `create_custom_offer(name, source, scale, style)` | Market + Finance | 空闲窗口；现金；企划能力员工 | 自定企划入槽、开发费入账 |
-| `adopt_proposal()` / `reject_proposal()` | Market | 存在提案；空闲窗口 | 提案转自定槽或清空 |
+| `create_custom_offer(name, source, scale, style)` | Market + Finance | 公司 running；无待处理事件；非资金危机；现金；企划能力员工。不要求全公司空闲 | 自定企划入槽、开发费入账 |
+| `adopt_proposal()` / `reject_proposal()` | Market | 公司 running；无待处理事件；非资金危机；存在提案。不要求全公司空闲 | 提案转自定槽或清空 |
 | `buy_tv_service(work_id)` | Project + Finance | 委员会模式；未购买；现金 | 渠道开放、发行费入账 |
 | `request_extension(work_id)` | Project + Finance | 委员会模式；未用过；未过截止；现金 | 延期生效、压力与费用 |
 | `arrange_financing(provider, amount)` | Finance | 偿付危机或资金压力周；额度未超限 | 现金入账、生成贷款与周还款计划（§7.5.1） |
@@ -1472,12 +1472,13 @@ SaveRecord { version: 4, savedAt: ISO8601, rules_version, state: GameState }
 
 ### 19.1 文档权威顺序
 
-1. `CORE_GAMEPLAY_REBUILD_FRAMEWORK.md` —— 玩法基线，最高。
-2. **本文** —— 系统结构（领域、模型、接口、结算、迁移）。
-3. `GAME_RULES.md` —— 规则口径（V3.9 之后各节）；与本文冲突时，规则以它为准，结构以本文为准。
-4. `DATA_MODEL.md` / `API.md` —— **现状契约（v3）**，迁移完成后需按本文重写为 v4。
-5. `ARCHITECTURE.md` —— 现状工程分层与技术约束，仍然有效的部分（技术栈、构建、验证边界）继续适用；其中"单 project / 全局 phase / 单事件槽"的描述将被 v4 取代。
-6. 审计与研究文档 —— 事实与论证来源，不作为规则。
+1. `DECISION_LOG.md` —— 已确认产品规则的最高权威；任何文档和实现不得覆盖。
+2. `CORE_GAMEPLAY_REBUILD_FRAMEWORK.md` —— 除决策登记册外的当前玩法基线；与已确认决策冲突时以决策登记册为准。
+3. **本文** —— 当前目标系统结构（领域、模型、接口、结算、迁移）；不得擅自改变玩法规则或玩家控制边界。
+4. `GAME_RULES.md` / `GAME_DESIGN.md` —— 旧 V1/V3 规则与设计记录，仅作历史迁移参考；不得当作当前目标规则权威。
+5. `DATA_MODEL.md` / `API.md` —— 旧 V3 运行时契约；迁移完成后由 v4 契约替代。
+6. `ARCHITECTURE.md` —— 现状工程分层与技术约束；仍有效的技术栈、构建和验证边界继续适用，旧单项目结构由 v4 取代。
+7. 审计与研究文档 —— 事实与论证来源，不自动构成规则。
 
 ### 19.2 冲突登记（必须显式处理，不得静默）
 
