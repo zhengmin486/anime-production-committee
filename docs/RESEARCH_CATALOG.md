@@ -37,13 +37,13 @@
 - [制作随机性实验](https://github.com/zhengmin486/anime-production-committee/pull/22)：PR #22，包含随机制作模拟器和 V0.1 报告；用于观察工作量/质量分离、随机流隔离和实验方法，不代表正式规则。
 - [跨模块账目一致性审计脚本](../scripts/audit-ledger-consistency.mjs)：PR #21 已合并，提供只读财务核验方法；适配的是旧 V3 状态结构，迁移时需重写输入适配。
 
-- [事件域迁移提案](EVENT_DOMAIN_MIGRATION_PROPOSAL.md)：PR #33，仍为开放 PR；记录事件域迁移设计，不代表已合入 main。
+- [事件域迁移提案 PR #33](https://github.com/zhengmin486/anime-production-committee/pull/33)：记录事件域迁移设计及仍需裁决的范围问题；以 PR 页面实时状态为准，不将提案内容自动视为已确认规则。
 - [领域边界与数据所有权草案](DOMAIN_BOUNDARIES_AND_DATA_OWNERSHIP_DRAFT_2026-11-24.md)：PR #34 的 WP0 历史草案，已由当前 [领域架构设计](DOMAIN_ARCHITECTURE.md) v1.0 取代。
 
 ## 5. 研究之外的设计与工程材料
 
 - [核心玩法重构框架](CORE_GAMEPLAY_REBUILD_FRAMEWORK.md)：当前玩法基线。
-- [领域架构讨论稿](DOMAIN_ARCHITECTURE.md)：架构方案，需遵循权威决策登记册。
+- [领域架构设计](DOMAIN_ARCHITECTURE.md)：当前架构设计 v1.0；遵循权威决策登记册。
 - [核心工作包拆分](CORE_GAMEPLAY_WORKSTREAM_BREAKDOWN_2026-11-24.md)：研究完成后的架构与实施工作拆分；早期 D1–D6 决策包已完成裁决，不能再次当作提问清单。
 - [统一重构审查清单](UNIFIED_REBUILD_REVIEW_CHECKLIST_2026-11-24.md)：历史问题和迁移检查。
 - [仓库审查与合并登记](REBUILD_REVIEW_AND_MERGE_REGISTER_2026-11-24.md)：PR、分支和材料状态。
