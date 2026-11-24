@@ -62,7 +62,7 @@
 - [玩法痛点专项研究与验证计划](PLAYABILITY_FOCUSED_RESEARCH_AND_VALIDATION_2026-11-24.md)
 - [重构审查与合并登记](REBUILD_REVIEW_AND_MERGE_REGISTER_2026-11-24.md)
 - [统一重构审查清单](UNIFIED_REBUILD_REVIEW_CHECKLIST_2026-11-24.md)
-- [前端方向与信息架构 v2](FRONTEND_DIRECTION_DRAFT_2026-11-24.md)：4 个场景（办公室 / 制作现场 / 会议室 / 发行与市场）的信息架构、场景与读模型/命令的映射、视觉语言、工程边界与 F0–F4 路线；待前端负责人评审，不是最终 UI 规范，不改动玩法规则。
+- [前端方向与信息架构 v2](FRONTEND_DIRECTION_DRAFT_2026-11-24.md)：4 个场景（办公室 / 制作现场 / 会议室 / 发行与市场）的信息架构、场景与读模型/命令的映射、视觉语言、工程边界与 F0–F4 路线；3 项待决问题已于 2026-11-24 裁决（像素场景 + 现代面板、会议室保留入口、F1 分三批）。不冻结 UI 版式，不改动玩法规则。
 
 以上文件的存在不代表其中所有提案均已生效；当前玩法以 DECISION_LOG.md、当前架构以 DOMAIN_ARCHITECTURE.md v1.4 为准，工作分工以 GitHub Issues 实时状态为准。
 
