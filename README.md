@@ -157,7 +157,7 @@ v2 验收范围（2026-11-21 本地验收已通过）：
 - 前端界面：[应用入口](apps/web/src/App.tsx)、[首页](apps/web/src/pages/HomePage.tsx)、[制作与结算页](apps/web/src/pages/StudioPage.tsx)、[样式](apps/web/src/styles/index.css)。
 - 前端测试：[协议夹具](apps/web/src/test/fixtures.ts)（新增）、[类型校验测试](apps/web/src/types/game.test.ts)、[WASM 服务测试](apps/web/src/services/gameCore.test.ts)、[存档测试](apps/web/src/services/saveGame.test.ts)、[状态层测试](apps/web/src/stores/gameStore.test.ts)、[首页测试](apps/web/src/pages/HomePage.test.tsx)、[应用测试](apps/web/src/App.test.tsx)。
 - 核心与端到端测试：[原生测试](packages/game-core/tests/game_core_test.cpp)、[真实 WASM 测试](packages/game-core/tests/wasm.test.mjs)、[根 WASM 测试入口](scripts/wasm.test.mjs)、[浏览器测试](scripts/browser.test.mjs)。
-- 文档：[README](README.md)、[接口](docs/API.md)、[规则](docs/GAME_RULES.md)、[数据模型](docs/DATA_MODEL.md)、[架构](docs/ARCHITECTURE.md)、[产品范围](docs/PRODUCT.md)、[V1.0 游戏设计总览](docs/GAME_DESIGN.md)。
+- 文档：[README](README.md)、[当前决策登记册](docs/DECISION_LOG.md)、[当前领域架构](docs/DOMAIN_ARCHITECTURE.md)、[研究目录](docs/RESEARCH_CATALOG.md)。旧 V3 接口、规则和数据模型仅用于迁移对照。
 
 仓库同步包含上述实现与测试，以及关联的贡献指南、Issue / PR 模板、素材目录、三张已入库的自生成图片与审计记录；素材来源记录本身不构成授权确认。没有修改构建配置、依赖、CI 工作流或 `.gitignore`，没有执行线上部署；工具链、依赖和构建产物不随 Git 提交。
 
@@ -204,29 +204,23 @@ Sites 官方插件本地打包约束：单文件不超过 50 MiB，整体发布 
 
 ## 文档
 
-- [权威决策登记册](docs/DECISION_LOG.md)：负责人已确认的当前玩法规则，所有智能体开工前必须核对。
-- [研究与审计成果目录](docs/RESEARCH_CATALOG.md)：研究报告、系统审计、模拟与实验材料索引。
+- [权威决策登记册](docs/DECISION_LOG.md)：当前已确认玩法规则，最高优先级。
 - [核心玩法重构框架](docs/CORE_GAMEPLAY_REBUILD_FRAMEWORK.md)：当前玩法基线。
-
-- [权威决策登记册](docs/DECISION_LOG.md)：负责人已确认的当前玩法规则，智能体开始工作前必须核对。
-- [研究与审计成果目录](docs/RESEARCH_CATALOG.md)：研究报告、系统审计、模拟与实验材料索引。
-- [核心玩法重构框架](docs/CORE_GAMEPLAY_REBUILD_FRAMEWORK.md)：当前玩法基线。
-
+- [领域架构设计](docs/DOMAIN_ARCHITECTURE.md)：当前系统架构 v1.0。
+- [核心工作包拆分](docs/CORE_GAMEPLAY_WORKSTREAM_BREAKDOWN_2026-11-24.md)：架构评审、模拟验证与后续实施工作。
+- [研究与审计成果目录](docs/RESEARCH_CATALOG.md)：已提交研究、审计、模拟和实验材料。
+- [项目文档导航](docs/README.md)：区分当前规则、架构、研究与历史资料。
 - [贡献与协作指南](CONTRIBUTING.md)
-- [核心玩法重构框架（当前设计基线）](docs/CORE_GAMEPLAY_REBUILD_FRAMEWORK.md)
-- [2026-11-24 仓库审查与合并登记](docs/REBUILD_REVIEW_AND_MERGE_REGISTER_2026-11-24.md)
-- [产品定位](docs/PRODUCT.md)
-- [技术架构](docs/ARCHITECTURE.md)
-- [V1.0 游戏设计总览](docs/GAME_DESIGN.md)
-- [统一数据模型](docs/DATA_MODEL.md)
-- [规则与暂定参数](docs/GAME_RULES.md)
-- [六接口协议与同步流程](docs/API.md)
-- [V1.0 差距审查与迁移计划](docs/V1_GAP_REVIEW.md)
-- [本轮分工（V1.0 迁移）](docs/TEAM_PLAN.md)
-- [制作事件模块设计（M2 提案）](docs/EVENT_MODULE_DESIGN.md)
-- [事件内容填写指南](docs/EVENT_CONTENT_GUIDE.md)
-- [当前进度与方向](docs/PROGRESS.md)
+- [仓库审查与合并登记](docs/REBUILD_REVIEW_AND_MERGE_REGISTER_2026-11-24.md)
 
+以下文件描述旧 V1/V3 设计、接口或实现，仅用于迁移和历史对照，不代表当前新架构：
+
+- [旧版 V1.0 游戏设计总览](docs/GAME_DESIGN.md)
+- [旧 V3 数据模型](docs/DATA_MODEL.md)
+- [旧 V3 规则与参数](docs/GAME_RULES.md)
+- [旧 V3 接口协议](docs/API.md)
+- [旧版差距审查与迁移记录](docs/V1_GAP_REVIEW.md)
+- [历史团队计划](docs/TEAM_PLAN.md)
 ## 当前范围与未完项
 
 - 六接口均实现；协议使用 snake_case、完整 GameState v2 往返，每次动作由 C++ 严格校验状态，错误包括 INVALID_PHASE，无前端规则兜底。
