@@ -17,7 +17,7 @@
 
 玩法细节见 [GAME_DESIGN.md](docs/GAME_DESIGN.md)，现行决策见 [DECISION_LOG.md](docs/DECISION_LOG.md)，目标架构见 [DOMAIN_ARCHITECTURE.md](docs/DOMAIN_ARCHITECTURE.md)。[DATA_MODEL.md](docs/DATA_MODEL.md) 与 [API.md](docs/API.md) 仍描述旧 V3 契约，不能当成新架构的最终接口。模型、API、实现与测试应同步更新，不各自维护不同含义的同名字段。
 
-当前最小纵向切片已实现六个 C++ 接口，React 通过真实 WASM 完成初始化、接取企划、决策、日结、事件与结算；本地验收记录见 README。固定名册、目录、事件和系数仍是暂定参数，经济口径与最终平衡待团队复核。新增玩法前，在 Issue 中确认范围、接口与验收标准；不要把计划中的能力描述成已实现。
+旧最小纵向切片曾实现六个 C++ 接口，React 通过真实 WASM 完成初始化、接取企划、决策、日结、事件与结算；本地验收记录见 README。该运行时采用单项目/五阶段模型，属于迁移前历史实现。当前先完成新架构设计；新增玩法前应核对 DECISION_LOG 与 DOMAIN_ARCHITECTURE，不得把旧接口或旧阶段模型当作目标契约。
 
 ## Issue 与分工
 
