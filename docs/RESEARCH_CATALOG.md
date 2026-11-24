@@ -33,8 +33,12 @@
 - [经济模拟报告 V0.4](ECONOMIC_SIMULATION_REPORT_V0.4.md)
 - [经济模拟报告 V0.5](ECONOMIC_SIMULATION_REPORT_V0.5.md)
 - [经济模拟报告 V0.6](ECONOMIC_SIMULATION_REPORT_V0.6.md)
-- [员工排班模拟器与报告](https://github.com/zhengmin486/anime-production-committee/pull/20)：PR #20，包含 V0.1 模拟器、V0.2 报告和员工人物卡校准；独立实验分支，基于旧单项目模型，不能直接作为多项目新架构平衡结论。
-- [制作随机性实验](https://github.com/zhengmin486/anime-production-committee/pull/22)：PR #22，包含随机制作模拟器和 V0.1 报告；用于观察工作量/质量分离、随机流隔离和实验方法，不代表正式规则。
+- [员工排班模拟器 V0.1](STAFF_SCHEDULING_SIMULATOR_V0.1.md)：PR #20，旧单项目模型下的排班模拟器说明。
+- [员工排班模拟报告 V0.2](STAFF_SCHEDULING_SIMULATION_REPORT_V0.2.md)：PR #20，包含排班策略和产能实验结果。
+- [员工模板校准 V0.1](STAFF_TEMPLATE_CALIBRATION_V0.1.md) 与 [V0.2](STAFF_TEMPLATE_CALIBRATION_V0.2.md)：PR #20，人物卡与能力模板实验。
+- [PR #20 完整交付与实验代码](https://github.com/zhengmin486/anime-production-committee/pull/20)：另含脚本、测试和实验 fixture。以上均基于旧单项目模型，不能直接作为多项目新架构的平衡结论。
+- [随机制作实验报告 V0.1](STOCHASTIC_PRODUCTION_EXPERIMENT_V0.1.md)：PR #22，讨论工作量/质量分离、随机流隔离和实验结果，不代表正式规则。
+- [PR #22 完整交付与实验代码](https://github.com/zhengmin486/anime-production-committee/pull/22)：包含随机制作模拟器、测试和持续集成配置。
 - [跨模块账目一致性审计脚本](../scripts/audit-ledger-consistency.mjs)：PR #21 已合并，提供只读财务核验方法；适配的是旧 V3 状态结构，迁移时需重写输入适配。
 
 - [事件域迁移提案 PR #33](https://github.com/zhengmin486/anime-production-committee/pull/33)：记录事件域迁移设计及仍需裁决的范围问题；以 PR 页面实时状态为准，不将提案内容自动视为已确认规则。
