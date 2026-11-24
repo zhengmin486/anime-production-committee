@@ -1,0 +1,188 @@
+{
+  "schema_version": 1,
+  "id": "tv_standard",
+  "name": "常规 TV 季番（12 集）",
+  "scale": "tv",
+  "episode_count": 12,
+  "work_unit": "centi_staff_week",
+  "notes": "工作点单位：1 点 = 1/100 人周。数值为 [PLACEHOLDER] 量级样例，用于验证结构可检查性，不作为平衡依据。common 项为项目级公共制作，episode 项为单集模板，实例化时按 episode_count 展开为 ep01..ep12。",
+  "common": [
+    {
+      "key": "series_composition",
+      "name": "系列构成",
+      "ability": "planning",
+      "work_total": 60,
+      "deliver_at": 850,
+      "deps": []
+    },
+    {
+      "key": "character_design",
+      "name": "角色设定",
+      "ability": "drawing",
+      "work_total": 85,
+      "deliver_at": 900,
+      "deps": []
+    },
+    {
+      "key": "art_setting",
+      "name": "美术设定",
+      "ability": "drawing",
+      "work_total": 70,
+      "deliver_at": 850,
+      "deps": []
+    },
+    {
+      "key": "color_design",
+      "name": "色彩设计",
+      "ability": "drawing",
+      "work_total": 30,
+      "deliver_at": 850,
+      "deps": ["common:character_design"]
+    },
+    {
+      "key": "music",
+      "name": "配乐",
+      "ability": "postproduction",
+      "work_total": 45,
+      "deliver_at": 800,
+      "deps": []
+    },
+    {
+      "key": "op_ed",
+      "name": "OP/ED",
+      "ability": "postproduction",
+      "work_total": 35,
+      "deliver_at": 800,
+      "deps": []
+    }
+  ],
+  "episode": [
+    {
+      "key": "script",
+      "stage": "content_design",
+      "name": "单集脚本",
+      "ability": "planning",
+      "work_total": 42,
+      "deliver_at": 900,
+      "deps": ["common:series_composition"]
+    },
+    {
+      "key": "episode_direction_plan",
+      "stage": "content_design",
+      "name": "演出构想",
+      "ability": "direction",
+      "work_total": 18,
+      "deliver_at": 850,
+      "deps": ["script"]
+    },
+    {
+      "key": "storyboard",
+      "stage": "storyboard_key_animation",
+      "name": "分镜",
+      "ability": "direction",
+      "work_total": 55,
+      "deliver_at": 900,
+      "deps": ["episode_direction_plan"]
+    },
+    {
+      "key": "layout",
+      "stage": "storyboard_key_animation",
+      "name": "构图与Layout",
+      "ability": "drawing",
+      "work_total": 48,
+      "deliver_at": 850,
+      "deps": ["storyboard", "common:character_design"]
+    },
+    {
+      "key": "key_animation",
+      "stage": "storyboard_key_animation",
+      "name": "原画",
+      "ability": "drawing",
+      "work_total": 95,
+      "deliver_at": 900,
+      "deps": ["layout"]
+    },
+    {
+      "key": "inbetween",
+      "stage": "animation",
+      "name": "动画（中割）",
+      "ability": "animation",
+      "work_total": 78,
+      "deliver_at": 900,
+      "deps": ["key_animation"]
+    },
+    {
+      "key": "animation_check",
+      "stage": "animation",
+      "name": "作画检查",
+      "ability": "direction",
+      "work_total": 34,
+      "deliver_at": 950,
+      "deps": ["inbetween"]
+    },
+    {
+      "key": "background",
+      "stage": "art_visual",
+      "name": "背景",
+      "ability": "drawing",
+      "work_total": 62,
+      "deliver_at": 850,
+      "deps": ["layout", "common:art_setting"]
+    },
+    {
+      "key": "art_check",
+      "stage": "art_visual",
+      "name": "美术检查",
+      "ability": "drawing",
+      "work_total": 20,
+      "deliver_at": 900,
+      "deps": ["background", "common:color_design"]
+    },
+    {
+      "key": "composite",
+      "stage": "photography_editing",
+      "name": "摄影合成",
+      "ability": "postproduction",
+      "work_total": 52,
+      "deliver_at": 900,
+      "deps": ["animation_check", "art_check"]
+    },
+    {
+      "key": "editing",
+      "stage": "photography_editing",
+      "name": "剪辑",
+      "ability": "direction",
+      "work_total": 24,
+      "deliver_at": 950,
+      "deps": ["composite"]
+    },
+    {
+      "key": "dubbing",
+      "stage": "sound_delivery",
+      "name": "配音收录",
+      "ability": "postproduction",
+      "work_total": 26,
+      "deliver_at": 900,
+      "deps": ["editing"]
+    },
+    {
+      "key": "sound_mix",
+      "stage": "sound_delivery",
+      "name": "音响调整",
+      "ability": "postproduction",
+      "work_total": 30,
+      "deliver_at": 950,
+      "deps": ["dubbing", "common:music"]
+    },
+    {
+      "key": "delivery_master",
+      "stage": "sound_delivery",
+      "name": "完成母版",
+      "ability": "postproduction",
+      "work_total": 12,
+      "deliver_at": 1000,
+      "is_gate": true,
+      "deps": ["sound_mix", "common:op_ed"]
+    }
+  ]
+}
