@@ -205,6 +205,9 @@ Sites 官方插件本地打包约束：单文件不超过 50 MiB，整体发布 
 ## 文档
 
 - [贡献与协作指南](CONTRIBUTING.md)
+- [权威玩法决策登记册](docs/DECISION_LOG.md)
+- [项目文档导航](docs/README.md)
+- [研究与审计成果目录](docs/RESEARCH_CATALOG.md)
 - [核心玩法重构框架（当前设计基线）](docs/CORE_GAMEPLAY_REBUILD_FRAMEWORK.md)
 - [领域架构设计（目标架构，v1.4）](docs/DOMAIN_ARCHITECTURE.md)
 - [制作蓝图规范](docs/BLUEPRINT_SPEC.md) · [TV 样例](docs/blueprints/tv_standard.blueprint.json)
