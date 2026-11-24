@@ -1,5 +1,8 @@
 # 统一数据结构：V3 目标契约、M1 部分实现与 V2 历史模型
 
+> **状态说明（2026-11-24）：** 本文件描述 V3 目标契约及其历史实现，不是当前公司级多项目架构的数据模型。V3 的单项目/五阶段字段仅作为迁移来源保留；当前目标以 [DECISION_LOG.md](DECISION_LOG.md) 和 [DOMAIN_ARCHITECTURE.md](DOMAIN_ARCHITECTURE.md) 为准。
+
+
 ## V3.1 M0 交付边界
 
 2026-11-21，针对议题 #2 冻结目标契约。用户已要求按差距审查建议完成 M0；下列时序与记账口径作为后续实现依据，数值平衡仍待定。可编译类型与边界校验在 [gameV3.ts](../apps/web/src/types/gameV3.ts)，静态跨端样本在 [fixtures.ts](../apps/web/src/test/fixtures.ts) 的 `v3*` 函数。它们不是规则模拟器，也不声称 C++ 已返回 v3。
