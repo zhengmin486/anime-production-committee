@@ -25,6 +25,22 @@ else()
     target_compile_options(game_core PRIVATE -Wall -Wextra -Wpedantic)
 endif()
 
+# v4 target architecture (M1 onward): compiled alongside v3; production entry switches at M6.
+# This target ensures v4 sources compile; shipped WASM remains v3 until M6.
+add_library(game_core_v4 STATIC
+    src/v4/model.cpp
+    src/v4/kernel.cpp
+    src/v4/runtime.cpp
+)
+target_include_directories(game_core_v4 PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
+target_link_libraries(game_core_v4 PUBLIC nlohmann_json::nlohmann_json)
+if(MSVC)
+    target_compile_options(game_core_v4 PUBLIC /utf-8 /EHsc)
+    target_compile_options(game_core_v4 PRIVATE /W4)
+else()
+    target_compile_options(game_core_v4 PRIVATE -Wall -Wextra -Wpedantic)
+endif()
+
 if(EMSCRIPTEN)
     # GoogleTest is deliberately excluded from the cross-compiled build.
     set(BUILD_TESTING OFF CACHE BOOL "Build native tests" FORCE)
