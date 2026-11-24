@@ -81,19 +81,20 @@ test('首周产出与独立手算逐项一致', () => {
   }
   const advanced = ok('advance_week', { state })
 
-  // 手算（产能按主专业；跨专业按 800‰ 折算；分配期按未被占用的剩余量扣减）：
-  // staff_anim 80 点 → 公共项 64（余 20）
-  // staff_dir  82 点 → 公共项 20→16（余 0），脚本 62→49（余 38）
+  // 手算（产能按主专业；跨专业按 800‰ 折算并四舍五入；分配期按未被占用的剩余量扣减）：
+  // staff_anim 80 点 → 公共项 80→64（余 20）
+  // staff_dir  82 点 → 公共项 20→16（余 0），脚本 62→50（余 38）
   // staff_ka   85 点 → 脚本 38→30（余 0）
   const common = findItem(advanced.state, 'work_01', 'common.series_comp')
   const script = findItem(advanced.state, 'work_01', 'ep01.script')
   assert.equal(common.work_done, 80)
-  assert.equal(script.work_done, 79)
+  assert.equal(script.work_done, 80)
 
+  // 质量由累计工作量派生：80 点 × 100‰ = 8，不再按每周增量截断
   const commonQuality = Object.values(common.quality).reduce((sum, value) => sum + value, 0)
   const scriptQuality = Object.values(script.quality).reduce((sum, value) => sum + value, 0)
-  assert.equal(commonQuality, 7)   // 64→6, 16→1
-  assert.equal(scriptQuality, 7)   // 49→4, 30→3
+  assert.equal(commonQuality, 8)
+  assert.equal(scriptQuality, 8)
 
   const fatigue = Object.fromEntries(advanced.state.staff.map((member) => [member.id, member.fatigue]))
   const morale = Object.fromEntries(advanced.state.staff.map((member) => [member.id, member.morale]))
@@ -170,20 +171,77 @@ test('非法目标与非法归属被拒绝且状态不变', () => {
 })
 
 test('定向目标把产能拉到指定单集', () => {
-  let state = ok('initialize', { seed: 9 }).state
-  state = ok('instantiate_work', { state, blueprint: tiny, work_id: 'work_a', duration_weeks: 26 }).state
-  state = ok('instantiate_work', { state, blueprint: tiny, work_id: 'work_b', duration_weeks: 26 }).state
-  // 两个项目都只解锁"公共制作 + 脚本"，定向到 work_b 的 ep01
-  state = ok('set_plan', { state, work_id: 'work_b', plan: { focus: 'quality', target: { kind: 'episode', id: 'ep01' } } }).state
-  for (const staffId of ['staff_dir', 'staff_ka', 'staff_anim']) {
-    state = ok('assign_staff', { state, staff_id: staffId, work_id: 'work_b' }).state
+  // 单人、单周，差异只来自定向：不设定向时预算全给公共项，设了才轮到脚本
+  const run = (plan) => {
+    let state = ok('initialize', { seed: 9 }).state
+    state = ok('instantiate_work', { state, blueprint: tiny, work_id: 'work_b', duration_weeks: 26 }).state
+    if (plan) state = ok('set_plan', { state, work_id: 'work_b', plan }).state
+    state = ok('assign_staff', { state, staff_id: 'staff_dir', work_id: 'work_b' }).state
+    const advanced = ok('advance_week', { state })
+    return {
+      script: findItem(advanced.state, 'work_b', 'ep01.script').work_done,
+      common: findItem(advanced.state, 'work_b', 'common.series_comp').work_done,
+      first: advanced.report.works.find((entry) => entry.work_id === 'work_b').items[0].item_id
+    }
   }
-  const advanced = ok('advance_week', { state })
-  const script = findItem(advanced.state, 'work_b', 'ep01.script')
-  const common = findItem(advanced.state, 'work_b', 'common.series_comp')
-  assert.ok(script.work_done > 0, '定向后脚本应有产出')
-  assert.ok(script.work_done > common.work_done, '定向项应优先于非定向项吃到产能')
-  // 第一个被投入的工作项应当是定向目标
-  const first = advanced.report.works.find((entry) => entry.work_id === 'work_b').items[0]
-  assert.equal(first.item_id, 'ep01.script')
+  const plain = run(null)
+  assert.ok(plain.common > 0 && plain.script === 0, '无定向时公共项先吃满')
+
+  const targeted = run({ focus: 'quality', target: { kind: 'episode', id: 'ep01' } })
+  assert.ok(targeted.script > 0, '定向后脚本应有产出')
+  assert.equal(targeted.common, 0, '定向后公共项应让位')
+  assert.equal(targeted.first, 'ep01.script', '第一个被投入的工作项应当是定向目标')
+})
+
+test('门槛优先级高于质量取向（回归：已过门槛的项不得吸走产能）', () => {
+  // 公共项 work_total=1000 只给 150 的门槛：第 0 周（198 点）就"达标"，但远未做完。
+  // 若排序被 quality 取向倒置，它会在后续每周继续吸走全部产能，脚本永远开不了工。
+  const big = {
+    ...tiny,
+    id: 'test_gate_priority',
+    common: [{ key: 'series_comp', name: '系列构成', ability: 'planning', work_total: 1000, deliver_at: 150, deps: [] }]
+  }
+  for (const focus of ['quality', 'schedule', 'cost']) {
+    let state = ok('initialize', { seed: 7 }).state
+    state = ok('instantiate_work', { state, blueprint: big, work_id: 'work_01', duration_weeks: 26 }).state
+    state = ok('set_plan', { state, work_id: 'work_01', plan: { focus } }).state
+    for (const staffId of ['staff_dir', 'staff_ka', 'staff_anim']) {
+      state = ok('assign_staff', { state, staff_id: staffId, work_id: 'work_01' }).state
+    }
+    state = ok('advance_week', { state }).state
+    // 第 1 周：公共项已过门槛但仍未完成，脚本尚未开工 —— 应当轮到脚本
+    const advanced = ok('advance_week', { state })
+    const script = findItem(advanced.state, 'work_01', 'ep01.script')
+    const common = findItem(advanced.state, 'work_01', 'common.series_comp')
+    assert.ok(common.work_done > 150 && common.work_done < 1000, `${focus}: 公共项应已过门槛但未完成`)
+    assert.ok(script.work_done > 0, `${focus}: 未达门槛的脚本必须拿到产能`)
+  }
+})
+
+test('改 focus 不清除定向目标，显式 null 才清除', () => {
+  let state = setupTiny()
+  state = ok('set_plan', { state, work_id: 'work_01', plan: { target: { kind: 'episode', id: 'ep01' } } }).state
+  assert.deepEqual(state.works[0].plan.target, { kind: 'episode', id: 'ep01' })
+
+  state = ok('set_plan', { state, work_id: 'work_01', plan: { focus: 'schedule' } }).state
+  assert.deepEqual(state.works[0].plan.target, { kind: 'episode', id: 'ep01' }, '只改 focus 不应丢目标')
+  assert.equal(state.works[0].plan.focus, 'schedule')
+
+  state = ok('set_plan', { state, work_id: 'work_01', plan: { target: null } }).state
+  assert.equal(state.works[0].plan.target, null, '显式 null 才清除目标')
+})
+
+test('计划枚举非法取值被拒绝且状态不变', () => {
+  const state = setupTiny()
+  const cases = [
+    { focus: 'bogus' },
+    { intensity: 'extreme' },
+    { outsourcing: 'whatever' },
+    { overtime: 'yes' },
+    { target: 'ep01' }
+  ]
+  for (const plan of cases) {
+    const result = call('set_plan', { state, work_id: 'work_01', plan })
+    assert.equal(result.error?.code, 'INVALID_INPUT', `plan=${JSON.stringify(plan)} 应被拒绝`)
+  }
 })

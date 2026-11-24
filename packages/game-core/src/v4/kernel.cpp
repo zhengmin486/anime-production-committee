@@ -135,10 +135,6 @@ int points_from_capacity(int capacity_permille_value) {
 }
 
 namespace {
-std::string candidate_ability(const Project& work, const std::string& item_id) {
-    const WorkItem* item = find_item(work, item_id);
-    return item == nullptr ? std::string{} : item->ability;
-}
 }  // namespace
 
 bool is_unlocked(const Project& work, const WorkItem& item) {
@@ -157,6 +153,7 @@ std::vector<ItemCandidate> order_candidates(const Project& work) {
         if (!is_unlocked(work, item) || item.complete()) continue;
         ItemCandidate candidate;
         candidate.item_id = item.id;
+        candidate.ability = item.ability;
         candidate.episode_id = entry.episode_id;
         candidate.stage_key = entry.stage_key;
         candidate.stage_order = entry.stage_order;
@@ -166,19 +163,22 @@ std::vector<ItemCandidate> order_candidates(const Project& work) {
         candidates.push_back(std::move(candidate));
     }
 
+    // 排序优先级严格按架构 §7.3.5：定向 > 未达门槛 > 阶段 > 取向 > id。
+    // 取向只允许在"同一门槛状态、同一阶段"内调整先后，不得反过来压过门槛优先级
+    // —— 否则已过门槛的项会持续吸走产能，下游永远不解锁。
     const std::string focus = work.plan.focus;
     std::sort(candidates.begin(), candidates.end(), [&focus](const ItemCandidate& a, const ItemCandidate& b) {
         if (a.target_hit != b.target_hit) return a.target_hit;                    // 1 定向优先
-        if (focus == "quality") {
-            if (a.delivered != b.delivered) return a.delivered;                   // 2 质量取向：先打磨已过门槛的
-        } else if (focus == "schedule") {
-            if (a.remaining != b.remaining) return a.remaining < b.remaining;     // 2 进度取向：先收尾
+        if (a.delivered != b.delivered) return !a.delivered;                      // 2 未达门槛优先
+        if (a.stage_order != b.stage_order) return a.stage_order < b.stage_order;  // 3 阶段靠前优先
+        if (focus == "schedule") {
+            if (a.remaining != b.remaining) return a.remaining < b.remaining;      // 4 进度取向：先收尾
         } else if (focus == "cost") {
-            if (a.remaining != b.remaining) return a.remaining > b.remaining;     // 2 成本取向：先集中大项
+            if (a.remaining != b.remaining) return a.remaining > b.remaining;      // 4 成本取向：先集中大项
         }
-        if (a.delivered != b.delivered) return !a.delivered;                      // 3 未达门槛优先
-        if (a.stage_order != b.stage_order) return a.stage_order < b.stage_order; // 4 阶段靠前优先
-        return a.item_id < b.item_id;                                             // 5 id 兜底
+        // quality 取向不额外排序：同一阶段内各工作项的质量权重相同（见 dimension_weights），
+        // 它的作用体现在"往哪一维记质量"，不体现在先后。阶段之间已由第 3 条决定。
+        return a.item_id < b.item_id;                                              // 5 id 兜底
     });
     return candidates;
 }
@@ -205,9 +205,10 @@ std::vector<ItemAssignment> allocate(const Project& work, const std::vector<cons
             if (available <= 0) continue;
             const int take = std::min(budget, available);
             if (take <= 0) continue;
-            const int scaled = take * fit_permille(*member, candidate_ability(work, candidate.item_id)) / 1000;
+            // 四舍五入而非截断：否则剩余量很小的项会算出 0 点，一周投入凭空消失。
+            const int scaled = (take * fit_permille(*member, candidate.ability) + 500) / 1000;
             assignments.push_back(ItemAssignment{work.id, candidate.item_id, candidate.episode_id, candidate.stage_key,
-                                                 member->id, candidate_ability(work, candidate.item_id), scaled});
+                                                 member->id, candidate.ability, scaled});
             remaining[candidate.item_id] -= take;
             budget -= take;
         }
@@ -242,8 +243,7 @@ std::array<int, kDimensionCount> dimension_weights(const std::string& stage_key,
 }
 
 ProductionResult apply_production(WorkItem& item, const Staff& staff, int points, bool hands_over,
-                                  std::uint32_t seed, int week, std::uint32_t stream_index,
-                                  const std::string& stage_key) {
+                                  std::uint32_t seed, int week, const std::string& stage_key) {
     ProductionResult result;
     int effective = points;
     if (hands_over) effective = points * (1000 - kHandoverLoss) / 1000;
@@ -257,11 +257,19 @@ ProductionResult apply_production(WorkItem& item, const Staff& staff, int points
         item.contributors.push_back(staff.id);
     }
 
-    const int quality_total = gain * kQualityRate / 1000;
-    result.quality_gain = quality_total;
+    // 质量总量由"累计工作量"派生，而不是逐周累加每周增量：
+    // 逐周截断会把每周的小数部分全部丢掉（80 点 → 每周 0 点是常态），
+    // 派生口径下质量只取决于 work_done，读档重算也不会漂。
+    int current_quality = 0;
+    for (const int value : item.quality.dims) current_quality += value;
+    const int quality_target = item.work_done * kQualityRate / 1000;
+    const int quality_total = std::max(0, quality_target - current_quality);
+    result.quality_gain = 0;
     if (quality_total <= 0) return result;
 
-    // 在阶段权重非零的维度里随机挑一个：落实"随机提升若干质量项"
+    // 在阶段权重非零的维度里随机挑一个：落实"随机提升若干质量项"。
+    // 随机坐标取 (seed, week, quality, hash(item|staff), 0)：
+    // 只依赖"谁在哪一周做了什么项"，与分派顺序、员工数量无关。
     const auto weights = dimension_weights(stage_key, item.ability);
     std::array<int, kDimensionCount> available{};
     int available_count = 0;
@@ -270,8 +278,8 @@ ProductionResult apply_production(WorkItem& item, const Staff& staff, int points
     }
     if (available_count == 0) return result;
 
-    const std::uint32_t purpose = hash_text(item.id);
-    const std::uint32_t pick = draw_below(seed, week, Stream::quality, purpose, stream_index, static_cast<std::uint32_t>(available_count));
+    const std::uint32_t purpose = hash_text(item.id + "|" + staff.id);
+    const std::uint32_t pick = draw_below(seed, week, Stream::quality, purpose, 0, static_cast<std::uint32_t>(available_count));
     const int dim = available[static_cast<std::size_t>(pick)];
     const int before = item.quality.dims[static_cast<std::size_t>(dim)];
     const int after = std::min(100, before + quality_total);
@@ -300,5 +308,9 @@ bool supervisor_switched(const Staff& staff, const std::string& work_id) {
 }
 
 int supervisor_switch_penalty(int points) { return points * kSupervisorSwitchLoss / 1000; }
+
+int team_capacity_permille(bool supervisor_switched_in) {
+    return supervisor_switched_in ? 1000 - kSupervisorSwitchLoss : 1000;
+}
 
 }  // namespace apc::v4::kernel

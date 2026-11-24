@@ -51,6 +51,7 @@ struct ItemAssignment {
 
 struct ItemCandidate {
     std::string item_id;
+    std::string ability;         // 该工作项驱动能力（分配期用，避免重复查表）
     std::string episode_id;
     std::string stage_key;
     int stage_order = 0;         // 公共制作为 -1
@@ -75,9 +76,10 @@ struct ProductionResult {
 std::array<int, kDimensionCount> dimension_weights(const std::string& stage_key, const std::string& ability);
 
 // 把产出写入工作项：累加 work_done、按维度分配质量、记录参与者。
+// 质量由累计工作量派生，随机坐标只取 (seed, week, quality, hash(item|staff), 0)，
+// 因此与分派顺序、同期员工数量无关。
 ProductionResult apply_production(WorkItem& item, const Staff& staff, int points, bool hands_over,
-                                  std::uint32_t seed, int week, std::uint32_t stream_index,
-                                  const std::string& stage_key);
+                                  std::uint32_t seed, int week, const std::string& stage_key);
 
 // ---- 磨合 ----
 bool is_supervisor(const std::string& role);
@@ -86,5 +88,8 @@ bool is_supervisor(const std::string& role);
 bool hands_over_item(int prior_work_done, int work_total, bool prior_contributed, const std::string& role);
 bool supervisor_switched(const Staff& staff, const std::string& work_id);
 int supervisor_switch_penalty(int points);
+// 项目本周团队产能系数：有监督人员换入时为 900，否则 1000。
+// 系数只在这里定义一次，避免 runtime 与内核各写一份而漂移。
+int team_capacity_permille(bool supervisor_switched_in);
 
 }  // namespace apc::v4::kernel

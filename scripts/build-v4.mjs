@@ -7,7 +7,7 @@
 // 用法：
 //   node scripts/build-v4.mjs
 //   环境变量：EMXX（em++ 路径）、JSON_INCLUDE（nlohmann/json.hpp 所在 include 目录）
-import { existsSync, mkdirSync, readdirSync, statSync } from 'node:fs'
+import { existsSync, mkdirSync, readdirSync, statSync, writeFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { spawnSync } from 'node:child_process'
@@ -46,9 +46,15 @@ if (!emxx) {
 }
 
 // ---- nlohmann/json ----
+// 版本与 packages/game-core/CMakeLists.txt 的 FetchContent 固定版本保持一致。
+const JSON_VERSION = '3.12.0'
+
 function findJsonInclude() {
   if (process.env.JSON_INCLUDE) return process.env.JSON_INCLUDE
   const roots = [join(root, 'build')]
+  // 先看本仓库自己的下载缓存，保证干净克隆可复现
+  const cached = join(root, 'build', 'deps', 'nlohmann')
+  if (existsSync(join(cached, 'nlohmann', 'json.hpp'))) return cached
   // 工作树场景：.worktrees 可能在主仓库根目录
   const worktreeDirs = [join(root, '.worktrees'), join(root, '..', '..', '.worktrees'), join(root, '..', '.worktrees')]
   for (const worktrees of worktreeDirs) {
@@ -92,11 +98,32 @@ function safeReadDir(path) {
   }
 }
 
-const jsonInclude = findJsonInclude()
-if (!jsonInclude) {
-  console.error('找不到 nlohmann/json.hpp。请设置 JSON_INCLUDE，或先运行一次原生构建以获取依赖。')
-  process.exit(1)
+// 找不到就按 CMake 里固定的版本下载单头文件，避免构建依赖"别的 worktree 恰好构建过"。
+async function downloadJson() {
+  const target = join(root, 'build', 'deps', 'nlohmann')
+  const file = join(target, 'nlohmann', 'json.hpp')
+  if (existsSync(file)) return target
+  const url = `https://raw.githubusercontent.com/nlohmann/json/v${JSON_VERSION}/single_include/nlohmann/json.hpp`
+  console.log(`未找到本地 nlohmann/json，尝试下载 v${JSON_VERSION}`)
+  try {
+    const response = await fetch(url)
+    if (!response.ok) throw new Error(`HTTP ${response.status}`)
+    const text = await response.text()
+    if (!text.includes('NLOHMANN_JSON_VERSION_MAJOR')) throw new Error('返回内容不是 json.hpp')
+    mkdirSync(join(target, 'nlohmann'), { recursive: true })
+    writeFileSync(file, text)
+    console.log(`已下载到 ${file}`)
+    return target
+  } catch (error) {
+    console.error(`下载失败：${error.message}`)
+    console.error('请设置 JSON_INCLUDE 指向 nlohmann/json 头文件所在目录，或先跑一次原生 CMake 构建。')
+    return undefined
+  }
 }
+
+// JSON_DOWNLOAD=1 可强制走下载，用于验证干净环境下的自举
+const jsonInclude = process.env.JSON_DOWNLOAD ? await downloadJson() : findJsonInclude() ?? (await downloadJson())
+if (!jsonInclude) process.exit(1)
 
 const args = [
   '-std=c++17',

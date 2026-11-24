@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cstdio>
 #include <cstdint>
+#include <initializer_list>
 #include <map>
 #include <set>
 #include <string>
@@ -224,10 +225,37 @@ std::vector<std::string> validate(const GameState& state) {
                     if (item.work_total <= 0) error("INV-03 work_total 必须为正: " + item.id);
                     if (item.work_done < 0 || item.work_done > item.work_total) error("INV-03 work_done 越界: " + item.id);
                     if (item.deliver_at < 1 || item.deliver_at > 1000) error("INV-03 deliver_at 越界: " + item.id);
-                    if (item.is_gate) ++gate_count;
+                    if (item.is_gate) {
+                        ++gate_count;
+                        if (stage.key != kStages[static_cast<std::size_t>(kStageCount - 1)]) {
+                            error("INV-07 门槛项只能出现在 sound_delivery: " + item.id);
+                        }
+                    }
                 }
             }
             if (gate_count == 0) error("INV-07 单集缺少门槛项: " + work.id + "/" + episode.id);
+        }
+
+        // 计划取值与定向目标（非法枚举会让排序静默退回默认行为，必须在这里拦住）
+        const auto one_of = [](const std::string& value, std::initializer_list<const char*> allowed) {
+            for (const char* candidate : allowed) {
+                if (value == candidate) return true;
+            }
+            return false;
+        };
+        if (!one_of(work.plan.intensity, {"low", "standard", "high"})) error("INV-01 plan.intensity 非法: " + work.id);
+        if (!one_of(work.plan.focus, {"quality", "schedule", "cost"})) error("INV-01 plan.focus 非法: " + work.id);
+        if (!one_of(work.plan.outsourcing, {"none", "gap_fill", "aggressive"})) error("INV-01 plan.outsourcing 非法: " + work.id);
+        if (work.plan.target) {
+            const auto& target = *work.plan.target;
+            bool valid = false;
+            if (target.kind == "episode") {
+                valid = std::any_of(work.episodes.begin(), work.episodes.end(),
+                                    [&target](const Episode& episode) { return episode.id == target.id; });
+            } else if (target.kind == "stage") {
+                valid = stage_index(target.id) >= 0;
+            }
+            if (!valid) error("INV-01 plan.target 未指向本项目单集或合法阶段: " + work.id);
         }
 
         // 依赖引用与环
@@ -262,15 +290,22 @@ std::string state_hash(const GameState& state) {
     GameState copy = state;
     std::sort(copy.staff.begin(), copy.staff.end(), [](const Staff& a, const Staff& b) { return a.id < b.id; });
     std::sort(copy.works.begin(), copy.works.end(), [](const Project& a, const Project& b) { return a.id < b.id; });
+    // 规范化：所有"集合语义"的数组都要排序，否则哈希会随追加顺序变化而漂移。
+    auto canonicalize = [](WorkItem& item) {
+        std::sort(item.deps.begin(), item.deps.end());
+        std::sort(item.contributors.begin(), item.contributors.end());
+    };
     for (auto& work : copy.works) {
         std::sort(work.common.items.begin(), work.common.items.end(),
                   [](const WorkItem& a, const WorkItem& b) { return a.id < b.id; });
+        for (auto& item : work.common.items) canonicalize(item);
         std::sort(work.episodes.begin(), work.episodes.end(),
                   [](const Episode& a, const Episode& b) { return a.id < b.id; });
         for (auto& episode : work.episodes) {
             for (auto& stage : episode.stages) {
                 std::sort(stage.items.begin(), stage.items.end(),
                           [](const WorkItem& a, const WorkItem& b) { return a.id < b.id; });
+                for (auto& item : stage.items) canonicalize(item);
             }
         }
     }
@@ -372,25 +407,65 @@ std::string set_plan(const std::string& input) {
         if (work == nullptr) return encode(error_body("NOT_FOUND", "项目不存在"));
         if (work->status != "producing") return encode(error_body("INVALID_PHASE", "只有制作中的项目可以改计划"));
 
-        work->plan.intensity = plan.value("intensity", work->plan.intensity);
-        work->plan.focus = plan.value("focus", work->plan.focus);
-        work->plan.outsourcing = plan.value("outsourcing", work->plan.outsourcing);
-        work->plan.overtime = plan.value("overtime", work->plan.overtime);
-        if (plan.contains("target") && plan.at("target").is_object()) {
-            const std::string kind = plan.at("target").value("kind", std::string{});
-            const std::string id = plan.at("target").value("id", std::string{});
-            bool valid = false;
-            if (kind == "episode") {
-                valid = std::any_of(work->episodes.begin(), work->episodes.end(),
-                                    [&id](const Episode& episode) { return episode.id == id; });
-            } else if (kind == "stage") {
-                valid = stage_index(id) >= 0;
+        // 枚举必须校验：非法取值一旦落库，排序会静默退回默认行为，玩家看不出原因。
+        auto one_of = [](const std::string& value, std::initializer_list<const char*> allowed) {
+            for (const char* candidate : allowed) {
+                if (value == candidate) return true;
             }
-            if (!valid) return encode(error_body("INVALID_INPUT", "target 必须指向本项目单集或合法阶段"));
-            work->plan.target = Target{kind, id};
-        } else {
-            work->plan.target.reset();
+            return false;
+        };
+        std::string intensity = work->plan.intensity;
+        std::string focus = work->plan.focus;
+        std::string outsourcing = work->plan.outsourcing;
+        bool overtime = work->plan.overtime;
+        if (plan.contains("intensity")) {
+            if (!plan.at("intensity").is_string()) return encode(error_body("INVALID_INPUT", "intensity 必须是字符串"));
+            intensity = plan.at("intensity").get<std::string>();
+            if (!one_of(intensity, {"low", "standard", "high"})) return encode(error_body("INVALID_INPUT", "intensity 取值非法"));
         }
+        if (plan.contains("focus")) {
+            if (!plan.at("focus").is_string()) return encode(error_body("INVALID_INPUT", "focus 必须是字符串"));
+            focus = plan.at("focus").get<std::string>();
+            if (!one_of(focus, {"quality", "schedule", "cost"})) return encode(error_body("INVALID_INPUT", "focus 取值非法"));
+        }
+        if (plan.contains("outsourcing")) {
+            if (!plan.at("outsourcing").is_string()) return encode(error_body("INVALID_INPUT", "outsourcing 必须是字符串"));
+            outsourcing = plan.at("outsourcing").get<std::string>();
+            if (!one_of(outsourcing, {"none", "gap_fill", "aggressive"})) return encode(error_body("INVALID_INPUT", "outsourcing 取值非法"));
+        }
+        if (plan.contains("overtime")) {
+            if (!plan.at("overtime").is_boolean()) return encode(error_body("INVALID_INPUT", "overtime 必须是布尔值"));
+            overtime = plan.at("overtime").get<bool>();
+        }
+
+        // 定向目标：字段缺省时保持原值（改 focus 不应该顺手把目标清掉），显式 null 才清除。
+        std::optional<Target> target = work->plan.target;
+        if (plan.contains("target")) {
+            const auto& raw = plan.at("target");
+            if (raw.is_null()) {
+                target.reset();
+            } else if (raw.is_object()) {
+                const std::string kind = raw.value("kind", std::string{});
+                const std::string id = raw.value("id", std::string{});
+                bool valid = false;
+                if (kind == "episode") {
+                    valid = std::any_of(work->episodes.begin(), work->episodes.end(),
+                                        [&id](const Episode& episode) { return episode.id == id; });
+                } else if (kind == "stage") {
+                    valid = stage_index(id) >= 0;
+                }
+                if (!valid) return encode(error_body("INVALID_INPUT", "target 必须指向本项目单集或合法阶段"));
+                target = Target{kind, id};
+            } else {
+                return encode(error_body("INVALID_INPUT", "target 必须是对象或 null"));
+            }
+        }
+
+        work->plan.intensity = intensity;
+        work->plan.focus = focus;
+        work->plan.outsourcing = outsourcing;
+        work->plan.overtime = overtime;
+        work->plan.target = target;
 
         const auto errors = validate(state);
         if (!errors.empty()) return encode(error_body("INVALID_STATE", errors.front()));
@@ -472,11 +547,10 @@ std::string advance_week(const std::string& input) {
                 prior_contributors[item.id] = std::set<std::string>(item.contributors.begin(), item.contributors.end());
             });
 
-            const int team_permille = supervisor_switch ? 1000 - 100 : 1000;   // 团队级磨合 [PLACEHOLDER]
+            const int team_permille = kernel::team_capacity_permille(supervisor_switch);
             const auto assignments = kernel::allocate(*work, assigned, team_permille);
 
             std::map<std::string, Json> item_reports;
-            std::map<std::string, int> item_order;
             std::vector<std::string> order;
             for (const auto& assignment : assignments) {
                 Staff* member = find_staff(state, assignment.staff_id);
@@ -492,8 +566,7 @@ std::string advance_week(const std::string& input) {
                 }
                 const bool hands_over = kernel::hands_over_item(prior.first, item->work_total, prior_contributed, member->role);
                 const auto result = kernel::apply_production(*item, *member, assignment.points, hands_over, state.seed,
-                                                             week, static_cast<std::uint32_t>(item_order.size()),
-                                                             assignment.stage_key);
+                                                             week, assignment.stage_key);
                 produced_by_staff[member->id] += result.points;
                 if (item_reports.find(item->id) == item_reports.end()) {
                     order.push_back(item->id);
