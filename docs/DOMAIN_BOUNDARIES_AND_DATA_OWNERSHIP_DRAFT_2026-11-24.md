@@ -54,7 +54,7 @@
 | 实体 | 权威所有者 | 生命周期 | 主要职责 |
 |---|---|---|---|
 | StaffAllocation | WeeklySettlement 输入快照 | 每周创建，结算后归档 | 记录核心员工当周唯一项目归属 |
-| StaffTransition | WeeklySettlement | 发生人员切换时创建 | 记录切换前后项目、阶段边界、监督身份及磨合损失依据 |
+| StaffTransition | WeeklySettlement | 发生人员接手或监督人员切换时创建 | 记录接手的工作单元、该工作是否已开始、人员角色及磨合损失依据 |
 | SupplierCapacityReservation | WeeklySettlement / SupplierReservation | 按周或合同有效期 | 防止供应商同一产能被多个项目重复占用 |
 | LedgerEntry | Company | 每笔业务发生时追加 | 公司现金的唯一变动记录，并附项目归因 |
 | WeeklySettlement | Company | 每周一次 | 收集输入、预检资源、计算结果、原子提交并生成周回执 |
