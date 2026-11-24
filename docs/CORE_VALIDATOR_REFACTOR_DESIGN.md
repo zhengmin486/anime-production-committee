@@ -1,5 +1,8 @@
 # 核心状态校验器改造设计
 
+> 历史资料说明：本文记录旧版 V2/V3 契约、旧五阶段制作模型或当时的研究建议，不代表当前目标玩法。现行决策以 [DECISION_LOG.md](DECISION_LOG.md) 为准：项目级公共制作 + 单集六阶段、工作项依赖并行、核心员工每周严格单项目分配、多项目并行及限时资金危机。本文中的旧阶段、资源分配和资金规则仅作为历史证据/旧实现迁移参考，不得直接作为新架构依据。
+
+
 > 基于 2026-11-22 main 实际源码核对。本文只定义 M2 接入前的核心兼容层改造，不实现 #6/#7/#11 模块行为，不修改玩法规则或数值。
 >
 > 核心文件基线：`packages/game-core/src/game_core.cpp`（blob SHA `ed6cfed93ee0c987632fcafdf680900ab3c97e57`）；目标契约：`docs/DATA_MODEL.md` V3.2–V3.7、`apps/web/src/types/gameV3.ts`。当前 native 测试：`packages/game-core/tests/game_core_test.cpp`。
