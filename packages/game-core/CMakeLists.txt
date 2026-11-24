@@ -25,6 +25,22 @@ else()
     target_compile_options(game_core PRIVATE -Wall -Wextra -Wpedantic)
 endif()
 
+# v4 目标架构（M1 起）：与 v3 并行存在，M6 才切换入口。
+# 本目标只保证 v4 源码被编译；正式 wasm 产物在 M6 前仍只含 v3。
+add_library(game_core_v4 STATIC
+    src/v4/model.cpp
+    src/v4/kernel.cpp
+    src/v4/runtime.cpp
+)
+target_include_directories(game_core_v4 PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
+target_link_libraries(game_core_v4 PUBLIC nlohmann_json::nlohmann_json)
+if(MSVC)
+    target_compile_options(game_core_v4 PUBLIC /utf-8 /EHsc)
+    target_compile_options(game_core_v4 PRIVATE /W4)
+else()
+    target_compile_options(game_core_v4 PRIVATE -Wall -Wextra -Wpedantic)
+endif()
+
 if(EMSCRIPTEN)
     # GoogleTest is deliberately excluded from the cross-compiled build.
     set(BUILD_TESTING OFF CACHE BOOL "Build native tests" FORCE)
