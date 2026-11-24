@@ -4,7 +4,7 @@ ANIME PRODUCTION COMMITTEE · 浏览器经营模拟游戏最小纵向切片 · v
 
 当前范围是初始化公司、选择企划、安排团队、推进制作、处理事件、结算并接取下一部的最小循环，不是完整游戏或最终平衡版本。React 通过 Emscripten 的真实 WebAssembly 调用 C++ 六接口；没有用 TypeScript 伪造核心计算，也没有独立后端。
 
-> **V1.0 迁移进行中。** 下面的玩法、协议与验收描述的是已合入的 v2 纵向切片，仍然准确，但不是目标形态。《游戏设计总案 V1.0》要求周制经营、五阶段、企划市场、委员会投资、六能力用工与公司终局，差距见 [docs/V1_GAP_REVIEW.md](docs/V1_GAP_REVIEW.md)，本轮分工与顺序见 [docs/TEAM_PLAN.md](docs/TEAM_PLAN.md)，任务在 [议题 #1](https://github.com/zhengmin486/anime-production-committee/issues/1) 与 #2–#9。
+**架构重构进行中。** 下面的玩法、协议与验收主要描述历史 v2/v3 运行切片，仍可用于理解旧实现，但不是当前目标规则。当前目标采用项目级公共制作＋单集制作、每集六阶段及公司级多项目经营。历史版本与目标规则的差距见 [docs/V1_GAP_REVIEW.md](docs/V1_GAP_REVIEW.md)，本轮分工与顺序见 [docs/TEAM_PLAN.md](docs/TEAM_PLAN.md)，任务在 [议题 #1](https://github.com/zhengmin486/anime-production-committee/issues/1) 与 #2–#9。
 
 ## M0 契约交付
 
@@ -204,6 +204,10 @@ Sites 官方插件本地打包约束：单文件不超过 50 MiB，整体发布 
 
 ## 文档
 
+- [权威决策登记册](docs/DECISION_LOG.md)：负责人已确认的当前玩法规则，所有智能体开工前必须核对。
+- [研究与审计成果目录](docs/RESEARCH_CATALOG.md)：研究报告、系统审计、模拟与实验材料索引。
+- [核心玩法重构框架](docs/CORE_GAMEPLAY_REBUILD_FRAMEWORK.md)：当前玩法基线。
+
 - [权威决策登记册](docs/DECISION_LOG.md)：负责人已确认的当前玩法规则，智能体开始工作前必须核对。
 - [研究与审计成果目录](docs/RESEARCH_CATALOG.md)：研究报告、系统审计、模拟与实验材料索引。
 - [核心玩法重构框架](docs/CORE_GAMEPLAY_REBUILD_FRAMEWORK.md)：当前玩法基线。
@@ -235,7 +239,7 @@ Sites 官方插件本地打包约束：单文件不超过 50 MiB，整体发布 
 
 ## 经济模拟器（实验版）
 
-已加入可复现的 520 周经济模拟器，用于比较承制/委员会现金流，并测试动态工作量、五阶段合格线、延期压力与违约处罚。V0.6 保留四种固定策略作为基准，新增保守、机会、激进三种动态经营策略及现金低点、合作模式分布等统计。它是独立的 Python 实验工具，不是游戏运行时；动态策略阈值仅是模拟假设，不属于游戏规则，经济参数保持不变。
+已加入可复现的 520 周经济模拟器，用于比较承制/委员会现金流，并测试动态工作量、旧五阶段合格线、延期压力与违约处罚。该模拟器属于旧单项目实验，不代表当前六阶段规则。V0.6 保留四种固定策略作为基准，新增保守、机会、激进三种动态经营策略及现金低点、合作模式分布等统计。它是独立的 Python 实验工具，不是游戏运行时；动态策略阈值仅是模拟假设，不属于游戏规则，经济参数保持不变。
 
 - [模拟器说明与运行方式](scripts/README.md)
 - [模拟器源码](scripts/economic_simulator.py)
@@ -254,4 +258,4 @@ python scripts/run_sensitivity.py
 python -m unittest discover -s scripts/tests -v
 ```
 
-当前模型已按五阶段工作量和动态合格线推进，但周产能、打磨概率、低完成度交付线仍是实验占位参数；员工能力、疲劳、外包、加班和实际制作成本接入后，必须重新校准。
+当前旧实验模型按五阶段工作量和动态合格线推进，但周产能、打磨概率、低完成度交付线仍是实验占位参数；员工能力、疲劳、外包、加班和实际制作成本接入后，必须重新校准。
