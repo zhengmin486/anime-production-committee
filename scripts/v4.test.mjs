@@ -787,3 +787,31 @@ test('事件快照：选项效果冻结在 pending，JSON 往返后仍按触发�
   assert.equal(resolved.events.pending.length, 1)
   assert.equal(resolved.events.pending[0].options[0].effects.length >= 0, true)
 })
+
+test('事件结算：选项 cost 与 funds 效果同周入账时账本 id 不冲突', () => {
+  let state = twoProjectsNearDeadline()
+  state = ok('advance_week', { state }).state
+  const event = state.events.pending.find((entry) => entry.work_id === 'work_a')
+  const option = event.options.find((entry) => entry.id === 'accept')
+  // 内容卡允许 cost 与 funds 效果并存（#13 可写出「赔款 + 加急费」类选项），
+  // 两条流水必须各有 id，否则 INV-02 判定状态非法、结算直接回滚。
+  option.cost = 300
+  option.effects.push({ scope: 'instant', target: 'funds', stage: '', value: -1000 })
+
+  const before = ok('hash_state', { state: JSON.parse(JSON.stringify(state)) }).hash
+  const resolved = ok('resolve_event', {
+    state: JSON.parse(JSON.stringify(state)),
+    work_id: 'work_a',
+    event_id: 'schedule_slip',
+    option_id: 'accept'
+  }).state
+  assert.notEqual(before, ok('hash_state', { state: resolved }).hash)
+
+  const charged = resolved.finance.entries.filter((entry) => entry.category === 'events' && entry.memo === 'schedule_slip')
+  assert.equal(charged.length, 2)
+  assert.deepEqual(charged.map((entry) => entry.amount).sort((a, b) => a - b), [-1000, -300])
+  assert.equal(new Set(charged.map((entry) => entry.id)).size, 2)
+  // 事件支出不得让现金转负，也不得改到另一条 pending
+  assert.ok(resolved.finance.balance >= 0)
+  assert.equal(resolved.events.pending.length, 1)
+})

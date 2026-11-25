@@ -965,7 +965,8 @@ void apply_event_effects(GameState& state, Project& work, const std::vector<Effe
             if (member.employment == "core") targets.push_back(&member);
         }
     }
-    for (const auto& effect : effects) {
+    for (std::size_t index = 0; index < effects.size(); ++index) {
+        const auto& effect = effects[index];
         if (effect.target == "quality") {
             adjust_quality(work, effect.scope == "stage" ? effect.stage : std::string{}, effect.value);
             continue;
@@ -987,9 +988,10 @@ void apply_event_effects(GameState& state, Project& work, const std::vector<Effe
             const std::int64_t funds = state.finance.balance;
             const std::int64_t amount = std::min<std::int64_t>(funds, -effect.value);
             if (amount > 0) {
+                // 带效果序号：同一选项同时带 cost 与 funds 效果时两条流水 id 不得相同（INV-02）。
                 state.finance.entries.push_back(LedgerEntry{
-                    "w" + std::to_string(week) + ".event." + event_id + "." + work.id, week, work.id, "events",
-                    -amount, std::nullopt, event_id});
+                    "w" + std::to_string(week) + ".event." + event_id + "." + work.id + ".e" + std::to_string(index),
+                    week, work.id, "events", -amount, std::nullopt, event_id});
                 state.finance.balance -= amount;
             }
         }
