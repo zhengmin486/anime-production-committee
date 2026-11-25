@@ -136,6 +136,23 @@ ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
 OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 ```
 
+## 界面字体复用 Fusion Pixel 12px（SIL OFL-1.1）
+
+2026-11-23 开始页像素皮肤（方向 C 的 C0 层）接入像素字体，走的是内置文件而不是依赖本机安装，目的是让本机、同事和托管站点拿到同一套字形，不随个人字体列表变化。
+
+| 项 | 值 |
+| --- | --- |
+| 来源 | [TakWolf/fusion-pixel-font](https://github.com/TakWolf/fusion-pixel-font) release `2026.11.10` |
+| 文件 | `fusion-pixel-12px-monospaced-zh_hans.ttf.woff2`，957,056 字节，未修改原样内置 |
+| SHA-256 | `16783b4599928e20fff825fdcf93a67782b371e9593640cb171e3a3dcf901f68` |
+| 内置位置 | `apps/web/public/fonts/`，许可证原文随文件同目录分发 |
+| 声明名 | CSS 家族名 `Pixel CJK`，字体内部名仍为 `Fusion Pixel 12px Mono zh-Hans` |
+| 字形覆盖 | 37,404 字形；扫描 `apps/web/src`、`packages/game-core` 与 `index.html` 得到的 774 个非空白字符全部命中，无缺字 |
+
+许可边界：OFL-1.1 允许随软件捆绑、嵌入和再分发，条件是不得用保留字体名（RFN「缝合像素 / Fusion Pixel」）命名修改版。这里选的是不子集化、不改动、不重命名，因此不产生演绎版，只需连同 `OFL.txt` 及上游 `LICENSES/`（ark-pixel、cubic-11、galmuri）一起保留。若日后为减体积做子集化，那属于修改版，必须另起家族名并保留原版权声明。
+
+已知接缝：`Pixel CJK` 目前只在 `.home-pixel` 作用域内生效，页面头部与页脚属于全局外壳，仍是无衬线回退字，开始页上下两种字体并存。等 C1 把外壳 HUD 一起改造后消除，本轮不扩大作用域以免经营台变成半像素半圆角的混合样式。
+
 ## 当前剩余工作
 
 1. 补齐图像生成输出的实际适用授权依据，授权未清楚前不标为正式可商用，不进入正式发布包。
