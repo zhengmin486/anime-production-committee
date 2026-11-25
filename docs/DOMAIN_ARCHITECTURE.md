@@ -507,7 +507,7 @@ Company {
   status: running | closing | ended
   end_reason: null | time_limit | bankrupt | voluntary
   reputation: >=0 ; reputation_log[{week, reason, delta, after}]
-  office_tier: small | medium | large  // 玩家主动扩容后的当前办公场地规模
+  office_tier: small | medium | large  // 玩家主动扩容后的当前办公场地规模；可跨级直达已解锁目标规模
   base_weekly_rent: >=0                // 当前办公场地规模对应的每周基础房租；扩容新增增量从确认后的下一次周结算起计提
   facilities: []                       // 已建造设施；可用槽位由 office_tier 推导
   // core_staff_capacity 由已达成的公司成长里程碑推导；只统计 core 员工名册，临时员工不占用；解锁后永久保留、只增不减，不依赖 office_tier / facilities
