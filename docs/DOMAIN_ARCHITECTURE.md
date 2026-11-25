@@ -1465,7 +1465,7 @@ SaveRecord { version: 4, savedAt: ISO8601, rules_version, state: GameState }
 | `project.outsourcing` | Vendor.OutsourceContract | 迁移并补交付状态 |
 | `project.committee` | Partnership.Committee | 迁移并对齐 `{id,name,channel}` |
 | `offers/custom_offer/pending_proposal` | Market | 保留槽位语义；`workloads[5]` 换为 `blueprint_id + episode_count + scale` |
-| `pending_event`（旧版全局单槽） | EventState.pending[] | **结构性替换**：多项目事件数组；每条带 work_id；每项目每周最多一条，多项目同周可并存，全部保留、逐条解决且非空阻塞推进 |
+| `pending_event`（旧版全局单槽） | EventState.pending[] | **结构性替换**：多项目事件数组；每条带 work_id；每项目每周最多一条，多项目同周可并存，全部保留、逐条解决；仅未查看的事件阻塞推进（见 §7.6 与 M0 §14.1） |
 | `history[]` | Archive.works | 迁移并补渠道对账/名次/团队快照/单集摘要；旧记录的 `stages[]` 作为历史形状原样保留、不再参与计算 |
 | `preview` | 读模型 | **不进存档** |
 | `phase` | 派生 | **删除**；由（公司状态 + 待处理事件 + 项目集合）派生 |

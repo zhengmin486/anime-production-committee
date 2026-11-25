@@ -37,7 +37,10 @@ content/events/
   "once_per_project": false,         // 重大事件必须 true
   "trigger": { "metric": "stage_quality", "op": "<", "threshold": 55 },
   "random_weight": 0,                // 0..1000‰；表现条件不成立时按此概率进随机池
-  "expires_weeks": 0,                // 首版必须为 0；期限/超时升级未实现，非 0 会被校验拒绝
+  "expires_weeks": 0,                // 0=无期限；1..8=限时事件，触发当周计入有效期
+  "timeout_option": "accept",        // 仅限时事件必填：到期执行的预设消极/保守分支
+  "escalate_on_timeout": false,      // 仅 tier=major 可 true：允许一次超时升级
+  "escalated_expires_weeks": 0,      // 升级后的后续响应期限，1..8；未升级时必须为 0
   "description": "…",
   "foreshadow": "…",                 // 可选：前兆文案
   "options": [
@@ -74,6 +77,15 @@ content/events/
 - `scope=stage` 可写 `stage`（必须是卡片 `stages` 内的阶段）；不写表示当前阶段。
 - 效果值有范围校验（如单次扣款 ≤ 2,000,000）；未知 target/scope/kind 一律拒绝整张卡，不允许运行时静默忽略。
 
+### 2.3 期限与超时（DEC-EVENT-002）
+
+- `expires_weeks=0` 表示不设期限，此时不得出现 `timeout_option`/`escalate_on_timeout`；非 0 时必须给出 `timeout_option`。
+- `timeout_option` 只能是本卡已有的 `abandon`/`decline` 选项：到期行为必须是消极/保守后果，不得预设尚未接入的 `outsource`/`extension`。
+- `escalate_on_timeout=true` 只允许 `tier=major` 且已设期限的卡片，并必须给出 `escalated_expires_weeks`（1..8）。
+- 到期与违约共用 `timeout_option` 这一条分支：未配置升级的事件用它作默认消极分支，配置升级的事件在第二次超时用它作违约惩罚。
+- 校验器（`scripts/lib/event-schema.mjs` 与 C++ `event::parse_catalog`）执行同一套规则，两边都不通过即拒绝整张卡。
+- 已发布的 7 张卡当前全部 `expires_weeks=0`：期限长度、违约力度按 DECISION_LOG「数值不提前冻结」交 #13 标定，标定后再改内容文件，不需要改 C++。
+
 ## 3. 加载链路
 
 ```text
@@ -103,15 +115,25 @@ npm run test:v4              # 构建 WASM 并跑契约测试（需 emsdk）
   content/events/key_cut_rework.json: card key_cut_rework [options[1].effects[0].stage]: 效果阶段不在卡片适用阶段内
 ```
 
-## 5. 运行时仲裁（M0 §14.1）
+### 4.1 流水线门禁
+
+`.github/workflows/v4-contract.yml` 在改动 `content/events/**`、`packages/game-core/**`、事件脚本或该工作流本身时运行两个 job：
+
+- **事件内容校验**：`node scripts/validate-event-content.mjs`，随后重跑 `build-event-catalog.mjs` 并 `git diff --exit-code` 生成文件——只改内容不重跑打包即失败；
+- **v4 契约测试（WASM）**：现场安装 Emscripten SDK 后执行 `npm run test:v4`，即 §7 的全部 40 条用例（含 pending 快照 JSON 往返、查看/到期与 INV-29）。
+
+此前的 `economic-simulator.yml` 只覆盖 Python 经济仿真，不构建 WASM；v4 契约测试的 CI 缺口由本工作流补上。工作流失败时以流水线实际结果为准，本地通过不能替代绿灯。
+
+## 5. 运行时仲裁（M0 §14.1 / §14.11 / §14.12）
 
 - `events.pending` 是数组；每个 `producing` 项目每周最多触发一个事件，不同项目可以在同一周各自触发。
 - 已有待处理事件的项目不会再次抽取；新事件不得覆盖、丢弃或合并旧事件。
-- 数组非空时 `advance_week()` 返回 `INVALID_PHASE`；全部处理完才允许推进。
+- **查看与处理分离（DEC-EVENT-001）**：`view_event(work_id, event_id)` 只把命中条目标记为 `viewed=true`，不结算、不扣款、不移除事件；`advance_week()` 只在存在未查看事件时返回 `INVALID_PHASE`，全部查看后即使仍未处理也允许推进。
 - `resolve_event(work_id, event_id, option_id)`：三个参数全部必填（M0 命令 19，PR #94 冻结）；只删除 `(work_id, event_id)` 命中的那一条，其他项目事件原样保留。
-- 冷却（`cooldown_weeks`）与重大事件 `major_seen` 都按项目记录在 `events.per_work[work_id]`。
-- **选项效果快照**：触发时把 `effects`（scope/target/stage/value）、`cost`、`cooldown_weeks`、`once_per_project` 与事件名一起冻结进 `events.pending[]`；`resolve_event` 只读快照，不回查内容目录。存档或卡片改版后，已触发事件仍执行触发时的效果。
-- `expires_week` 首版恒为 `null`；校验器与运行时都会拒绝非 0 `expires_weeks`。
+- 冷却（`cooldown_weeks`）与重大事件 `major_seen` 都按项目记录在 `events.per_work[work_id]`；玩家手动处理与超时自动处理共用同一套记账。
+- **选项效果快照**：触发时把 `effects`（scope/target/stage/value）、`cost`、`cooldown_weeks`、`once_per_project`、期限字段（`expires_week`/`timeout_option`/`escalate_on_timeout`/`escalated_expires_weeks`）与事件名一起冻结进 `events.pending[]`；`view_event`/`resolve_event` 与到期处理只读快照，不回查内容目录。存档或卡片改版后，已触发事件仍执行触发时的效果。
+- **到期处理（DEC-EVENT-002）**：只有"已查看且仍未处理"的限时事件参与倒计时；周结算在事件抽取之前处理到期，配置了一次升级且尚未升级的事件以同一 `event_id` 替换原条目并进入新期限，其余情况执行预设分支并移除该条。回执见 `report.timeouts[]`（`reason` 为 `timeout`/`breach`）。到期自动扣款以当前余额封顶，不得让现金转负。
+- 无期限事件 `expires_week` 恒为 `null`，永不自动结算；限时事件必须带可执行的 `timeout_option`，否则 INV-29 直接拒绝该状态。
 
 ## 6. 旧样例迁移映射
 
@@ -130,22 +152,30 @@ npm run test:v4              # 构建 WASM 并跑契约测试（需 emsdk）
 
 ## 7. 测试与证据
 
-`scripts/v4.test.mjs` 共 32 条，其中事件相关 7 条：
+`scripts/v4.test.mjs` 共 40 条，其中事件相关 15 条：
 
 1. 内嵌目录 7 张卡、无 issue、id 稳定；
-2. 非法卡夹具：重复 id、未知 target、`funds` 为正、缺 label、schema_version 错误、`expires_weeks≠0`、空目录，错误定位到 card/field；
-3. 双项目同周各自触发，互不覆盖；省略 `work_id` 被拒；处理一条后另一条保留；
-4. 效果只作用于归属项目（A 质量 −3，B 不变）；
-5. 重大事件同项目只触发一次，下一周让位给普通事件；
-6. 同 seed 同操作，pending 与哈希一致；同项目多条 pending / 归属无效被 INV-23 拒绝；
-7. 选项效果快照：篡改快照后再走 JSON 往返，结算仍按快照值执行，不回查目录。
+2. 非法卡夹具：重复 id、未知 target、`funds` 为正、缺 label、schema_version 错误、空目录，错误定位到 card/field；
+3. 期限字段校验：限时缺 `timeout_option`、到期分支不在选项内、分支类型越界（overtime/outsource）、无期限却配分支、期限超 8 周、普通卡配升级、升级后期限越界，以及合法限时/升级卡通过；
+4. 双项目同周各自触发，互不覆盖；省略 `work_id` 被拒；处理一条后另一条保留；
+5. 效果只作用于归属项目（A 质量 −3，B 不变）；
+6. 重大事件同项目只触发一次，下一周让位给普通事件；
+7. 同 seed 同操作，pending 与哈希一致；同项目多条 pending / 归属无效被 INV-23 拒绝；
+8. 选项效果快照：篡改快照后再走 JSON 往返，结算仍按快照值执行，不回查目录；
+9. `view_event` 只标记已查看：不移除 pending、不扣款、不记账、不改质量/冷却/周数，且只影响目标条目，`work_id` 缺失被拒、事件不存在返回 `NOT_FOUND`；
+10. 全部查看后即可推进，未处理 pending 原样保留且当周不再重复抽取；
+11. 未查看的限时事件不参与到期处理；
+12. 到期自动执行预设分支（cost + funds 效果入账、回执 `reason=timeout`），其他项目 pending 逐字段不变；
+13. 超时升级只发生一次（`reason=timeout` 阶段 0 次、条目替换为新期限），第二次超时按 `reason=breach` 结算并移除；
+14. INV-29：缺可用到期分支、分支 id 不存在、有效期越界、无期限却标记升级/到期状态、升级期限越界的 pending 状态一律 `INVALID_STATE`；
+15. `viewed` 与期限字段随 JSON 往返保留，旧存档缺字段按"未查看、无期限"处理；同一选项 `cost` 与 `funds` 效果同周产生的两条流水 id 不冲突（INV-02）。
 
-本机无 Emscripten，32 条用 MSVC 19.51 原生 JSON CLI 跑通（32/32）；`npm run test:v4` 仍需在有 emsdk 的环境复跑。
+本机 `.tools/emsdk` 可用，40 条已通过真实 WASM 构建复跑（`npm run test:v4`，40/40）；同一套用例另用 MSVC 19.51 原生 JSON 壳交叉验证过（40/40），原生壳只是临时工具、放在 `build/`（已 gitignore）不入库。
 
 ## 8. 边界与后续
 
 - 不新增效果类型、概率或触发指标；需要新增时先走规则评审。
 - 公司级事件（`work_id=null`）不在本期：M0 要求每条 pending 带项目 id。
-- 事件处理期限/超时升级仍按 STATUS-51：待处理事件硬暂停，不引入“暂缓后继续推进”。
+- 期限行为按 DEC-EVENT-001/002 落地：未查看事件阻塞推进（不会在玩家未查看时超时），已查看未处理事件可随推进继续倒计时并在到期时自动结算；旧的"待处理事件硬暂停"表述以 M0 §14.1/§14.11/§14.12 为准（STATUS-51 已按此改写）。
 - 事件收入、供应商外包、委员会延期分别等 #51 / #7 / #6。
 - 内容卡文案与数值平衡由 #13 内容协作维护；本流水线只保证格式、加载与校验。

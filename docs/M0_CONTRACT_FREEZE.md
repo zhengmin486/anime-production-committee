@@ -518,3 +518,16 @@ v3 的单项目、五阶段、全局 phase、单事件槽、双份财务汇总�
 - 超时处理按事件身份执行，不得覆盖或清除其他项目 pending；超时自动处理不需要玩家确认。
 - 事件期限、升级门槛、默认分支效果与违约惩罚数值由内容配置及数值标定确定。
 
+### 14.12 事件查看与到期回执的工程登记（#50 落地增补）
+
+本节把 §14.1 的查看动作与 §14.11 的到期处理落成可调用接口，属 B 级兼容扩展：不改变 §5 已冻结的 22 条命令编号与语义，`view_event` 作为 §14.1 派生的新增命令登记在此，命令表重新编号与阶段标注统一由 #53 收敛。
+
+- **查看命令**：`view_event(state, work_id, event_id)`，两参数必填且非空。守卫与失败码：公司非 running ⇒ `COMPANY_ENDED`；参数缺失/类型错误/空串 ⇒ `INVALID_INPUT`；状态非法 ⇒ `INVALID_STATE`；该项目没有该待处理事件 ⇒ `NOT_FOUND`。成功返回 `{state, viewed, expires_week, message}`。
+- **查看的原子语义**：只把命中条目的 `viewed` 置为 true，pending 条数、账本、项目/人员状态、周数全部不变；同一条重复查看不产生第二次效果。查看**不**等于处理，也不暂停或重置期限。
+- **推进守卫**：`advance_week` 只统计 `viewed=false` 的 pending 条数；存在未查看事件时返回 `INVALID_PHASE`，并在消息中给出未查看条数。
+- **到期回执**：周结算在阶段 7 之后、事件抽取之前处理到期，回执为 `report.timeouts[]`，每条 `{work_id, event_id, name, option_id, reason, cost}`，`reason` 取 `timeout`（执行默认消极分支）或 `breach`（升级后再次超时执行违约分支）。到期处理必须先于当周抽取，因此被清空的槽位当周可以重新抽事件。
+- **分支解析**：到期与违约共用同一条预设分支 `timeout_option`——未配置升级的事件用它作默认消极分支，配置了升级的事件在第二次超时用它作违约惩罚；一条事件最多升级一次，升级后 `escalated=true` 且沿用同一 `event_id` 替换原 pending 条目。
+- **快照一致**：`viewed`、`expires_week`、`timeout_option`、`escalate_on_timeout`、`escalated_expires_weeks`、`escalated` 与其他快照字段一样随存档往返，到期结算只读快照，不回查内容目录。旧存档缺这些字段时按"未查看、无期限、无到期分支"处理（宁可多阻塞一次推进，也不静默越过查看规则）。
+- **归属记账**：到期分支的 `cost` 与 `funds` 效果都记入唯一账本，条目类别 `events`、归属 `work_id`、memo 为 `event_id`；自动扣款以当前余额封顶，不得使现金转负或绕过破产判定。同一选项同时含 `cost` 与 `funds` 效果时，流水条目 id 必须互不相同（INV-02）。
+- **内容边界**：`expires_weeks` 上限 8 周；仅 `tier=major` 且已设期限的卡片可配置一次升级，升级后期限 1..8；到期分支只能落在已接入的消极/保守选项（`abandon`/`decline`），不得使用尚未接入的 `outsource`/`extension`。首版发布的 7 张卡仍全部 `expires_weeks=0`，期限与惩罚数值待 #13 标定。
+

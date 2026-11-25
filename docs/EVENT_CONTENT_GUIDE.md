@@ -3,6 +3,7 @@
 - 系统实现与机制口径：@pyxz0，见 [事件模块设计](EVENT_MODULE_DESIGN.md)
 - 内容与文案：@Muchbv，统一跟踪在 [#13](https://github.com/zhengmin486/anime-production-committee/issues/13)
 - 目的：让内容可以先于核心实现落地，且不需要改 C++ 就能评审
+- **v4 交付口径**：本文描述的是 V3 样例结构（`docs/event_catalog.json` 与 `escalation` 对象）。v4 已上线的内容流水线要求一卡一文件 `content/events/<id>.json`，字段、期限与超时配置以 [事件内容流水线](EVENT_CONTENT_PIPELINE.md) §2/§2.3 为准，由 `npm run validate:content` 校验；按本文格式提交会被校验器拒绝。
 
 ## 你需要交什么
 
