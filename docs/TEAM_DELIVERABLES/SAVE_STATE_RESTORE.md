@@ -5,6 +5,17 @@
 - 依据：`docs/API.md`、`docs/DATA_MODEL.md`、`docs/TEAM_PLAN.md`、`docs/PROGRESS.md`。
 - 状态：存档链路检查完成；修复单槽静默覆盖一处实际缺陷，其余以补充测试为主。未改游戏规则、未改 C++ 核心状态结构、未新增存档版本。
 
+## v4 目标契约的存档边界（2026-11-25）
+
+现行 v3 运行时与下述 v4 目标不同，不能把前端透传当作已经支持。v4 存档必须按 [M0 §8](../M0_CONTRACT_FREEZE.md#8-存档与版本拒绝策略) 完整保存并恢复：
+
+- 多项目 `works[]`、公司唯一现金池与财务流水；
+- 员工 `signing_fee`、`weekly_salary`、`temporary_contract` 与 `assignment_work_id`，不再以 `project_fee` 表达临时员工报酬；
+- 完整 `events.pending[]`（含 `work_id/event_id/triggered_week`），逐条处理后只移除对应事件；
+- 随机状态与冷却/重大事件记录。
+
+v4 继续拒绝 v1–v3 存档，不新增迁移或字段补全；读取不得推进周、执行结算或改变未来随机结果。上述字段的运行时实现与验收仍属后续工程任务。
+
 ## 现状版本结论（先检查后实施）
 
 当前实际生效的是 v3，不是文档历史区块里的 v2：

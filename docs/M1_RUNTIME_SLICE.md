@@ -160,7 +160,7 @@ npm run test:v4      # 构建 v4 模块 + 跑 25 条契约测试
 | --- | --- | --- |
 | 抽取时机 | `runtime.cpp::advance_week`，人员结算之后、`state.company.week = week + 1` 之前 | 读取本周已提交结果，不碰账；未满足触发条件时不生成事件；一旦事件触发成立，必须完整写入 `events.pending[]`，不得因全局数量限制丢弃；事件生成/写入异常按事件步骤错误处理，不得静默吞掉已成立事件 |
 | 周回执 | `report` 汇总本周所有项目触发的事件摘要/标识，不使用单一 `event_id` 或 `dropped_*` 丢弃字段 | 与 `funds`/`works`/`staff` 平级；无事件时为空集合；同周多项目触发时必须完整列出 |
-| 命令 | `resolve_event(event_id, option_id)` 单独文件 `event.hpp/.cpp`，`runtime.cpp` 只加一行分发 | 与"事件在结算完成后抽取"配合：事件阻塞的是下一次 `advance_week` |
+| 命令 | `resolve_event(work_id, event_id, option_id)` 单独文件 `event.hpp/.cpp`，`runtime.cpp` 只加一行分发 | 与"事件在结算完成后抽取"配合：事件阻塞的是下一次 `advance_week`；处理只移除目标事件 |
 
 两条确定性要求（写在这里，防止 M2 踩坑）：
 

@@ -4,6 +4,7 @@
 - 跟踪议题：[#11](https://github.com/zhengmin486/anime-production-committee/issues/11)
 - 依据：`docs/TEAM_DELIVERABLES/EVENT_MODULE.md` 的 15 条已确认规则、`docs/GAME_RULES.md` V3.2 第 7 步与第 8 节
 - 状态：**期限与放弃机制已由 zm 确认，待按本文档实现与验收**。本文档不修改其他已冻结规则；标「契约扩展」的条目仍需批注后才能进核心。
+- v4 边界：本文的 `pending_event`/`deferred_event` 是现行 V3 实现方案，不构成 v4 目标结构。v4 统一使用 `events.pending[]` 多项目数组与 `resolve_event(work_id,event_id,option_id)`，处理一条只移除对应事件；目标契约见 M0 §14.1 与 DOMAIN_ARCHITECTURE §7.6。
 
 ## 1. 现状（按 main 代码核对）
 
