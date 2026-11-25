@@ -1,0 +1,71 @@
+name: v4 contract tests
+
+# 事件内容流水线与 v4 契约测试的门禁：内容校验、生成文件一致性与 40 条 JSON 契约用例。
+# 依据 docs/EVENT_CONTENT_PIPELINE.md §3/§4/§7。
+
+on:
+  push:
+    paths:
+      - "content/events/**"
+      - "packages/game-core/**"
+      - "scripts/lib/**"
+      - "scripts/v4.test.mjs"
+      - "scripts/build-event-catalog.mjs"
+      - "scripts/build-v4.mjs"
+      - "scripts/validate-event-content.mjs"
+      - ".github/workflows/v4-contract.yml"
+  pull_request:
+    paths:
+      - "content/events/**"
+      - "packages/game-core/**"
+      - "scripts/lib/**"
+      - "scripts/v4.test.mjs"
+      - "scripts/build-event-catalog.mjs"
+      - "scripts/build-v4.mjs"
+      - "scripts/validate-event-content.mjs"
+      - ".github/workflows/v4-contract.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  content-validation:
+    name: 事件内容校验
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Validate content/events
+        run: node scripts/validate-event-content.mjs
+      - name: Regenerate embedded catalog and require it to match the commit
+        run: |
+          node scripts/build-event-catalog.mjs
+          git diff --exit-code packages/game-core/src/v4/event_catalog_generated.cpp
+
+  v4-contract:
+    name: v4 契约测试（WASM）
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install Emscripten SDK
+        run: |
+          git clone --depth 1 https://github.com/emscripten-core/emsdk.git "$HOME/emsdk"
+          "$HOME/emsdk/emsdk" install latest
+          "$HOME/emsdk/emsdk" activate latest
+          source "$HOME/emsdk/emsdk_env.sh"
+          echo "$PATH" >> "$GITHUB_PATH"
+          em++ --version
+      - name: Build v4 module and run contract tests
+        run: npm run test:v4
