@@ -382,7 +382,7 @@ v1.0 只给了骨架，并把"公共制作 + 单集 + 工作项"和"资金危机
 | 拥有 | 不拥有 |
 | --- | --- |
 | 多项目待处理事件队列 `events.pending[]` | 项目质量与进度（Project） |
-| 每项目的冷却表、已触发重大事件、延后事件 | 员工状态（Staff） |
+| 每项目的冷却表、已触发重大事件记录 | 员工状态（Staff） |
 | 每项目每周最多一个事件的触发约束、候选评估与冷却 | 事件造成的资金变化（Finance 入账） |
 | 事件内容目录的引用 | 风险值（Project 派生） |
 
@@ -884,6 +884,8 @@ crisis --(deadline 用尽仍失败)--> 由应用层置 Company.closing/bankrupt
 - 危机期间禁止招聘、签订新外包及其他新增经营承诺。已签外包与临时员工合同继续存在；临时员工不得因进入危机而被通用提前解约，只有特定事件明确提供选项时才可提前解除。项目中止时按既定规则自动释放绑定的临时员工。
 - 危机期间若玩家完全不操作，结果只能是破产；不存在"什么都不做就自己好起来"。
 
+> **原创企划准入待确认**：自主原创资格由独立声望与资金条件决定（DEC-COMPANY-002）。旧文档中的“企划能力员工”不得在未确认前作为额外资格门槛；若需要该能力，应先明确它是操作所需资源还是资格条件。
+
 ### 7.6 Event 与 Archive
 
 ```text
@@ -898,7 +900,6 @@ EventInstance { event_id, work_id, episode_id: null|episode_id, stage: null|stag
                 options[{id,label,cost,risk_hint}], expires_week, escalation }
 
 // 不设 deferred/abandon 槽；处理一个事件只移除对应 event_id，其他待处理事件保留。
-}
 
 Archive {
   works: WorkRecord[]              // 只追加
@@ -968,7 +969,7 @@ WorkRecord { id, name, ip_id, source, genre, scale, mode, investment_percent,
 | `sign_outsourcing(work_id, item_id, supplier_id, work_total, mode)` | Vendor + Finance | 工作项已解锁；专业匹配；供应商产能余量；现金 | 合同建立、费用入账、占用产能 |
 | `deliver_work(work_id)` | Project + Application | 全部门槛项已交付；未过截止 | 转 delivering 并当次结清（§7.3.6） |
 | `abort_work(work_id)` | Project + Finance | 项目 producing | 项目终止、违约扣罚入账、释放人员与外包占用 |
-| `create_custom_offer(name, source, scale, style)` | Market + Finance | 公司 running；无待处理事件；非资金危机；现金；企划能力员工。不要求全公司空闲 | 自定企划入槽、开发费入账 |
+| `create_custom_offer(name, source, scale, style)` | Market + Finance | 公司 running；无待处理事件；非资金危机；现金及自主原创资格条件。不要求全公司空闲 | 自定企划入槽、开发费入账 |
 | `adopt_proposal()` / `reject_proposal()` | Market | 公司 running；无待处理事件；非资金危机；存在提案。不要求全公司空闲 | 提案转自定槽或清空 |
 | `buy_tv_service(work_id)` | Project + Finance | 委员会模式；未购买；现金 | 渠道开放、发行费入账 |
 | `request_extension(work_id)` | Project + Finance | 委员会模式；未用过；未过截止；现金 | 延期生效、压力与费用 |
