@@ -133,10 +133,10 @@ SaveRecord { version: 4, savedAt: ISO8601, rules_version: string, state: GameSta
 | # | 命令 | 关键守卫 | 主要失败码 | 原子范围 |
 | --- | --- | --- | --- | --- |
 | 1 | `initialize_game(seed)` | 无（唯一不带 state 的命令） | INVALID_INPUT | 建立公司/名册/供应商/合作方/市场首轮 |
-| 2 | `start_work(offer_id, mode, percent, committee_partner_ids)` | running ∧ 非危机 ∧ 企划存在且有效 ∧ 模式合法 ∧（普通企划满足 `min_reputation/required_works` ∨ 有效原创草稿存在）∧ 现金 ≥ 全部应付款 | NOT_FOUND / MODE_NOT_ALLOWED / INSUFFICIENT_FUNDS / CRISIS_COMMITMENT_BLOCKED | 项目+委员会+两笔账+消费企划，一次提交；原创在此正式开工 |
+| 2 | `start_work(offer_id, mode, percent, committee_partner_ids)` | running ∧ 企划存在且有效 ∧ 模式合法 ∧（普通企划满足 `min_reputation/required_works` ∨ 有效原创草稿存在）∧ 现金 ≥ 全部应付款 | NOT_FOUND / MODE_NOT_ALLOWED / INSUFFICIENT_FUNDS / CRISIS_COMMITMENT_BLOCKED | 项目+委员会+两笔账+消费企划，一次提交；原创在此正式开工 |
 | 3 | `set_work_plan(work_id, plan)` | 项目 producing ∧ target 引用本项目单集/阶段且至多一个 | NOT_FOUND / INVALID_INPUT | 仅更新计划 |
 | 4 | `assign_staff(staff_id, work_id \| null)` | 项目 producing ∧ 员工存在 ∧ 不违反单项目 | NOT_FOUND / INVALID_PHASE | 仅更新归属 |
-| 5 | `hire_core(staff_id)` | running ∧ 非危机 ∧ 候选人存在 ∧ 现金 ≥ signing_fee ∧ 名册上限（若有） | NOT_FOUND / INSUFFICIENT_FUNDS / CRISIS_COMMITMENT_BLOCKED | 签约即入职并加入核心名册，当周可分配；signing_fee 立即入账，首周周薪计入本周下一次周结算 |
+| 5 | `hire_core(staff_id)` | running ∧ 候选人存在 ∧ 现金 ≥ signing_fee ∧ 名册上限（若有） | NOT_FOUND / INSUFFICIENT_FUNDS / CRISIS_COMMITMENT_BLOCKED | 签约即入职并加入核心名册，当周可分配；signing_fee 立即入账，首周周薪计入本周下一次周结算 |
 | 6 | `scout(role?, focus_ability?)` | running ∧ 非危机 ∧ 现金 ≥ 本次费用 ∧ 招聘池非空 | INSUFFICIENT_FUNDS / CRISIS_COMMITMENT_BLOCKED | 池+保底计数+费用 |
 | 7 | `dismiss_staff(staff_id)` | running ∧ core 员工存在 ∧ 解雇后 core 数 ≥1 | NOT_FOUND / INVALID_INPUT | 移出名册+清空归属；不预付遣散费 |
 | 8 | `hire_temporary(work_id, candidate_id)` | running ∧ 非危机 ∧ 项目 producing ∧ 现金 ≥ signing_fee | NOT_FOUND / INSUFFICIENT_FUNDS / CRISIS_COMMITMENT_BLOCKED | 临时合同+signing_fee 即时入账；weekly_salary 从后续周结算计提；归属合同项目 |
@@ -148,7 +148,7 @@ SaveRecord { version: 4, savedAt: ISO8601, rules_version: string, state: GameSta
 | 14 | `reject_proposal()` | 存在提案 | NOT_FOUND | 清空提案 |
 | 15 | `buy_tv_service(work_id)` | 委员会模式 ∧ 未购买 ∧ 非危机 ∧ 现金 | MODE_NOT_ALLOWED / INSUFFICIENT_FUNDS | 渠道+发行费 |
 | 16 | `request_extension(work_id)` | 委员会模式 ∧ 未用过 ∧ 未过截止 ∧ 非危机 ∧ 现金 | MODE_NOT_ALLOWED / INSUFFICIENT_FUNDS | 延期+费用 |
-| 17 | `arrange_financing(provider, amount)` | 危机中或资金压力周 ∧ 额度未超 | INSUFFICIENT_FUNDS / INVALID_PHASE | 现金入账+贷款 |
+| 17 | `arrange_financing(provider, amount)` | 资金压力周（未进入终局）∧ 额度未超 | INSUFFICIENT_FUNDS / INVALID_PHASE | 现金入账+贷款 |
 | 18 | `advance_week()` | running ∧ `events.pending[]` 为空 ∧ week<520 ∧ 非 closing | INVALID_PHASE | 八阶段原子周结算；刚性支出预检失败则回滚并直接破产终局 |
 | 19 | `resolve_event(work_id, event_id, option_id)` | 该 work 存在对应 pending 事件 ∧ 选项合法 ∧ 现金充足（若需付款） | NOT_FOUND / INVALID_INPUT / INSUFFICIENT_FUNDS | 效果分派；只移除 `(work_id,event_id)` 对应事件 |
 | 20 | `end_company()` | running | INVALID_PHASE | 锁 closing，未交付转 delivering |
@@ -174,7 +174,7 @@ SaveRecord { version: 4, savedAt: ISO8601, rules_version: string, state: GameSta
 | `CAPACITY_EXCEEDED` | 供应商产能不足 | 周承诺超容量 | 否 | 显示剩余产能 |
 | `DEPENDENCY_UNMET` | 工作项未解锁 | 上游未达门槛 | 否 | 指向阻塞项 |
 | `GATE_UNMET` | 门槛项未全部交付 | 提前交付被拒 | 否 | 列出缺口项 |
-| `CRISIS_COMMITMENT_BLOCKED` | 危机期禁止新增承诺 | 立项/外包/招聘/电视服务/自定企划 | 否（先脱困） | 展示危机面板 |
+| `CRISIS_COMMITMENT_BLOCKED` | **已废弃**；新规则不再进入可持续推进的危机状态 | — | — | 保留错误码占位，禁止新流程产生 |
 | `COMPANY_ENDED` | 公司已结束 | 关闭后调非结清命令 | 否 | 只留结清与总结 |
 | `SAVE_VERSION_UNSUPPORTED` | 存档版本不支持 | 读到 v1/v2/v3 或未来版本 | 否 | 提示新开，不覆盖原档 |
 | `SAVE_CORRUPT` | 存档结构损坏 | JSON 非法、必填缺失、含派生字段 | 否 | 提示保留原档 |
@@ -186,7 +186,7 @@ SaveRecord { version: 4, savedAt: ISO8601, rules_version: string, state: GameSta
 
 ## 7. 危机期白名单
 
-依据 DEC-FIN-003。危机期间推进周数、继续计提固定成本、允许现金暂时为负。
+历史规则，已由 §14.7 覆盖；不得实现危机周推进、负现金欠付或危机救济窗口。
 
 | 动作 | 危机中 | 理由 |
 | --- | --- | --- |
