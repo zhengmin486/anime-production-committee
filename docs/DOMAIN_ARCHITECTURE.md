@@ -507,7 +507,10 @@ Company {
   status: running | closing | ended
   end_reason: null | time_limit | bankrupt | voluntary
   reputation: >=0 ; reputation_log[{week, reason, delta, after}]
-  facilities: []                     // 首版空集合，§16 接入缝
+  office_tier: small | medium | large  // 玩家主动扩容后的当前办公场地规模
+  base_weekly_rent: >=0                // 办公场地规模对应的每周基础房租
+  facilities: []                       // 已建造设施；可用槽位由 office_tier 推导
+  // core_staff_capacity 由公司成长里程碑独立推导，不依赖 office_tier / facilities
 }
 
 Staff {
@@ -990,7 +993,7 @@ WorkRecord { id, name, ip_id, source, genre, scale, mode, investment_percent,
 | `buy_tv_service(work_id)` | Project + Finance | 委员会模式；未购买；现金 | 渠道开放、发行费入账 |
 | `request_extension(work_id)` | Project + Finance | 委员会模式；未用过；未过截止；现金 | 延期生效、压力与费用 |
 | `arrange_financing(provider, amount)` | Finance | 偿付危机或资金压力周；额度未超限 | 现金入账、生成贷款与周还款计划（§7.5.1） |
-| `expand_office()` | Company + Finance | 达到声望 190/350 对应扩容资格；非资金危机；现金覆盖一次性扩建搬迁费 | 即时扣费并立即扩至 4/6 个设施槽位，同时提高每周基础房租；不改变核心员工编制 |
+| 办公场地扩容 | Company + Finance | 达到声望 190/350 对应扩容资格；非资金危机；现金覆盖一次性扩建搬迁费 | 玩家主动确认后即时扣费并立即扩至 4/6 个设施槽位，同时提高每周基础房租；不改变核心员工编制；具体命令名由接口契约确定 |
 | `advance_week()` | Application | 公司 running；无待处理事件；周 < 520 | 执行完整周结算（§9） |
 | `resolve_event(work_id, event_id, option_id)` | Event → Application | 该 work 存在对应 pending 事件；选项合法；现金足够（若需付款）；效果不绕过危机白名单 | 效果分派到各领域；只移除目标事件 |
 | `end_company()` | Company + Application | 公司 running | 锁 closing，未交付项目转 delivering |
@@ -1092,7 +1095,7 @@ UI 不计算规则。核心在每次命令后输出读模型；读模型**不持
 
 **办公场地扩容：** 声望 190 解锁 2→4 槽，声望 350 解锁 4→6 槽；玩家主动确认并支付一次性搬迁费后立即完成，同时每周基础房租小幅上调。危机期间禁止扩容。费用与租金增量待标定。
 
-**容量隔离：** 核心员工名册上限随公司成长里程碑独立开放，不依赖设施等级、设施槽位或作画工作室；开放编制不收扩容费，实际招聘受现金流与人才供给约束。编制成长曲线待标定。
+**容量隔离：** Company 的办公场地规模（office_tier）决定设施槽位，初期/中型/大型分别为 2/4/6 槽；核心员工名册上限（core_staff_capacity）由独立的公司成长里程碑推导，不依赖 office_tier、设施槽位或作画工作室。开放编制不收扩容费，实际招聘受现金流与人才供给约束。编制成长曲线待标定。
 
 ---
 
