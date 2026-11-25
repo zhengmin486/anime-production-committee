@@ -525,13 +525,27 @@ test('输入边界：assign_staff 的 work_id 类型错误不被当成取消分�
 
 test('输入边界：缺必填字段返回 INVALID_INPUT，不用默认值掩盖', () => {
   const state = setupTiny()
-  const missingWeek = JSON.parse(JSON.stringify(state))
-  delete missingWeek.company.week
-  assert.equal(call('assign_staff', { state: missingWeek, staff_id: 'staff_dir', work_id: null }).error?.code, 'INVALID_INPUT')
+  const before = ok('hash_state', { state }).hash
+  const rejectUnchanged = (mutate, label) => {
+    const bad = JSON.parse(JSON.stringify(state))
+    mutate(bad)
+    for (const name of ['assign_staff', 'advance_week', 'hash_state']) {
+      const result = call(name, { state: bad, staff_id: 'staff_dir', work_id: null })
+      assert.equal(result.error?.code, 'INVALID_INPUT', `${label} / ${name} 应被拒绝`)
+    }
+    assert.equal(ok('hash_state', { state }).hash, before, `${label}：失败不得改动状态`)
+  }
 
-  const missingTotal = JSON.parse(JSON.stringify(state))
-  delete missingTotal.works[0].common.items[0].work_total
-  assert.equal(call('assign_staff', { state: missingTotal, staff_id: 'staff_dir', work_id: null }).error?.code, 'INVALID_INPUT')
+  rejectUnchanged((s) => { delete s.company.week }, '缺 company.week')
+  rejectUnchanged((s) => { delete s.works[0].common.items[0].work_total }, '缺 item.work_total')
+  // 这几个字段在 from_json 里都有默认值，过去缺了会被静默补成 0 / normal，
+  // 让"周结算与手算一致"在坏输入上失真。现在必须在入口拒绝。
+  rejectUnchanged((s) => { delete s.staff[0].weekly_salary }, '缺 staff.weekly_salary（工资会静默归零）')
+  rejectUnchanged((s) => { delete s.staff[0].project_fee }, '缺 staff.project_fee')
+  rejectUnchanged((s) => { delete s.staff[0].fatigue }, '缺 staff.fatigue（产能会静默归零）')
+  rejectUnchanged((s) => { delete s.staff[0].morale }, '缺 staff.morale')
+  rejectUnchanged((s) => { delete s.finance.solvency }, '缺 finance.solvency（危机状态被洗白）')
+  rejectUnchanged((s) => { delete s.finance.solvency.state }, '缺 finance.solvency.state')
 })
 
 test('契约名适配：initialize_game / set_work_plan 与内部入口等价', () => {

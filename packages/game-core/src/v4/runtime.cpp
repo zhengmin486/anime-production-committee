@@ -198,6 +198,10 @@ GameState decode_state(const Json& request) {
     require(state.at("finance"), "opening_funds", "finance");
     require(state.at("finance"), "balance", "finance");
     require(state.at("finance"), "entries", "finance");
+    // solvency 影响危机分支与命令白名单；缺字段会被 from_json 读成 "normal"，
+    // 把危机中的存档静默洗白成正常经营，必须显式拒绝。
+    require(state.at("finance"), "solvency", "finance");
+    require(state.at("finance").at("solvency"), "state", "finance.solvency");
     if (!state.at("staff").is_array() || !state.at("works").is_array()) {
         throw Json::type_error::create(302, "staff / works 必须是数组", nullptr);
     }
@@ -205,6 +209,13 @@ GameState decode_state(const Json& request) {
         require(member, "id", "staff[]");
         require(member, "role", "staff[]");
         require(member, "abilities", "staff[]");
+        // 这些字段在 from_json 里都有默认值，但都直接参与周结算：
+        // weekly_salary / project_fee 决定工资，fatigue / morale 决定产能。
+        // 缺一个就会被静默补成 0，让"手算逐项一致"的出口在坏输入上失真。
+        require(member, "weekly_salary", "staff[]");
+        require(member, "project_fee", "staff[]");
+        require(member, "fatigue", "staff[]");
+        require(member, "morale", "staff[]");
     }
     for (const auto& work : state.at("works")) {
         require(work, "id", "works[]");
