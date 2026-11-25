@@ -85,7 +85,7 @@ SaveRecord { version: 4, savedAt: ISO8601, rules_version: string, state: GameSta
 | `Partner` | id, name, type, channels, prestige, relationship, history, status | — | 渠道唯一 |
 | `Committee` | id, work_id, members, formed_week, status | closed_week | 一成员一渠道，bd 不挂成员 |
 | `MarketState` | heat, slots, refresh_week, competitors | custom_offer, proposal, last_competition_round | slots ≤ 4；自定/提案为独立槽 |
-| `Finance` | opening_funds, balance, entries, loans, solvency | — | balance = opening + Σentries；负余额仅危机/关闭 |
+| `Finance` | opening_funds, balance, entries, loans, solvency | — | balance = opening + Σentries；负余额仅允许出现在破产关闭终局 |
 | `EventState` | pending[], last_event_week, per_work | pending 数组可为空 | 每条待处理事件带 work_id/event_id/triggered_week；pending 中每项目至多一条；不同项目可同周各有事件；last_event_week 不得充当全局单槽 |
 | `Archive` | works, series | company_result | 只追加 |
 
@@ -119,7 +119,7 @@ SaveRecord { version: 4, savedAt: ISO8601, rules_version: string, state: GameSta
 | INV-22 | Archive 只追加；`WorkRecord.id` 唯一；`previous_work_id` 指向更早记录 | INVALID_STATE |
 | INV-23 | `events.pending[]` 可同时包含多个项目事件；每条带 `work_id/event_id/triggered_week`，pending 中每项目至多一条；同一项目每周最多触发一个；`last_event_week` 不得全局限流；未处理事件不得覆盖/丢弃 | INVALID_STATE |
 | INV-24 | `market.slots ≤ 4`；自定/提案槽与市场槽、历史 id 互斥 | INVALID_STATE |
-| INV-25 | 负余额只出现在 `solvency=crisis` 或 `company.status=closing(bankrupt)` | INVALID_STATE |
+| INV-25 | 负余额只允许出现在 `company.status=closing(bankrupt)`；正常经营状态不得出现负余额 | INVALID_STATE |
 | INV-26 | 存档中不含派生值（§2 列表）；加载时重算 | SAVE_CORRUPT |
 
 ---
@@ -133,24 +133,24 @@ SaveRecord { version: 4, savedAt: ISO8601, rules_version: string, state: GameSta
 | # | 命令 | 关键守卫 | 主要失败码 | 原子范围 |
 | --- | --- | --- | --- | --- |
 | 1 | `initialize_game(seed)` | 无（唯一不带 state 的命令） | INVALID_INPUT | 建立公司/名册/供应商/合作方/市场首轮 |
-| 2 | `start_work(offer_id, mode, percent, committee_partner_ids)` | running ∧ 非危机 ∧ 企划存在且有效 ∧ 模式合法 ∧（普通企划满足 `min_reputation/required_works` ∨ 有效原创草稿存在）∧ 现金 ≥ 全部应付款 | NOT_FOUND / MODE_NOT_ALLOWED / INSUFFICIENT_FUNDS / CRISIS_COMMITMENT_BLOCKED | 项目+委员会+两笔账+消费企划，一次提交；原创在此正式开工 |
+| 2 | `start_work(offer_id, mode, percent, committee_partner_ids)` | running ∧ 企划存在且有效 ∧ 模式合法 ∧（普通企划满足 `min_reputation/required_works` ∨ 有效原创草稿存在）∧ 现金 ≥ 全部应付款 | NOT_FOUND / MODE_NOT_ALLOWED / INSUFFICIENT_FUNDS | 项目+委员会+两笔账+消费企划，一次提交；原创在此正式开工 |
 | 3 | `set_work_plan(work_id, plan)` | 项目 producing ∧ target 引用本项目单集/阶段且至多一个 | NOT_FOUND / INVALID_INPUT | 仅更新计划 |
 | 4 | `assign_staff(staff_id, work_id \| null)` | 项目 producing ∧ 员工存在 ∧ 不违反单项目 | NOT_FOUND / INVALID_PHASE | 仅更新归属 |
-| 5 | `hire_core(staff_id)` | running ∧ 非危机 ∧ 候选人存在 ∧ 现金 ≥ signing_fee ∧ 名册上限（若有） | NOT_FOUND / INSUFFICIENT_FUNDS / CRISIS_COMMITMENT_BLOCKED | 签约即入职并加入核心名册，当周可分配；signing_fee 立即入账，首周周薪计入本周下一次周结算 |
-| 6 | `scout(role?, focus_ability?)` | running ∧ 非危机 ∧ 现金 ≥ 本次费用 ∧ 招聘池非空 | INSUFFICIENT_FUNDS / CRISIS_COMMITMENT_BLOCKED | 池+保底计数+费用 |
+| 5 | `hire_core(staff_id)` | running ∧ 候选人存在 ∧ 现金 ≥ signing_fee ∧ 名册上限（若有） | NOT_FOUND / INSUFFICIENT_FUNDS | 签约即入职并加入核心名册，当周可分配；signing_fee 立即入账，首周周薪计入本周下一次周结算 |
+| 6 | `scout(role?, focus_ability?)` | running ∧ 现金 ≥ 本次费用 ∧ 招聘池非空 | INSUFFICIENT_FUNDS | 池+保底计数+费用 |
 | 7 | `dismiss_staff(staff_id)` | running ∧ core 员工存在 ∧ 解雇后 core 数 ≥1 | NOT_FOUND / INVALID_INPUT | 移出名册+清空归属；不预付遣散费 |
-| 8 | `hire_temporary(work_id, candidate_id)` | running ∧ 非危机 ∧ 项目 producing ∧ 现金 ≥ signing_fee | NOT_FOUND / INSUFFICIENT_FUNDS / CRISIS_COMMITMENT_BLOCKED | 临时合同+signing_fee 即时入账；weekly_salary 从后续周结算计提；归属合同项目 |
+| 8 | `hire_temporary(work_id, candidate_id)` | running ∧ 项目 producing ∧ 现金 ≥ signing_fee | NOT_FOUND / INSUFFICIENT_FUNDS | 临时合同+signing_fee 即时入账；weekly_salary 从后续周结算计提；归属合同项目 |
 | 9 | `sign_outsourcing(work_id, item_id, supplier_id, work_total, mode)` | 工作项已解锁 ∧ 专业匹配 ∧ 产能余量 ∧ 现金 | DEPENDENCY_UNMET / CAPACITY_EXCEEDED / INSUFFICIENT_FUNDS | 合同+费用+占用 |
 | 10 | `deliver_work(work_id)` | 全部门槛项 delivered ∧ 未过截止 ∧ 项目 producing | GATE_UNMET / INVALID_PHASE | 当次完成交付结算（周数不变） |
 | 11 | `abort_work(work_id)` | 项目 producing | NOT_FOUND | 终止+扣罚+释放占用 |
-| 12 | `create_custom_offer(name, source, scale, style)` | running ∧ 非危机 ∧ 基础声望等草稿资格满足 ∧ 原创草稿槽可用；不检查全部投资资金 | CRISIS_COMMITMENT_BLOCKED / INVALID_INPUT | 只创建原创草稿，不建立 Project、不扣全部投资资金；草稿开发费时点待确认 |
+| 12 | `create_custom_offer(name, source, scale, style)` | running ∧ 基础声望等草稿资格满足 ∧ 原创草稿槽可用；不检查全部投资资金 | INVALID_INPUT | 只创建原创草稿，不建立 Project、不扣全部投资资金；草稿开发费时点待确认 |
 | 13 | `adopt_proposal()` | 存在提案 ∧ running | NOT_FOUND | 提案→自定槽 |
 | 14 | `reject_proposal()` | 存在提案 | NOT_FOUND | 清空提案 |
-| 15 | `buy_tv_service(work_id)` | 委员会模式 ∧ 未购买 ∧ 非危机 ∧ 现金 | MODE_NOT_ALLOWED / INSUFFICIENT_FUNDS | 渠道+发行费 |
-| 16 | `request_extension(work_id)` | 委员会模式 ∧ 未用过 ∧ 未过截止 ∧ 非危机 ∧ 现金 | MODE_NOT_ALLOWED / INSUFFICIENT_FUNDS | 延期+费用 |
-| 17 | `arrange_financing(provider, amount)` | 危机中或资金压力周 ∧ 额度未超 | INSUFFICIENT_FUNDS / INVALID_PHASE | 现金入账+贷款 |
-| 18 | `advance_week()` | running ∧ `events.pending[]` 为空 ∧ week<520 ∧ 非 closing | INVALID_PHASE | 整周结算（正常 13 阶段 / 危机 7 步） |
-| 19 | `resolve_event(work_id, event_id, option_id)` | 该 work 存在对应 pending 事件 ∧ 选项合法 ∧ 现金充足（若需付款）∧ 效果不绕过危机白名单 | NOT_FOUND / INVALID_INPUT / INSUFFICIENT_FUNDS | 效果分派；只移除 `(work_id,event_id)` 对应事件 |
+| 15 | `buy_tv_service(work_id)` | 委员会模式 ∧ 未购买 ∧ 现金 | MODE_NOT_ALLOWED / INSUFFICIENT_FUNDS | 渠道+发行费 |
+| 16 | `request_extension(work_id)` | 委员会模式 ∧ 未用过 ∧ 未过截止 ∧ 现金 | MODE_NOT_ALLOWED / INSUFFICIENT_FUNDS | 延期+费用 |
+| 17 | `arrange_financing(provider, amount)` | 资金压力周（未进入终局）∧ 额度未超 | INSUFFICIENT_FUNDS / INVALID_PHASE | 现金入账+贷款 |
+| 18 | `advance_week()` | running ∧ `events.pending[]` 为空 ∧ week<520 ∧ 非 closing | INVALID_PHASE | 八阶段原子周结算；刚性支出预检失败则回滚并直接破产终局 |
+| 19 | `resolve_event(work_id, event_id, option_id)` | 该 work 存在对应 pending 事件 ∧ 选项合法 ∧ 现金充足（若需付款） | NOT_FOUND / INVALID_INPUT / INSUFFICIENT_FUNDS | 效果分派；只移除 `(work_id,event_id)` 对应事件 |
 | 20 | `end_company()` | running | INVALID_PHASE | 锁 closing，未交付转 delivering |
 | 21 | `finalize_delivery(work_id)` | 项目 delivering（关闭路径） | INVALID_PHASE | 交付结算 |
 | 22 | `finalize_company()` | 公司 ended 且项目已结清 | INVALID_PHASE | 生成结局，只执行一次 |
@@ -174,7 +174,7 @@ SaveRecord { version: 4, savedAt: ISO8601, rules_version: string, state: GameSta
 | `CAPACITY_EXCEEDED` | 供应商产能不足 | 周承诺超容量 | 否 | 显示剩余产能 |
 | `DEPENDENCY_UNMET` | 工作项未解锁 | 上游未达门槛 | 否 | 指向阻塞项 |
 | `GATE_UNMET` | 门槛项未全部交付 | 提前交付被拒 | 否 | 列出缺口项 |
-| `CRISIS_COMMITMENT_BLOCKED` | 危机期禁止新增承诺 | 立项/外包/招聘/电视服务/自定企划 | 否（先脱困） | 展示危机面板 |
+| `CRISIS_COMMITMENT_BLOCKED` | **已废弃**；新规则不再进入可持续推进的危机状态 | — | — | 保留错误码占位，禁止新流程产生 |
 | `COMPANY_ENDED` | 公司已结束 | 关闭后调非结清命令 | 否 | 只留结清与总结 |
 | `SAVE_VERSION_UNSUPPORTED` | 存档版本不支持 | 读到 v1/v2/v3 或未来版本 | 否 | 提示新开，不覆盖原档 |
 | `SAVE_CORRUPT` | 存档结构损坏 | JSON 非法、必填缺失、含派生字段 | 否 | 提示保留原档 |
@@ -186,7 +186,7 @@ SaveRecord { version: 4, savedAt: ISO8601, rules_version: string, state: GameSta
 
 ## 7. 危机期白名单
 
-依据 DEC-FIN-003。危机期间推进周数、继续计提固定成本、允许现金暂时为负。
+历史规则，已由 §14.7 覆盖；不得实现危机周推进、负现金欠付或危机救济窗口。
 
 | 动作 | 危机中 | 理由 |
 | --- | --- | --- |
@@ -330,6 +330,8 @@ npm run validate:handover
 
 ---
 
+**本节历史白名单不再授权危机周推进、负现金欠付或额外救济窗口。当前资金预检失败语义以 §14.2、§14.7 为准。**
+
 ## 12. M0 完成判定
 
 | 交付 | 状态 | 证据 |
@@ -419,15 +421,15 @@ v3 的单项目、五阶段、全局 phase、单事件槽、双份财务汇总�
 - 玩家可以按任意顺序处理待处理事件；不要求全局 FIFO。
 - 处理命令为 `resolve_event(work_id, event_id, option_id)`，成功后只移除目标事件，其他项目事件原样保留。
 - 数组非空时禁止 `advance_week()`；全部事件处理完成后才允许推进。
-- 资金危机期间不抽取新事件，但不清空既有 pending；`resolve_event` 仍可处理，选项效果必须遵守危机白名单。
+- 本次规则不再存在可持续推进的资金危机周；若周结算预检失败，按 §14.7 直接破产。既有 pending 事件的处理规则仍有效，但不得触发危机周或绕过破产终局。
 - 校验器必须覆盖：同周多个项目各一事件合法、同一项目同周第二事件非法、处理一条不清除其他项目事件、事件未清空时推进周失败。
 
-### 14.2 负现金与资金危机语义确认
+### 14.2 资金预检失败与破产语义（覆盖旧危机规则）
 
-- `DEC-FIN-003` 允许资金危机期间现金暂时为负，负数表示欠付，不代表自动借款。
-- `INV-25` 的“负余额只出现在 `solvency=crisis` 或 `company.status=closing(bankrupt)`”与上述规则一致，不得收紧为余额始终非负。
-- 危机期间按 DEC-FIN-003 推进周数并继续计提固定成本，不生产、不计制作费；危机白名单仍然有效。
-- 资金危机的期限、融资额度、利率及判定阈值属于标定参数，不在本次契约修订中冻结。
+- 周结算刚性支出预检失败时，整周结算回滚至计划冻结快照，不发生部分扣款或制作推进，并直接触发破产终局。
+- 不允许以负现金欠付、危机周推进或额外救济窗口延续经营；旧版限时危机结算流程不再是目标行为。
+- advance_week 的八阶段顺序、预检支出范围、回滚边界与延迟状态时序以 DEC-TIME-003 及 DECISION_LOG 第 18 节为准。
+- 既有 INV-25 和危机期命令白名单中涉及 solvency=crisis 的字段/守卫必须按本次 C 级契约修订同步调整，不得继续据此实现旧危机周推进。
 
 ### 14.3 版本与实现状态
 
@@ -457,5 +459,18 @@ v3 的单项目、五阶段、全局 phase、单事件槽、双份财务汇总�
 - **原创两级准入（DEC-PLAN-001）**：`create_custom_offer` 只创建草稿并检查基础声望等草稿资格，不检查全部投资资金；`start_work` 才正式建立项目并检查全部应付款。普通企划继续按 `min_reputation/required_works` 准入，不再合并为笼统的“声望与成绩达标”。草稿开发费金额与扣费时点仍待确认，不得提前收取全部投资额。
 - **员工报酬字段**：`project_fee` 的旧语义由 `signing_fee + weekly_salary` 取代。核心与临时员工均保留一次性签约费和周薪；临时员工的费用与归属明确指向合同项目。该变更是 v4 目标契约，不宣称现行 v3 代码或存档已经支持，也不为 v3 增加迁移层。
 - **核心解雇**：`dismiss_staff` 随时可执行，不要求公司空闲、不要求现金、不禁止危机期操作；不预付遣散费；解雇后公司至少保留 1 名核心员工。26 条不变式数量不变，最低保有量由 Staff 约束与命令守卫共同落实。
-- **危机与临时合同**：既有 pending 事件可在危机期间逐条处理，危机期间不抽新事件。临时员工只有特定危机/裁减事件明确提供选项时才可提前解约；停止后续周薪，已发生费用不退，不新增通用买断、欠款、递延费用或借贷机制。
+- **临时合同提前解约**：临时员工只有特定裁减/解约事件明确提供选项时才可提前解约；停止后续周薪，已发生费用不退，不新增通用买断、欠款、递延费用或借贷机制。该规则不再依赖资金危机状态。
 - **待确认参数**：基础声望阈值、原创草稿开发费金额/扣费时点、`signing_fee/weekly_salary` 具体数值仍待标定；本次只冻结字段、资格分段、命令守卫与费用归属，不冻结数值。
+
+
+> 资金预检失败语义以新增 14.7 为准；旧 14.2 的危机周推进描述已被覆盖。
+
+### 14.7 2026-11-25 单周结算原子流水线（覆盖旧正常/危机结算）
+
+- advance_week 统一采用八阶段：计划冻结与快照 → 刚性支出预检 → 刚性支出扣款 → 项目生产推进/阶段切换 → 人员经验疲劳/红灯判定 → 商业窗口与交付收入 → 延迟状态倒计时/到期 → 随机事件与周数递增。
+- 刚性支出包含核心员工周薪、临时员工周薪、基础房租、设施维护费、生效中的制作/外包固定周费及到期承诺付款；阶段 6 的收入不得计入阶段 2 预检。
+- 若阶段 2 现金不足，阶段 3–8 全部跳过，状态回滚至阶段 1 快照，现金不发生部分扣款，项目/人员/延迟状态/事件/周数均不变化，并直接触发破产终局。
+- 不设置额外危机拯救窗口；旧版危机 7 步、负现金欠付、危机周推进和相关命令白名单均由本条覆盖。相关字段、守卫、错误码与终局处理属于 C 级契约修订，必须同步实现和测试。第 7 节危机期白名单仅作历史记录，不再作为命令授权依据。
+- 延迟状态统一按“第 W 周触发即占当周计数，每周末阶段 7 减 1，归零后下一周开局生效”。设施建设期不计维护费，启用周阶段 2 起计费；红灯触发周照常工作和计薪，下一周开始休养，满期后再下一周恢复；企划定金/机会有效 M 周覆盖 W 至 W+M-1，最后有效周末未确认则失效且定金不退。
+- 周内计划态允许反复覆盖、撤销，推进时使用最后确认快照；即时签约/扣款类命令失败必须原子回滚。
+- 只读预演接口至少返回刚性周支出、岗位硬资格、预计疲劳变化区间、预计完工周数；不得剧透随机波动实际结果或未触发事件。
