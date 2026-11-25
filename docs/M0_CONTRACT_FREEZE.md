@@ -15,7 +15,7 @@
 | 类别 | 内容 | 变更成本 |
 | --- | --- | --- |
 | 状态形状 | `GameState v4` 的聚合、字段、可空规则 | 高：影响校验器、存档、全部读模型 |
-| 不变式 | INV-01 – INV-27 | 高：每条都要有对应断言 |
+| 不变式 | INV-01 – INV-29 | 高：每条都要有对应断言 |
 | 命令面 | 22 个命令的输入、守卫、错误码 | 中：影响 UI 与测试 |
 | 错误码 | 16 个稳定码 | 中：UI 按码分支 |
 | 危机白名单 | 危机期允许/禁止的动作 | 中：影响玩家自救路径 |
@@ -122,6 +122,8 @@ SaveRecord { version: 4, savedAt: ISO8601, rules_version: string, state: GameSta
 | INV-25 | 负余额只允许出现在 `company.status=closing(bankrupt)`；正常经营状态不得出现负余额 | INVALID_STATE |
 | INV-26 | 存档中不含派生值（§2 列表）；加载时重算 | SAVE_CORRUPT |
 | INV-27 | 每个 producing 项目恰有一名已通过任职资格校验并已分配到该项目的监督；资格仅在任职/分配时校验，任职后不因属性波动撤销；不得出现监督空缺或重复 | INVALID_STATE |
+| INV-28 | forced_rest 员工保留原项目归属与岗位占位但不贡献产能；满期次周开局恢复原岗位；监督已被替补时原监督回归不得顶替现任监督 | INVALID_STATE |
+| INV-29 | 限时事件阶段 7 超时必须执行默认分支或一次性升级；升级事件再次超时执行违约分支；超时处理不得丢失其他项目 pending | INVALID_STATE |
 
 ---
 
@@ -136,10 +138,10 @@ SaveRecord { version: 4, savedAt: ISO8601, rules_version: string, state: GameSta
 | 1 | `initialize_game(seed)` | 无（唯一不带 state 的命令） | INVALID_INPUT | 建立公司/名册/供应商/合作方/市场首轮 |
 | 2 | `start_work(offer_id, mode, percent, committee_partner_ids)` | running ∧ 企划存在且有效 ∧ 模式合法 ∧（普通企划满足 `min_reputation/required_works` ∨ 有效原创草稿存在）∧ 现金 ≥ 全部应付款 | NOT_FOUND / MODE_NOT_ALLOWED / INSUFFICIENT_FUNDS | 项目+委员会+两笔账+消费企划，一次提交；原创在此正式开工 |
 | 3 | `set_work_plan(work_id, plan)` | 项目 producing ∧ target 引用本项目单集/阶段且至多一个 | NOT_FOUND / INVALID_INPUT | 仅更新计划 |
-| 4 | `assign_staff(staff_id, work_id \| null)` | 项目 producing ∧ 员工存在 ∧ 不违反单项目 ∧ 调整后所有 producing 项目仍恰有一名监督 | NOT_FOUND / INVALID_PHASE | 仅更新归属；监督更换不得留下空缺或重复 |
+| 4 | `assign_staff(staff_id, work_id \| null)` | 项目 producing ∧ 员工存在 ∧ 不违反单项目 ∧ 监督更换须原子 Swap/Replace ∧ 调整后所有 producing 项目仍满足 INV-27 | NOT_FOUND / INVALID_PHASE | 更新归属；监督更换不得留下空缺或重复 |
 | 5 | `hire_core(staff_id)` | running ∧ 候选人存在 ∧ 现金 ≥ signing_fee ∧ 当前核心员工数 < 已解锁 core_staff_capacity | NOT_FOUND / INSUFFICIENT_FUNDS / CAPACITY_EXCEEDED | 签约即入职并加入核心名册，当周可分配；临时员工不占核心编制；signing_fee 立即入账，首周周薪计入本周下一次周结算 |
 | 6 | `scout(role?, focus_ability?)` | running ∧ 现金 ≥ 本次费用 ∧ 招聘池非空 | INSUFFICIENT_FUNDS | 池+保底计数+费用 |
-| 7 | `dismiss_staff(staff_id)` | running ∧ core 员工存在 ∧ 解雇后 core 数 ≥1 ∧ 不使任何 producing 项目失去唯一监督 | NOT_FOUND / INVALID_INPUT / INVALID_PHASE | 移出名册+清空归属；不预付遣散费 |
+| 7 | `dismiss_staff(staff_id)` | running ∧ core 员工存在 ∧ 解雇后 core 数 ≥1 ∧ 若为监督须先原子替换；无同项目/空闲合格替补则关键岗位锁定 | NOT_FOUND / INVALID_INPUT / INVALID_PHASE | 移出名册+清空归属；不预付遣散费 |
 | 8 | `hire_temporary(work_id, candidate_id)` | running ∧ 项目 producing ∧ 现金 ≥ signing_fee | NOT_FOUND / INSUFFICIENT_FUNDS | 临时合同+signing_fee 即时入账；weekly_salary 从后续周结算计提；归属合同项目 |
 | 9 | `sign_outsourcing(work_id, item_id, supplier_id, work_total, mode)` | 工作项已解锁 ∧ 专业匹配 ∧ 产能余量 ∧ 现金 | DEPENDENCY_UNMET / CAPACITY_EXCEEDED / INSUFFICIENT_FUNDS | 合同+费用+占用 |
 | 10 | `deliver_work(work_id)` | 全部门槛项 delivered ∧ 未过截止 ∧ 项目 producing | GATE_UNMET / INVALID_PHASE | 当次完成交付结算（周数不变） |
@@ -480,12 +482,29 @@ v3 的单项目、五阶段、全局 phase、单事件槽、双份财务汇总�
 ### 14.8 监督统筹兼任与工作项多人协作（DEC-STAFF-008）
 
 - 每个 producing 项目必须恰有一名监督；监督任职资格只在任职/分配时校验，任职后不因员工状态或属性波动被动撤销。
-- assign_staff、dismiss_staff 等人员调整必须保证所有 producing 项目始终恰有一名监督；不得提交造成监督空缺或重复的状态。监督离任时的具体替补交互/API 尚待明确，不能以此放宽状态不变量。
+- 主动解雇、调离或外派监督必须先指定具备监督硬资格的替补执行原子 Swap/Replace；替补仅限同项目员工或公司空闲员工，禁止从其他项目强行抽调。无合格替补时原监督关键岗位锁定至项目完结/中止。
+- 被动离岗时，系统按“同项目合格员工优先、公司空闲合格员工其次”选择能力最高者临时代理；并列时按稳定员工 ID 顺序。代理触发交接/效率修正。无替补时项目进入监督缺位停工状态，本周不推进该项目制作进度。
+- assign_staff、dismiss_staff、外派及监督替换等人员命令必须保证提交后的所有 producing 项目均满足 INV-27；监督替换不得出现中间可观察的无监督状态。
 - 监督统筹占用固定比例的本周精力；剩余精力可参与本项目中职业适配的普通工作项。监督岗位不改变 Staff.role，也不改变普通工作项资格。
 - 工作项允许多名主责共同承担，不设人数上限；具备主责硬资格者均计为主责。协力是具备协力资格但不具备主责资格的参与者，贡献进度并按工作项基准线拉近/稳定质量下限，但不得突破主责团队决定的质量上限。
 - 不适配员工不计入该工作项正常产能与质量贡献。
-- 监督统筹占比与剩余精力产能折算、多主责质量聚合、协力质量下限贡献及主责质量上限公式均为待标定参数。本节冻结资格和结果边界，不冻结公式。
+- 监督统筹占比与剩余精力产能折算、多主责质量聚合、协力质量下限贡献、主责质量上限、代理交接损失及代理效率修正均为待标定参数。本节冻结资格和结果边界，不冻结公式。
 
+
+### 14.10 红灯强制休养期间的归属与回归（DEC-STAFF-009）
+
+- 员工进入 `forced_rest` 期间挂起保留原项目归属与岗位占位；玩家仍可在周内主动将其调走。
+- 强制休养期间员工不参与制作、不贡献产能；原归属/岗位占位仅用于恢复定位，不视为有效出勤。
+- 休养计时满期后，于次周开局自动回归原岗位并恢复工作，不重新计算入组磨合损失。
+- 若休养期间原监督位已由代理/替补接任，原监督回归后自动转为该项目普通/协力参与位，不得强行顶替现任监督。
+
+### 14.11 限时事件超时与升级（DEC-EVENT-002）
+
+- 限时事件触发当周计入有效期；每周末阶段 7 统一倒计时减 1 周。
+- 到期仍未处理时，在阶段 7 末尾自动执行事件预设的默认消极/保守分支，并移出 `events.pending[]`。
+- 高权重关键事件可配置一次超时升级；升级沿用同一事件身份替换原 pending 条目，升级事件再次超时才触发预设硬性违约惩罚。最多升级一次，不得循环延期。
+- 超时处理按事件身份执行，不得覆盖或清除其他项目 pending；超时自动处理不需要玩家确认。
+- 事件期限、升级门槛、默认分支效果与违约惩罚数值由内容配置及数值标定确定。
 
 ### 14.9 核心编制成长与办公场地扩容时序（DEC-COMPANY-003 / DEC-COMPANY-002 补充）
 
