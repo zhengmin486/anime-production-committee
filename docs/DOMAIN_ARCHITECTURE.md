@@ -964,7 +964,7 @@ WorkRecord { id, name, ip_id, source, genre, scale, mode, investment_percent,
 | `assign_staff(staff_id, work_id \| null)` | Staff | 项目存在且 producing；核心员工每周仅能归属一个项目；传 null 为撤出 | 更新唯一项目归属，下一次结算生效 |
 | `hire_core(staff_id)` / `scout(...)` | Staff + Finance | 公司 running；非资金危机；候选人有效；现金足够支付一次性招聘/签约费用；名册上限（若有）。不要求全公司空闲（DEC-PLAY-003） | 名册变化、一次性费用即时入账；新员工从下一次周结算起可分配并计薪 |
 | `dismiss_staff(staff_id)` | Staff + Finance | 核心员工存在；公司至少保留 1 名核心员工 | 移出名册、清空归属；不产生遣散费 |
-| `hire_temporary(work_id, candidate_id)` | Staff + Finance | 项目 producing；非资金危机；候选人有效；现金足够支付签约费 | 建立项目绑定合同、签约费即时入账；周薪从下一次周结算起计提并归属项目 |
+| `hire_temporary(work_id, candidate_id)` | Staff + Finance | 项目 producing；非资金危机；候选人有效；现金足够支付签约费 | 建立项目绑定合同、签约费即时入账；周薪从下一次周结算起计提并归属项目，综合成本高于同等核心员工 |
 | 临时员工提前解除 | Event → Staff + Finance | 仅当特定事件选项明确授权；普通命令不开放通用提前解约 | 保留已发生费用；解除后停止后续周薪；项目中止/交付仍按合同规则自动解绑 |
 | `sign_outsourcing(work_id, item_id, supplier_id, work_total, mode)` | Vendor + Finance | 工作项已解锁；专业匹配；供应商产能余量；现金 | 合同建立、费用入账、占用产能 |
 | `deliver_work(work_id)` | Project + Application | 全部门槛项已交付；未过截止 | 转 delivering 并当次结清（§7.3.6） |
