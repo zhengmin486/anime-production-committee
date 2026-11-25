@@ -314,7 +314,7 @@
 - 不同公司规模下的固定成本增长。
 - 闲置员工工资。
 - 设施维护费（需与各设施参数表保持一致）。
-- 固定费用在正常周和危机周的计提口径。
+- 固定费用按现行八阶段正常周结算口径计提；当前版本不存在危机周计提规则。
 - 公司规模改变时的费用变化。
 
 **决定前应查阅：** [DECISION_LOG.md](DECISION_LOG.md)、[DOMAIN_ARCHITECTURE](DOMAIN_ARCHITECTURE.md)、[M1 运行切片](M1_RUNTIME_SLICE.md)、[#61 公司](https://github.com/zhengmin486/anime-production-committee/issues/61)、[#64 经济](https://github.com/zhengmin486/anime-production-committee/issues/64)。
@@ -333,9 +333,11 @@
 
 ---
 
-## 10. 融资与资金危机
+## 10. 未来更新候选：融资与限时资金危机机制
 
-- 资金危机触发时的强制费用缺口判定。
+> 本节仅保存未来可能重新评估的参数方向，不属于首版规则、当前 M2.5 验收或现阶段平衡标定。当前执行 DEC-FIN-002/003：预检不足直接破产。
+
+- 危机触发条件与强制费用缺口判定。
 - 危机期限：进入危机后允许自救的周数。
 - 初次危机期限与再次进入危机是否相同。
 - 融资额度上限计算公式。
@@ -352,7 +354,7 @@
 - 危机期间固定成本变化（工资、运营、还款与利息）。
 - 交付结算后余额为负时进入危机的判定方式。
 
-**已确认而不属于待标定的规则：** 正常周预检失败时不提交正常制作结算；危机期间周数继续推进、继续计提固定成本、允许现金暂时为负；不自动借款；融资是唯一允许的新增资金动作；危机期限内未恢复偿付能力才破产。
+**本节状态：未来候选而非已确认规则。** 危机期限、负现金语义、融资、自救动作与危机周固定成本计提均未纳入当前版本；任何恢复方案必须重新提交规则变更并通过原子性与经济平衡审查。
 
 **决定前应查阅：** [DECISION_LOG.md](DECISION_LOG.md)、[DOMAIN_ARCHITECTURE](DOMAIN_ARCHITECTURE.md) 的 Finance/危机章节、[M0 契约](M0_CONTRACT_FREEZE.md)、[#61 公司](https://github.com/zhengmin486/anime-production-committee/issues/61)、[#64 经济](https://github.com/zhengmin486/anime-production-committee/issues/64)。
 

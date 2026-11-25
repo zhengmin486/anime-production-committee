@@ -4,6 +4,7 @@
 - 范围：Issue [#39](https://github.com/zhengmin486/anime-production-committee/issues/39) 的「当前可立即做」优先项——三个核心界面的可点击静态原型。
 - 代码位置：`apps/web/src/prototype/`，随 PR [#46](https://github.com/zhengmin486/anime-production-committee/pull/46) 合并进 `main`（合并提交 `e30c040`，内容提交 `63d9c11`，10 个文件 +1717/−2）。
 - 本文补齐 #39 交付物 1（信息架构与导航图）、交付物 3（关键组件清单与 mock data 结构说明）、交付物 4（需要接入的读模型/命令字段映射清单），并登记验收对照与实测证据。
+- 历史机制说明：本文原型中的 `cash_crisis` 回执、危机面板、危机截图及 `arrange_financing` 入口来自旧限时危机周方案，现仅作为历史原型样本保留，不得接入当前 v4 规则或照此实现当前 UI。限时危机周仅是未来更新候选，当前规则按 DEC-FIN-002/003 直接破产。
 - 权威关系：玩法规则以 [DECISION_LOG.md](DECISION_LOG.md) 为准；读模型、命令与错误码以 [M0_CONTRACT_FREEZE.md](M0_CONTRACT_FREEZE.md)、[DOMAIN_ARCHITECTURE.md](DOMAIN_ARCHITECTURE.md) v1.4 为准；工作项与门槛口径以 [BLUEPRINT_SPEC.md](BLUEPRINT_SPEC.md) 为准；已确认的重大玩法决策见 [CORE_GAMEPLAY_REBUILD_FRAMEWORK.md](CORE_GAMEPLAY_REBUILD_FRAMEWORK.md) §12。**本文不定义任何规则数值。**
 
 ---
@@ -36,7 +37,7 @@
    │    → {episodeCount} 集各自的制作进度（单集选择）→ 第 n 集《标题》
    │    → 持续方针与实际差距 → 这个项目本周占了谁 → 风险从哪来 → {project.title}的花费与回款
    └─ 每周经营 WeeklyOperations
-        周次快照选择（4 份回执，覆盖 正常 / 事件待处理 / 资金危机 / 关闭中）
+        周次快照选择（4 份历史原型回执，含已废止的资金危机样本；危机态仅供追溯旧设计）
         {receipt.headline} → 本周真正需要玩家处理的 N 件事
         → 自动执行与仅报告 → 产出与原因
         → {事件标题}（事件态）/ 期限内允许做什么、不允许做什么（危机态）
@@ -84,7 +85,7 @@
 | `outsourcing` | 已签外包任务 | 同上 |
 | `projects[3]` | 《雾港II》12 集 TV、《夜行电车》3 集 OVA、《小满》1 集短篇（在制，完成母版未达标） | 每项含 6 公共项 + 每集 14 项，`workTotal` 与 `deliverAt` 逐字来自蓝图 |
 | `ledger` | 分类账目（13 类：投资、承制、商业、工资、运营、制作、临时、外包、事件、延期、违约金、开发费、发行） | DEC-FIN-001；项目账只是按 `work_id` 过滤的归因视图 |
-| `receipts[4]` | 四份周回执，分别处于 `normal` / `event_pending` / `cash_crisis` / `closing`；第 19 周为假设破产快照 | DEC-PLAY-002、DEC-FIN-003、M0 关闭边界 |
+| `receipts[4]` | 四份历史原型周回执；其中 `cash_crisis` 是已废止旧方案的静态样本，不代表当前运行态 | 仅作历史 UI 研究；当前破产语义见 DEC-FIN-002/003 |
 | `marketOffers` | 企划机会与热度 | 样本 |
 | `relationships` | 长期合作方关系 | 无读模型，见 §5 缺口 |
 | `history` | 已交付作品履历 | 无读模型，见 §5 缺口 |
@@ -97,7 +98,7 @@
 
 ## 5. 读模型与命令字段映射清单（#39 交付物 4）
 
-M0 现有 9 个读模型：`company_overview`、`work_detail`、`production_board`、`staff_board`、`finance_summary`、`crisis_board`、`market_board`、`event_card`、`week_receipt`。
+旧版 M0 原型清单曾包含 `crisis_board`；该读模型已随限时危机周退出当前接口范围。当前其余读模型按最新 M0 契约执行。
 
 | 界面展示 | 读模型 | 现状 |
 | --- | --- | --- |
@@ -108,7 +109,7 @@ M0 现有 9 个读模型：`company_overview`、`work_detail`、`production_boar
 | 员工姓名 / 角色 / 能力 / 疲劳 / 士气 / 归属 | `staff_board`（含 `assignment_work_id`） | 有 |
 | 供应商产能与已签外包 | `work_detail` 人员与外包占用 | 部分（产能需 `suppliers` 视图） |
 | 账目分类与项目归因 | `finance_summary` | 有 |
-| 危机缺口、剩余期限、自救清单 | `crisis_board` | 有 |
+| 危机缺口、剩余期限、自救清单 | `crisis_board` | 已废止旧原型；当前版本不提供 |
 | 企划机会与热度 | `market_board` | 有 |
 | 事件卡（标题 / 影响对象 / 选项代价 / 后果） | `event_card` | 有 |
 | 周回执（产出与原因、人员变化、下周关注） | `week_receipt` | 有 |
@@ -118,7 +119,7 @@ M0 现有 9 个读模型：`company_overview`、`work_detail`、`production_boar
 
 事件确认只修改 `WeeklyOperations` 的本地选择/回显状态，结果文本来自 `event.outcomes[optionId]`，不按选项重新计算工作点、现金或风险；切换周次保留回显，刷新页面恢复样本初态。关闭快照禁用推进按钮，结清与总结仅预览信息层级，不调用核心命令。
 
-命令入口（原型均不提交真实命令）：`advance_week`、`start_work`、`set_work_plan`、`assign_staff`、`hire_core`、`scout`、`hire_temporary`、`dismiss_staff`、`sign_outsourcing`、`deliver_work`、`abort_work`、`request_extension`、`arrange_financing`、`resolve_event`、`adopt_proposal`、`reject_proposal`、`create_custom_offer`、`buy_tv_service`。
+命令入口（原型均不提交真实命令）：`advance_week`、`start_work`、`set_work_plan`、`assign_staff`、`hire_core`、`scout`、`hire_temporary`、`dismiss_staff`、`sign_outsourcing`、`deliver_work`、`abort_work`、`request_extension`、`resolve_event`、`adopt_proposal`、`reject_proposal`、`create_custom_offer`、`buy_tv_service`。`arrange_financing` 仅为旧危机原型入口，不属于当前命令接口。
 
 需要在接入时专门处理的错误码：`GATE_UNMET`（必须列出未达标门槛项并跳到 `production_board` 对应行，不能只报错）、`DEPENDENCY_UNMET`（指向阻塞项）、`CAPACITY_EXCEEDED`（显示该供应商剩余产能）、`INSUFFICIENT_FUNDS`（显示缺口与出路）、`INVALID_PHASE`（说明为什么此刻不能做，而不是把按钮静默置灰）。
 
@@ -129,7 +130,7 @@ M0 现有 9 个读模型：`company_overview`、`work_detail`、`production_boar
 | 新用户能从公司总览理解经营状态与当前最重要的问题 | 满足 | 「需要留意的经营问题」面板 + 每部作品的门槛缺口与落后周数；总览可一跳进入作品详情 |
 | 项目详情能区分公共制作和每集六阶段，不误导为整部作品同步推进 | 满足 | 「公共制作与单集制作是两层」独立区块；单集网格为 `{集数} × 6 段`，无「一条 6 段流水线」表达 |
 | 周经营界面体现员工每周唯一项目归属与计划自动执行边界 | 满足 | 归属表每人单行 + 上周归属与切换标记；「自动执行与仅报告」与「本周真正需要玩家处理的 N 件事」分列 |
-| 事件待处理、资金危机、正常经营三种状态有清晰的操作差异 | 满足（三种状态） | 四份周回执中的事件确认、危机禁止清单、正常回执分别呈现 |
+| 历史事件待处理、旧危机样本与正常经营原型有清晰区分 | 历史原型验收 | 危机禁止清单和危机状态只证明旧样本表现，不构成当前规则或当前 UI 验收 |
 | 关闭中有明确的结束边界 | 满足（静态快照） | 第 19 周假设破产快照禁用推进，仅提供达标结清与经营总结预览；不调用核心 `calculate_result` |
 | 页面使用 mock data，不依赖未冻结 API | 满足 | 源码扫描断言（§1） |
 | 所有业务字段可追溯到架构、M0 契约或 DECISION_LOG | 部分满足 | §4、§5 给出映射与 3 处缺口；`model.ts` 的展示态推导待负责人裁决（§4 末尾） |
@@ -145,7 +146,7 @@ M0 现有 9 个读模型：`company_overview`、`work_detail`、`production_boar
 | [`v2-1440-company.png`](evidence/wp10-prototype/v2-1440-company.png) | 1440×1000 | 公司总览、唯一现金池、派生完成度 |
 | [`v2-1440-work.png`](evidence/wp10-prototype/v2-1440-work.png) | 1440×1000 | 作品详情两层结构、12 集网格、第 6 集等待主动交付 |
 | [`v2-1440-week.png`](evidence/wp10-prototype/v2-1440-week.png) | 1440×1000 | 事件待处理态与玩家动作清单 |
-| [`v2-768-week-crisis.png`](evidence/wp10-prototype/v2-768-week-crisis.png) | 768×1000 | 第 16 周资金危机：缺口、期限、允许与禁止清单 |
+| [`v2-768-week-crisis.png`](evidence/wp10-prototype/v2-768-week-crisis.png) | 768×1000 | 已废止限时危机周的历史设计截图，仅供回溯，不作为当前 UI 依据 |
 | [`v2-375-work.png`](evidence/wp10-prototype/v2-375-work.png) | 375×1000 | 作品详情单列堆叠、六阶段条带 |
 | [`v2-375-company.png`](evidence/wp10-prototype/v2-375-company.png) | 375×1000 | 公司总览单列堆叠 |
 | [`v3-1440-finance.png`](evidence/wp10-prototype/v3-1440-finance.png) | 1440×1000 | 公司流水筛选、项目归因与 Archive |

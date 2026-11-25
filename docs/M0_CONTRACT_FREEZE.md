@@ -16,9 +16,9 @@
 | --- | --- | --- |
 | 状态形状 | `GameState v4` 的聚合、字段、可空规则 | 高：影响校验器、存档、全部读模型 |
 | 不变式 | INV-01 – INV-29 | 高：每条都要有对应断言 |
-| 命令面 | 22 个命令的输入、守卫、错误码 | 中：影响 UI 与测试 |
+| 命令面 | 21 个现行命令的输入、守卫、错误码 | 中：影响 UI 与测试 |
 | 错误码 | 16 个稳定码 | 中：UI 按码分支 |
-| 危机白名单 | 危机期允许/禁止的动作 | 中：影响玩家自救路径 |
+| 旧版危机白名单 | 仅作为历史记录，不授权当前命令 | 历史契约；当前无危机状态或危机期命令集合 |
 | 存档策略 | v4 信封、版本拒绝、单槽 | 高：影响老存档 |
 | 蓝图契约 | schema、依赖语义、门槛语义 | 中：影响内容生产 |
 
@@ -85,7 +85,7 @@ SaveRecord { version: 4, savedAt: ISO8601, rules_version: string, state: GameSta
 | `Partner` | id, name, type, channels, prestige, relationship, history, status | — | 渠道唯一 |
 | `Committee` | id, work_id, members, formed_week, status | closed_week | 一成员一渠道，bd 不挂成员 |
 | `MarketState` | heat, slots, refresh_week, competitors | custom_offer, proposal, last_competition_round | slots ≤ 4；自定/提案为独立槽 |
-| `Finance` | opening_funds, balance, entries, loans, solvency | — | balance = opening + Σentries；负余额仅允许出现在破产关闭终局 |
+| `Finance` | opening_funds, balance, entries | — | balance = opening + Σentries；balance 始终非负；不含 loans / solvency 状态 |
 | `EventState` | pending[], last_event_week, per_work | pending 数组可为空 | 每条待处理事件带 work_id/event_id/triggered_week；pending 中每项目至多一条；不同项目可同周各有事件；last_event_week 不得充当全局单槽 |
 | `Archive` | works, series | company_result | 只追加 |
 
@@ -112,14 +112,14 @@ SaveRecord { version: 4, savedAt: ISO8601, rules_version: string, state: GameSta
 | INV-15 | `allowed_modes`：普通企划含 contract 与 committee；原创仅 committee | INVALID_STATE |
 | INV-16 | `balance = opening_funds + Σ entries.amount` | INVALID_STATE |
 | INV-17 | 每笔 entry 只属一个 category；收入类只能由交付结算写入 | INVALID_STATE |
-| INV-18 | `0 ≤ loan.remaining ≤ loan.principal`，且 remaining = principal − Σ已还 | INVALID_STATE |
+| INV-18 | 当前 Finance 不包含 `Loan` / `Solvency` / `solvency=crisis` 字段；融资与危机周机制不属于当前状态契约 | INVALID_STATE |
 | INV-19 | 同一供应商 `Σ active 合同 weekly_cap ≤ capacity_per_week` | CAPACITY_EXCEEDED |
 | INV-20 | 合同 `item_id` 属于同一 `work_id`；累计交付不超过该项 `work_total` | INVALID_STATE |
 | INV-21 | `running ⇒ week < 520`；`week` 只由 `advance_week` 改变 | INVALID_PHASE |
 | INV-22 | Archive 只追加；`WorkRecord.id` 唯一；`previous_work_id` 指向更早记录 | INVALID_STATE |
 | INV-23 | `events.pending[]` 可同时包含多个项目事件；每条带 `work_id/event_id/triggered_week/viewed`，pending 中每项目至多一条；同一项目每周最多触发一个；未查看事件阻塞推进，已查看未处理事件不阻塞；`last_event_week` 不得全局限流；事件不得覆盖/丢弃 | INVALID_STATE |
 | INV-24 | `market.slots ≤ 4`；自定/提案槽与市场槽、历史 id 互斥 | INVALID_STATE |
-| INV-25 | 负余额只允许出现在 `company.status=closing(bankrupt)`；正常经营状态不得出现负余额 | INVALID_STATE |
+| INV-25 | `Finance.balance ≥ 0`；刚性支出预检不足时回滚并直接破产，不记录负现金欠付 | INVALID_STATE |
 | INV-26 | 存档中不含派生值（§2 列表）；加载时重算 | SAVE_CORRUPT |
 | INV-27 | 每个 producing 项目恰有一名已通过任职资格校验并已分配到该项目的监督；资格仅在任职/分配时校验，任职后不因属性波动撤销；不得出现监督空缺或重复 | INVALID_STATE |
 | INV-28 | forced_rest 员工保留原项目归属与岗位占位但不贡献产能；满期次周开局恢复原岗位；监督已被替补时原监督回归不得顶替现任监督 | INVALID_STATE |
@@ -131,7 +131,7 @@ SaveRecord { version: 4, savedAt: ISO8601, rules_version: string, state: GameSta
 
 命令是**用例级**的：每个命令独立 schema、独立守卫、独立错误码，不存在"万能 decision 联合类型"。
 
-22 个命令（下表 19 行，其中两行各含多个命令）。
+21 个现行命令（下表 18 行，其中两行各含多个命令）。旧版 `arrange_financing` 不属于当前 v4 命令面。
 
 | # | 命令 | 关键守卫 | 主要失败码 | 原子范围 |
 | --- | --- | --- | --- | --- |
@@ -151,12 +151,12 @@ SaveRecord { version: 4, savedAt: ISO8601, rules_version: string, state: GameSta
 | 14 | `reject_proposal()` | 存在提案 | NOT_FOUND | 清空提案 |
 | 15 | `buy_tv_service(work_id)` | 委员会模式 ∧ 未购买 ∧ 现金 | MODE_NOT_ALLOWED / INSUFFICIENT_FUNDS | 渠道+发行费 |
 | 16 | `request_extension(work_id)` | 委员会模式 ∧ 未用过 ∧ 未过截止 ∧ 现金 | MODE_NOT_ALLOWED / INSUFFICIENT_FUNDS | 延期+费用 |
-| 17 | `arrange_financing(provider, amount)` | 资金压力周（未进入终局）∧ 额度未超 | INSUFFICIENT_FUNDS / INVALID_PHASE | 现金入账+贷款 |
-| 18 | `advance_week()` | running ∧ 不存在 `viewed=false` 的 pending 事件 ∧ week<520 ∧ 非 closing | INVALID_PHASE | 八阶段原子周结算；刚性支出预检失败则回滚并直接破产终局 |
-| 19 | `resolve_event(work_id, event_id, option_id)` | 该 work 存在对应 pending 事件 ∧ 选项合法 ∧ 现金充足（若需付款） | NOT_FOUND / INVALID_INPUT / INSUFFICIENT_FUNDS | 效果分派；只移除 `(work_id,event_id)` 对应事件 |
-| 20 | `end_company()` | running | INVALID_PHASE | 锁 closing，未交付转 delivering |
-| 21 | `finalize_delivery(work_id)` | 项目 delivering（关闭路径） | INVALID_PHASE | 交付结算 |
-| 22 | `finalize_company()` | 公司 ended 且项目已结清 | INVALID_PHASE | 生成结局，只执行一次 |
+| 17 | `advance_week()` | running ∧ 不存在 `viewed=false` 的 pending 事件 ∧ week<520 ∧ 非 closing | INVALID_PHASE | 八阶段原子周结算；刚性支出预检失败则回滚并直接破产终局 |
+| 18 | `resolve_event(work_id, event_id, option_id)` | 该 work 存在对应 pending 事件 ∧ 选项合法 ∧ 现金充足（若需付款） | NOT_FOUND / INVALID_INPUT / INSUFFICIENT_FUNDS | 效果分派；只移除 `(work_id,event_id)` 对应事件 |
+| 19 | `end_company()` | running | INVALID_PHASE | 锁 closing，未交付转 delivering |
+| 20 | `finalize_delivery(work_id)` | 项目 delivering（关闭路径） | INVALID_PHASE | 交付结算 |
+| 21 | `finalize_company()` | 公司 ended 且项目已结清 | INVALID_PHASE | 生成结局，只执行一次 |
+
 
 **通用原子性**：除 `initialize_game` 外，所有命令都是"工作副本 + 一次提交"。任一守卫或内部步骤失败 ⇒ 状态与调用前逐字段一致。
 
@@ -173,11 +173,11 @@ SaveRecord { version: 4, savedAt: ISO8601, rules_version: string, state: GameSta
 | `INVALID_PHASE` | 当前公司/项目状态不允许 | 事件未处理、公司关闭、项目非 producing | 否（先处理前置） | 指向应做的事 |
 | `NOT_FOUND` | 引用的实体不存在 | id 打错或已被消费 | 否 | 刷新列表 |
 | `MODE_NOT_ALLOWED` | 合作模式/玩法未开放或不适用 | 承制买电视服务、原创走承制 | 否 | 说明可用模式 |
-| `INSUFFICIENT_FUNDS` | 现金不足 | 立项、签约、融资超限 | 否（先筹钱） | 显示缺口 |
+| `INSUFFICIENT_FUNDS` | 现金不足 | 立项、签约或需即时付款的命令 | 否 | 显示缺口 |
 | `CAPACITY_EXCEEDED` | 供应商产能不足 | 周承诺超容量 | 否 | 显示剩余产能 |
 | `DEPENDENCY_UNMET` | 工作项未解锁 | 上游未达门槛 | 否 | 指向阻塞项 |
 | `GATE_UNMET` | 门槛项未全部交付 | 提前交付被拒 | 否 | 列出缺口项 |
-| `CRISIS_COMMITMENT_BLOCKED` | **已废弃**；新规则不再进入可持续推进的危机状态 | — | — | 保留错误码占位，禁止新流程产生 |
+| `CRISIS_COMMITMENT_BLOCKED` | **已废弃占位码**；当前没有危机状态或危机期承诺白名单 | — | — | 不由现行命令产生，保留字符串只用于兼容诊断 |
 | `COMPANY_ENDED` | 公司已结束 | 关闭后调非结清命令 | 否 | 只留结清与总结 |
 | `SAVE_VERSION_UNSUPPORTED` | 存档版本不支持 | 读到 v1/v2/v3 或未来版本 | 否 | 提示新开，不覆盖原档 |
 | `SAVE_CORRUPT` | 存档结构损坏 | JSON 非法、必填缺失、含派生字段 | 否 | 提示保留原档 |
@@ -265,7 +265,7 @@ PASS  HO-05  两人同周从零开始同一工作项，双方都不扣
 PASS  HO-06  临时人员接手已开工工作项，与核心员工同规则
 PASS  HO-07  监督人员切换项目，产生团队级一次性损失，且不重复计算个人项损失
 PASS  HO-08  监督人员留在同一项目，不产生团队级损失
-PASS  HO-09  经历资金危机（数周不生产）后恢复，继续做自己参与过的工作项，不扣
+PASS  HO-09  经历数周未生产后恢复，继续做自己参与过的工作项，不扣
 PASS  HO-10  工作项已完成，分配不到该工作项，不产生损失
 PASS  HO-11  本周在该工作项上没有产出（产能被别处占满），不算参与，不扣
 PASS  HO-12  监督人员切换项目但当周无产出，不产生团队级损失
