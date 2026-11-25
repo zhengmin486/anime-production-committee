@@ -30,8 +30,12 @@ std::string hash_state(const std::string& input);        // {state}
 std::string initialize_game(const std::string& input);   // M0 命令 1：{seed}
 std::string set_work_plan(const std::string& input);     // M0 命令 3：{state, work_id, plan}
 
-// M0 命令 19：{state, event_id, option_id}；work_id 可选，用于同名事件跨项目消歧。
+// M0 命令 19：{state, work_id, event_id, option_id}，三个参数全部必填（PR #94 冻结）。
 std::string resolve_event(const std::string& input);
+
+// DEC-EVENT-001 查看动作：{state, work_id, event_id}。
+// 只把目标事件标记为已查看，解除它对 advance_week 的阻塞；不产生任何效果。
+std::string view_event(const std::string& input);
 
 // 内部/构建诊断：校验一份事件卡目录，返回 {ok,count,ids,issues}。不是玩家命令。
 std::string validate_event_catalog(const std::string& input);  // {catalog, source?}

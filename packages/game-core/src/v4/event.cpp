@@ -112,9 +112,30 @@ bool parse_card(const Json& raw, Checker& checker, std::set<std::string>& ids, E
         checker.fail(id, "random_weight", "random_weight 必须在 0..1000");
     }
     const int expires = int_field(raw, "expires_weeks", 0);
-    // 首版没有处理期限/超时升级的运行时行为（M2-b 规则未落地），
-    // 严格拒绝非 0，避免内容作者误以为到期会产生效果。
-    if (expires != 0) checker.fail(id, "expires_weeks", "首版不支持处理期限，expires_weeks 必须为 0");
+    // DEC-EVENT-002：expires_weeks>0 表示限时响应事件，触发当周计入有效期。
+    // 到期必须有明确预设分支，不允许"到期后行为未定义"的卡片。
+    if (expires < 0 || expires > kMaxExpiresWeeks) {
+        checker.fail(id, "expires_weeks", "expires_weeks 必须在 0.." + std::to_string(kMaxExpiresWeeks));
+    }
+    const std::string timeout_option = text_field(raw, "timeout_option");
+    if (expires > 0 && timeout_option.empty()) {
+        checker.fail(id, "timeout_option", "限时事件必须预设到期分支 timeout_option");
+    }
+    if (expires == 0 && (!timeout_option.empty() || bool_field(raw, "escalate_on_timeout", false))) {
+        checker.fail(id, "timeout_option", "未设期限的卡片不得配置到期/升级分支");
+    }
+    const bool escalate = bool_field(raw, "escalate_on_timeout", false);
+    const int escalated_expires = int_field(raw, "escalated_expires_weeks", 0);
+    if (escalate) {
+        if (tier != "major") checker.fail(id, "escalate_on_timeout", "只有重大事件可配置一次超时升级");
+        if (expires <= 0) checker.fail(id, "escalate_on_timeout", "超时升级需要先配置 expires_weeks");
+        if (escalated_expires <= 0 || escalated_expires > kMaxExpiresWeeks) {
+            checker.fail(id, "escalated_expires_weeks",
+                         "升级后的响应期限必须在 1.." + std::to_string(kMaxExpiresWeeks));
+        }
+    } else if (raw.contains("escalated_expires_weeks") && escalated_expires != 0) {
+        checker.fail(id, "escalated_expires_weeks", "未配置升级时 escalated_expires_weeks 必须为 0");
+    }
 
     // trigger
     std::string metric, op;
@@ -228,6 +249,19 @@ bool parse_card(const Json& raw, Checker& checker, std::set<std::string>& ids, E
     if (tier == "major" && !once) checker.fail(id, "once_per_project", "重大事件必须 once_per_project=true");
     if (tier == "major" && cooldown != 0) checker.fail(id, "cooldown_weeks", "重大事件不能配冷却（同项目只触发一次）");
 
+    // 到期分支必须落在卡片自己的可用选项上：升级/超时都是"预设分支"，不能凭空创造效果。
+    if (!timeout_option.empty()) {
+        const auto hit = std::find_if(options.begin(), options.end(),
+                                      [&timeout_option](const OptionSpec& option) { return option.id == timeout_option; });
+        if (hit == options.end()) {
+            checker.fail(id, "timeout_option", "到期分支不在该卡片的选项里");
+        } else if (hit->kind == "outsource" || hit->kind == "extension") {
+            checker.fail(id, "timeout_option", "到期分支不能使用尚未接入的选项类型");
+        } else if (hit->kind != "abandon" && hit->kind != "decline") {
+            checker.fail(id, "timeout_option", "到期分支只能是消极/保守选项（abandon/decline）");
+        }
+    }
+
     out = EventSpec{id,
                     name,
                     category,
@@ -245,7 +279,10 @@ bool parse_card(const Json& raw, Checker& checker, std::set<std::string>& ids, E
                     expires,
                     text_field(raw, "description"),
                     text_field(raw, "foreshadow"),
-                    options};
+                    options,
+                    timeout_option,
+                    escalate,
+                    escalated_expires};
     return !id.empty();
 }
 
@@ -418,9 +455,14 @@ PendingEvent build_instance(const EventSpec& spec, const std::string& work_id, i
     event.name = spec.name;
     event.work_id = work_id;
     event.triggered_week = week;
+    event.viewed = false;
     event.cooldown_weeks = spec.cooldown_weeks;
     event.once_per_project = spec.once_per_project;
-    if (spec.expires_weeks > 0) event.expires_week = week + spec.expires_weeks;
+    // 有效期 M 周覆盖 W..W+M-1（DEC-EVENT-002）：这里存最后有效周，倒计时不必逐周减一。
+    if (spec.expires_weeks > 0) event.expires_week = week + spec.expires_weeks - 1;
+    event.timeout_option = spec.timeout_option;
+    event.escalate_on_timeout = spec.escalate_on_timeout;
+    event.escalated_expires_weeks = spec.escalated_expires_weeks;
     for (const auto& option : spec.options) {
         EventOptionView view;
         view.id = option.id;
@@ -510,6 +552,44 @@ Resolution inspect(const GameState& state, const std::string& work_id, const std
         return result;
     }
     return result;
+}
+
+bool mark_viewed(GameState& state, const std::string& work_id, const std::string& event_id) {
+    for (auto& event : state.events.pending) {
+        if (event.work_id != work_id || event.event_id != event_id) continue;
+        event.viewed = true;
+        return true;
+    }
+    return false;
+}
+
+int unviewed_count(const GameState& state) {
+    int count = 0;
+    for (const auto& event : state.events.pending) {
+        if (!event.viewed) ++count;
+    }
+    return count;
+}
+
+std::vector<TimeoutAction> expire_deadlines(GameState& state, int week) {
+    std::vector<TimeoutAction> actions;
+    for (auto& event : state.events.pending) {
+        // 未查看事件本身就阻止推进，因此不参与倒计时（DEC-EVENT-001/002）。
+        if (!event.viewed || !event.expires_week || week < *event.expires_week) continue;
+        if (event.escalate_on_timeout && !event.escalated) {
+            // 沿用同一事件身份替换原 pending 条目，最多一次，不得循环延期。
+            event.escalated = true;
+            event.expires_week = week + event.escalated_expires_weeks - 1;
+            continue;
+        }
+        if (event.timeout_option.empty()) continue;   // INV-29 已排除这种状态
+        actions.push_back(TimeoutAction{event.work_id, event.event_id, event.timeout_option});
+    }
+    std::sort(actions.begin(), actions.end(), [](const TimeoutAction& a, const TimeoutAction& b) {
+        if (a.work_id != b.work_id) return a.work_id < b.work_id;
+        return a.event_id < b.event_id;
+    });
+    return actions;
 }
 
 Json builtin_catalog_report() { return catalog_report(embedded_event_cards(), "content/events"); }

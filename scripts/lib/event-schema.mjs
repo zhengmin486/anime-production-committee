@@ -3,6 +3,9 @@
 
 export const CATALOG_SCHEMA_VERSION = 1
 
+// 限时事件的最长有效期，与 C++ event::kMaxExpiresWeeks 保持一致。
+export const MAX_EXPIRES_WEEKS = 8
+
 export const STAGES = [
   'content_design',
   'storyboard_key_animation',
@@ -62,8 +65,35 @@ export function validateCard(card, source) {
   if (!isInt(card.random_weight) || card.random_weight < 0 || card.random_weight > 1000) {
     fail('random_weight', 'random_weight 必须在 0..1000')
   }
-  if (!isInt(card.expires_weeks) || card.expires_weeks < 0 || card.expires_weeks > 8) {
-    fail('expires_weeks', 'expires_weeks 必须在 0..8')
+  // DEC-EVENT-002：expires_weeks>0 表示限时响应事件，触发当周计入有效期；0 表示不设期限。
+  if (!isInt(card.expires_weeks) || card.expires_weeks < 0 || card.expires_weeks > MAX_EXPIRES_WEEKS) {
+    fail('expires_weeks', `expires_weeks 必须在 0..${MAX_EXPIRES_WEEKS}`)
+  }
+  const hasTimeout = isInt(card.expires_weeks) && card.expires_weeks > 0
+  if (card.timeout_option !== undefined && !isText(card.timeout_option)) {
+    fail('timeout_option', 'timeout_option 必须是非空字符串')
+  } else if (hasTimeout && card.timeout_option === undefined) {
+    fail('timeout_option', '限时事件必须预设到期分支 timeout_option')
+  } else if (!hasTimeout && card.timeout_option !== undefined) {
+    fail('timeout_option', '未设期限的卡片不得配置到期分支')
+  }
+  if (card.escalate_on_timeout !== undefined && typeof card.escalate_on_timeout !== 'boolean') {
+    fail('escalate_on_timeout', 'escalate_on_timeout 必须是布尔值')
+  }
+  const escalate = card.escalate_on_timeout === true
+  if (card.escalate_on_timeout !== undefined && !hasTimeout) {
+    fail('escalate_on_timeout', '超时升级需要先配置 expires_weeks')
+  }
+  if (card.escalated_expires_weeks !== undefined && !isInt(card.escalated_expires_weeks)) {
+    fail('escalated_expires_weeks', 'escalated_expires_weeks 必须是整数')
+  }
+  if (escalate) {
+    if (card.tier !== 'major') fail('escalate_on_timeout', '只有重大事件可配置一次超时升级')
+    if (card.escalated_expires_weeks < 1 || card.escalated_expires_weeks > MAX_EXPIRES_WEEKS) {
+      fail('escalated_expires_weeks', `升级后的响应期限必须在 1..${MAX_EXPIRES_WEEKS}`)
+    }
+  } else if (card.escalated_expires_weeks !== undefined && card.escalated_expires_weeks !== 0) {
+    fail('escalated_expires_weeks', '未配置升级时 escalated_expires_weeks 必须为 0')
   }
 
   if (typeof card.trigger !== 'object' || card.trigger === null) fail('trigger', '缺少 trigger 对象')
@@ -115,6 +145,15 @@ export function validateCard(card, source) {
   }
   if (card.tier === 'major' && card.once_per_project !== true) fail('once_per_project', '重大事件必须 once_per_project=true')
   if (card.tier === 'major' && card.cooldown_weeks !== 0) fail('cooldown_weeks', '重大事件不能配冷却')
+  // 到期分支只能落在本卡片已接入的消极/保守选项上。
+  if (isText(card.timeout_option)) {
+    const branch = card.options.find((option) => option?.id === card.timeout_option)
+    if (!branch) fail('timeout_option', '到期分支不在该卡片的选项里')
+    else if (branch.kind === 'outsource' || branch.kind === 'extension') fail('timeout_option', '到期分支不能使用尚未接入的选项类型')
+    else if (branch.kind !== 'abandon' && branch.kind !== 'decline') {
+      fail('timeout_option', '到期分支只能是消极/保守选项（abandon/decline）')
+    }
+  }
   return issues
 }
 

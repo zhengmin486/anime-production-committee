@@ -208,7 +208,13 @@ struct PendingEvent {
     std::string name;         // 快照：结算回执不依赖可能变化的内容目录
     std::string work_id;
     int triggered_week = 0;
+    bool viewed = false;      // DEC-EVENT-001：未查看阻塞推进，查看不等于处理
+    // DEC-EVENT-002：有效期 M 周覆盖 triggered_week..triggered_week+M-1；无期限事件为 null。
     std::optional<int> expires_week;
+    std::string timeout_option;          // 快照：到期执行的预设分支
+    bool escalate_on_timeout = false;    // 快照：本事件配置了一次超时升级
+    int escalated_expires_weeks = 0;     // 快照：升级后的后续响应期限
+    bool escalated = false;              // 唯一一次超时升级已用掉
     int cooldown_weeks = 0;
     bool once_per_project = false;
     std::vector<EventOptionView> options;

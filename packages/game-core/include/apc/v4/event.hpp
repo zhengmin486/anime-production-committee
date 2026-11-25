@@ -15,6 +15,9 @@
 
 namespace apc::v4::event {
 
+// 限时事件的最长有效期（周），与 scripts/lib/event-schema.mjs 保持一致。
+inline constexpr int kMaxExpiresWeeks = 8;
+
 struct EffectSpec {
     std::string scope;    // instant / stage / project
     std::string target;   // quality / work_done / fatigue / morale / funds
@@ -50,6 +53,10 @@ struct EventSpec {
     std::string description;
     std::string foreshadow;
     std::vector<OptionSpec> options;
+    // DEC-EVENT-002 期限配置（放在末尾以保持既有聚合初始化顺序）。
+    std::string timeout_option;         // 到期执行的预设分支；expires_weeks>0 时必填
+    bool escalate_on_timeout = false;   // 重大事件可配置的一次超时升级
+    int escalated_expires_weeks = 0;    // 升级后的后续响应期限
 };
 
 // 内容校验问题：source（文件/内嵌源）、card_id、field 三段都能定位。
@@ -79,6 +86,26 @@ const EventSpec* find(const std::string& id);
 // 每周结算第 11 阶段调用：为每个 producing 项目各抽取至多一个事件，
 // 追加到 events.pending（不覆盖、不丢弃已有事件）。返回周回执片段。
 Json draw(GameState& state, int week);
+
+// 玩家查看事件详情（DEC-EVENT-001）：只把目标事件标记为已查看。
+// 不应用选项、不扣款、不移除 pending，也不改动其他项目的任何事件。
+// 返回 false 表示该项目没有该待处理事件。
+bool mark_viewed(GameState& state, const std::string& work_id, const std::string& event_id);
+
+// 未查看的待处理事件数量：advance_week 的推进守卫只看这个数（DEC-EVENT-001）。
+int unviewed_count(const GameState& state);
+
+// DEC-EVENT-002 / DEC-TIME-003 阶段 7：限时事件到期处理。
+// 只有"已查看且仍未处理"的事件参与倒计时；到期时
+// - 配置了一次升级且尚未升级：沿用同一事件身份替换原 pending 条目并进入新期限；
+// - 其余情况：产出到期动作，由应用层执行事件预设分支后移除该条。
+// 只写 events.pending，不碰 Project/Staff/Finance，也不影响其他项目事件。
+struct TimeoutAction {
+    std::string work_id;
+    std::string event_id;
+    std::string option_id;   // 快照中的分支选项 id
+};
+std::vector<TimeoutAction> expire_deadlines(GameState& state, int week);
 
 // 选项校验：只读待处理事件里的冻结快照，不回查内容目录。
 struct Resolution {

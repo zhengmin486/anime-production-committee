@@ -626,9 +626,74 @@ test('事件内容：非法卡被拒绝并定位到卡片与字段', () => {
   const badVersion = validate([{ ...card, schema_version: 2 }])
   assert.ok(badVersion.issues.some((issue) => issue.field === 'schema_version'))
 
-  // 首版没有期限/超时行为，非 0 必须被拒绝，避免内容作者误以为会生效
-  const expiry = validate([{ ...card, expires_weeks: 2 }])
-  assert.ok(expiry.issues.some((issue) => issue.field === 'expires_weeks'))
+  // DEC-EVENT-002：限时事件必须预设到期分支，否则整卡被拒
+  const noBranch = validate([{ ...card, expires_weeks: 2 }])
+  assert.ok(noBranch.issues.some((issue) => issue.field === 'timeout_option'))
+
+  const timed = validate([{ ...card, expires_weeks: 2, timeout_option: 'accept' }])
+  assert.equal(timed.ok, true)
+  assert.equal(timed.issues.length, 0)
+
+  const branchMissing = validate([{ ...card, expires_weeks: 2, timeout_option: 'not_a_option' }])
+  assert.ok(branchMissing.issues.some((issue) => issue.field === 'timeout_option' && issue.message.includes('选项里')))
+
+  const branchKind = validate([
+    {
+      ...card,
+      expires_weeks: 2,
+      timeout_option: 'handle',
+      options: [{ id: 'handle', label: '加人赶工', kind: 'overtime', cost: 0, effects: [] }, card.options[0]]
+    }
+  ])
+  assert.ok(branchKind.issues.some((issue) => issue.field === 'timeout_option' && issue.message.includes('消极')))
+
+  const branchReserved = validate([
+    {
+      ...card,
+      expires_weeks: 2,
+      timeout_option: 'handle',
+      options: [{ id: 'handle', label: '外包', kind: 'outsource', cost: 0, effects: [] }, card.options[0]]
+    }
+  ])
+  assert.ok(branchReserved.issues.some((issue) => issue.field === 'timeout_option' && issue.message.includes('尚未接入')))
+
+  const noDeadlineBranch = validate([{ ...card, expires_weeks: 0, timeout_option: 'accept' }])
+  assert.ok(noDeadlineBranch.issues.some((issue) => issue.field === 'timeout_option'))
+
+  const tooLong = validate([{ ...card, expires_weeks: 9, timeout_option: 'accept' }])
+  assert.ok(tooLong.issues.some((issue) => issue.field === 'expires_weeks'))
+
+  // 一次超时升级只允许重大事件配置，且必须先有响应期限
+  const escalateNormal = validate([{ ...card, expires_weeks: 2, timeout_option: 'accept', escalate_on_timeout: true, escalated_expires_weeks: 2 }])
+  assert.ok(escalateNormal.issues.some((issue) => issue.field === 'escalate_on_timeout' && issue.message.includes('重大')))
+
+  const escalateMajor = validate([
+    {
+      ...card,
+      tier: 'major',
+      once_per_project: true,
+      cooldown_weeks: 0,
+      expires_weeks: 2,
+      timeout_option: 'accept',
+      escalate_on_timeout: true,
+      escalated_expires_weeks: 2
+    }
+  ])
+  assert.equal(escalateMajor.ok, true)
+
+  const escalateWindow = validate([
+    {
+      ...card,
+      tier: 'major',
+      once_per_project: true,
+      cooldown_weeks: 0,
+      expires_weeks: 2,
+      timeout_option: 'accept',
+      escalate_on_timeout: true,
+      escalated_expires_weeks: 0
+    }
+  ])
+  assert.ok(escalateWindow.issues.some((issue) => issue.field === 'escalated_expires_weeks'))
 
   const empty = ok('validate_event_catalog', { source: 'empty', catalog: { schema_version: 1, cards: [] } })
   assert.equal(empty.ok, false)
@@ -645,7 +710,7 @@ function twoProjectsNearDeadline() {
   return setAnimationQuality(setAnimationQuality(state, 'work_a', 50), 'work_b', 50)
 }
 
-test('事件仲裁：两个项目同周各自触发，互不覆盖，处理前阻塞推进', () => {
+test('事件仲裁：两个项目同周各自触发，互不覆盖，未查看前阻塞推进', () => {
   let state = twoProjectsNearDeadline()
   const advanced = ok('advance_week', { state })
   state = advanced.state
@@ -761,4 +826,238 @@ test('事件快照：选项效果冻结在 pending，JSON 往返后仍按触发�
   // 存档往返后 pending 仍保留完整效果载荷
   assert.equal(resolved.events.pending.length, 1)
   assert.equal(resolved.events.pending[0].options[0].effects.length >= 0, true)
+})
+
+// ---- DEC-EVENT-001 / DEC-EVENT-002：查看与处理分离、限时事件到期 ----
+
+function eventEntry(state, overrides = {}) {
+  const week = state.company.week
+  return {
+    event_id: 'fixture_timer',
+    name: '夹具期限事件',
+    work_id: 'work_a',
+    triggered_week: week,
+    viewed: true,
+    expires_week: week,
+    timeout_option: 'accept',
+    escalate_on_timeout: false,
+    escalated_expires_weeks: 0,
+    escalated: false,
+    cooldown_weeks: 0,
+    once_per_project: false,
+    options: [
+      {
+        id: 'accept',
+        label: '听天由命',
+        kind: 'abandon',
+        risk_hint: '',
+        cost: 300,
+        effects: [{ scope: 'instant', target: 'funds', value: -1000 }]
+      }
+    ],
+    ...overrides
+  }
+}
+
+function withPending(state, entries) {
+  const next = JSON.parse(JSON.stringify(state))
+  next.events.pending = entries
+  return next
+}
+
+// 模拟玩家把队列里所有事件都点开看一遍：只翻 viewed，不处理任何一条。
+function viewAll(state) {
+  let next = JSON.parse(JSON.stringify(state))
+  for (const event of pendingOf(next)) {
+    if (event.viewed) continue
+    next = ok('view_event', { state: next, work_id: event.work_id, event_id: event.event_id }).state
+  }
+  return next
+}
+
+test('事件查看：view_event 只标记已查看，不结算、不扣款、不移除 pending', () => {
+  let state = twoProjectsNearDeadline()
+  state = ok('advance_week', { state }).state
+  assert.ok(pendingOf(state).every((event) => event.viewed === false))
+  const before = JSON.parse(JSON.stringify(state))
+
+  const viewed = ok('view_event', { state, work_id: 'work_a', event_id: 'schedule_slip' })
+  const after = viewed.state
+  assert.equal(viewed.viewed, true)
+  assert.equal(after.events.pending.length, 2)
+  assert.equal(after.events.pending.find((event) => event.work_id === 'work_a').viewed, true)
+  assert.equal(after.events.pending.find((event) => event.work_id === 'work_b').viewed, false)
+  assert.equal(after.finance.balance, before.finance.balance)
+  assert.equal(after.finance.entries.length, before.finance.entries.length)
+  assert.equal(findItem(after, 'work_a', 'ep01.inbetween').quality.story, 50)
+  assert.equal(after.events.per_work.work_a?.cooldowns?.schedule_slip, undefined)
+  assert.equal(after.company.week, before.company.week)
+
+  // 另一条仍未查看 → 推进依旧被拒
+  const blocked = call('advance_week', { state: after })
+  assert.equal(blocked.error.code, 'INVALID_PHASE')
+  assert.ok(blocked.error.message.includes('1'))
+
+  const missing = call('view_event', { state: after, work_id: 'work_a', event_id: 'not_an_event' })
+  assert.equal(missing.error.code, 'NOT_FOUND')
+  const ambiguous = call('view_event', { state: after, event_id: 'schedule_slip' })
+  assert.equal(ambiguous.error.code, 'INVALID_INPUT')
+})
+
+test('事件查看：全部查看后即可推进，未处理的 pending 继续保留', () => {
+  let state = twoProjectsNearDeadline()
+  state = ok('advance_week', { state }).state
+  for (const event of pendingOf(state)) {
+    state = ok('view_event', { state, work_id: event.work_id, event_id: event.event_id }).state
+  }
+  assert.equal(pendingOf(state).every((event) => event.viewed), true)
+
+  const advanced = ok('advance_week', { state })
+  assert.equal(advanced.state.company.week, state.company.week + 1)
+  assert.equal(advanced.report.timeouts.length, 0)
+  assert.deepEqual(advanced.state.events.pending.map((event) => event.work_id).sort(), ['work_a', 'work_b'])
+  assert.equal(advanced.state.events.pending.every((event) => event.viewed), true)
+  // 已排队的项目占位，同周不再重复抽取
+  assert.equal(advanced.report.events.count, 0)
+})
+
+test('事件期限：未查看的限时事件不参与到期处理', () => {
+  const base = twoProjectsNearDeadline()
+  const week = base.company.week
+  const state = withPending(base, [eventEntry(base, { viewed: false, expires_week: week })])
+  const blocked = call('advance_week', { state })
+  assert.equal(blocked.error.code, 'INVALID_PHASE')
+
+  const viewed = ok('view_event', { state, work_id: 'work_a', event_id: 'fixture_timer' }).state
+  assert.equal(viewed.events.pending[0].viewed, true)
+  assert.equal(viewed.events.pending[0].expires_week, week)
+  const advanced = ok('advance_week', { state: viewed })
+  assert.equal(advanced.report.timeouts.length, 1)
+  assert.equal(advanced.report.timeouts[0].event_id, 'fixture_timer')
+})
+
+test('事件期限：到期自动执行预设分支，其他项目的 pending 一条不动', () => {
+  const base = twoProjectsNearDeadline()
+  const week = base.company.week
+  const due = eventEntry(base, { work_id: 'work_a', expires_week: week })
+  const kept = eventEntry(base, { work_id: 'work_b', event_id: 'fixture_later', expires_week: week + 2 })
+  // 先走一次运行时编解码，拿到补齐 stage 等空字段后的规范快照，再用于逐字段比对
+  const seeded = assign(withPending(base, [due, kept]), 'staff_dir', 'work_a')
+  const [dueN, keptN] = seeded.events.pending
+  const state = withPending(seeded, [dueN, keptN])
+  // 对照组：同样的两条 pending，只是都还没到期
+  const control = withPending(seeded, [{ ...dueN, expires_week: week + 2 }, keptN])
+
+  const advanced = ok('advance_week', { state })
+  assert.deepEqual(advanced.report.timeouts, [
+    { work_id: 'work_a', event_id: 'fixture_timer', name: '夹具期限事件', option_id: 'accept', reason: 'timeout', cost: 300 }
+  ])
+  const after = advanced.state
+  assert.equal(after.events.pending.some((event) => event.event_id === 'fixture_timer'), false)
+  assert.deepEqual(after.events.pending.find((event) => event.event_id === 'fixture_later'), keptN)
+
+  const controlState = ok('advance_week', { state: control }).state
+  // 分支的 cost 与 funds 效果都进账本，且现金只按归属事件结算
+  assert.equal(after.finance.balance, controlState.finance.balance - 1300)
+  const timedEntries = after.finance.entries.filter((entry) => entry.memo === 'fixture_timer')
+  assert.equal(timedEntries.length, 2)
+  assert.ok(timedEntries.every((entry) => entry.work_id === 'work_a' && entry.category === 'events'))
+  assert.equal(controlState.finance.entries.some((entry) => entry.memo === 'fixture_timer'), false)
+})
+
+test('事件期限：超时升级只发生一次，第二次超时按违约处理', () => {
+  const base = twoProjectsNearDeadline()
+  const week = base.company.week
+  const state = withPending(base, [
+    eventEntry(base, { work_id: 'work_a', expires_week: week, escalate_on_timeout: true, escalated_expires_weeks: 2 })
+  ])
+
+  const first = ok('advance_week', { state })
+  assert.equal(first.report.timeouts.length, 0)
+  const escalated = first.state.events.pending.find((event) => event.event_id === 'fixture_timer')
+  assert.equal(escalated.escalated, true)
+  assert.equal(escalated.expires_week, week + 1)
+  assert.equal(escalated.viewed, true)
+  assert.equal(first.state.finance.entries.some((entry) => entry.memo === 'fixture_timer'), false)
+
+  const second = ok('advance_week', { state: viewAll(first.state) })
+  const breach = second.report.timeouts.find((entry) => entry.event_id === 'fixture_timer')
+  assert.deepEqual(breach, {
+    work_id: 'work_a', event_id: 'fixture_timer', name: '夹具期限事件', option_id: 'accept', reason: 'breach', cost: 300
+  })
+  assert.equal(second.state.events.pending.some((event) => event.event_id === 'fixture_timer'), false)
+})
+
+test('事件期限：INV-29 拒绝缺少可用到期分支或越界的限时事件', () => {
+  const base = twoProjectsNearDeadline()
+  const week = base.company.week
+  const check = (entry) => call('assign_staff', { state: withPending(base, [entry]), staff_id: 'staff_dir', work_id: 'work_a' })
+
+  const noBranch = check(eventEntry(base, { timeout_option: '' }))
+  assert.equal(noBranch.error?.code, 'INVALID_STATE')
+  assert.ok(noBranch.error.message.includes('INV-29'))
+
+  const unknownBranch = check(eventEntry(base, { timeout_option: 'ghost' }))
+  assert.ok(unknownBranch.error?.message.includes('INV-29'))
+
+  const windowTooLong = check(eventEntry(base, { expires_week: week + 8 }))
+  assert.ok(windowTooLong.error?.message.includes('INV-29'))
+
+  const markedWithoutDeadline = check(eventEntry(base, { expires_week: null, escalated: true }))
+  assert.ok(markedWithoutDeadline.error?.message.includes('INV-29'))
+
+  const escalateWindow = check(eventEntry(base, { escalate_on_timeout: true, escalated_expires_weeks: 0 }))
+  assert.ok(escalateWindow.error?.message.includes('INV-29'))
+})
+
+test('事件快照：viewed 与期限字段随存档往返保留，旧存档缺字段按未查看处理', () => {
+  let state = twoProjectsNearDeadline()
+  state = ok('advance_week', { state }).state
+  const week = state.company.week
+  const staged = withPending(state, [
+    eventEntry(state, { work_id: 'work_a', viewed: false, expires_week: week + 1 }),
+    eventEntry(state, { work_id: 'work_b', event_id: 'fixture_later', viewed: true, expires_week: null, timeout_option: '' })
+  ])
+
+  const echoed = ok('view_event', { state: staged, work_id: 'work_a', event_id: 'fixture_timer' }).state
+  assert.equal(echoed.events.pending[0].viewed, true)
+  assert.equal(echoed.events.pending[0].expires_week, week + 1)
+  assert.equal(echoed.events.pending[1].viewed, true)
+  assert.equal(echoed.events.pending[1].expires_week, null)
+
+  // 旧版本存档没有这些字段：必须按"未查看、无期限"处理，宁可多阻塞一次推进
+  const legacy = JSON.parse(JSON.stringify(staged))
+  for (const event of legacy.events.pending) {
+    delete event.viewed
+    delete event.expires_week
+    delete event.timeout_option
+    delete event.escalate_on_timeout
+    delete event.escalated_expires_weeks
+    delete event.escalated
+  }
+  const blocked = call('advance_week', { state: legacy })
+  assert.equal(blocked.error.code, 'INVALID_PHASE')
+  assert.ok(blocked.error.message.includes('2'))
+
+  // 旧卡没有期限配置：解码后一律无期限、无到期分支，且不会自动结算
+  const legacyState = ok('resolve_event', {
+    state: legacy,
+    work_id: 'work_a',
+    event_id: 'fixture_timer',
+    option_id: 'accept'
+  }).state
+  assert.equal(legacyState.events.pending[0].expires_week, null)
+  assert.equal(legacyState.events.pending[0].timeout_option, '')
+  assert.equal(legacyState.events.pending[0].escalate_on_timeout, false)
+})
+
+test('事件结算：选项 cost 与 funds 效果同周入账时账本 id 不冲突', () => {
+  const base = twoProjectsNearDeadline()
+  // 无期限事件走手动处理路径：cost 300 + funds 效果 -1000 会在同一周产生两条流水
+  const state = withPending(base, [eventEntry(base, { expires_week: null, timeout_option: '' })])
+  const resolved = ok('resolve_event', { state, work_id: 'work_a', event_id: 'fixture_timer', option_id: 'accept' })
+  const entries = resolved.state.finance.entries.filter((entry) => entry.memo === 'fixture_timer')
+  assert.equal(entries.length, 2)
+  assert.equal(new Set(entries.map((entry) => entry.id)).size, 2)
+  assert.equal(resolved.state.finance.balance, base.finance.balance - 1300)
 })

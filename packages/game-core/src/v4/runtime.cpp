@@ -23,6 +23,11 @@ constexpr int kFatigueWorkGain = 8;
 constexpr int kFatigueRestLoss = 4;
 constexpr int kExperienceThreshold = 20;
 
+// 事件效果的应用层写在后半段，先声明供周结算的到期处理调用。
+void apply_event_effects(GameState& state, Project& work, const std::vector<EffectView>& effects, int week,
+                         const std::string& event_id);
+void record_event_resolution(GameState& state, const PendingEvent& due, int week);
+
 Json error_body(const char* code, const std::string& message) { return Json{{"error", {{"code", code}, {"message", message}}}}; }
 
 std::string encode(const Json& value) { return value.dump(); }
@@ -403,10 +408,32 @@ std::vector<std::string> validate(const GameState& state) {
         if (event.triggered_week < 0 || event.triggered_week > state.company.week) {
             error("INV-23 triggered_week 越界: " + event.event_id);
         }
-        if (event.expires_week && *event.expires_week < event.triggered_week) {
-            error("INV-23 expires_week 早于触发周: " + event.event_id);
+        if (event.expires_week) {
+            if (*event.expires_week < event.triggered_week) {
+                error("INV-23 expires_week 早于触发周: " + event.event_id);
+            }
+            // INV-29：限时事件必须带可执行的预设分支，到期行为不能是未定义的。
+            const int window = *event.expires_week - event.triggered_week + 1;
+            if (window < 1 || window > event::kMaxExpiresWeeks) {
+                error("INV-29 有效期周数越界: " + event.event_id);
+            }
+            const bool branch_found = std::any_of(event.options.begin(), event.options.end(),
+                                                  [&event](const EventOptionView& option) {
+                                                      return option.id == event.timeout_option;
+                                                  });
+            if (event.timeout_option.empty() || !branch_found) {
+                error("INV-29 限时事件缺少可用的到期分支: " + event.event_id);
+            }
+            if (event.escalated && !event.escalate_on_timeout) {
+                error("INV-29 未配置升级的事件不得标记为已升级: " + event.event_id);
+            }
+            if (event.escalate_on_timeout &&
+                (event.escalated_expires_weeks < 1 || event.escalated_expires_weeks > event::kMaxExpiresWeeks)) {
+                error("INV-29 升级后的响应期限越界: " + event.event_id);
+            }
+        } else if (event.escalated || event.escalate_on_timeout || !event.timeout_option.empty()) {
+            error("INV-29 无期限事件不得配置到期/升级状态: " + event.event_id);
         }
-        if (event.expires_week) error("INV-23 首版不支持处理期限，expires_week 必须为 null: " + event.event_id);
         if (event.options.empty()) error("INV-23 待处理事件缺少选项快照: " + event.event_id);
     }
     for (const auto& [work_id, entry] : state.events.per_work) {
@@ -692,9 +719,11 @@ std::string advance_week(const std::string& input) {
 
         if (state.company.status != "running") return encode(error_body("COMPANY_ENDED", "公司已结束"));
         if (state.company.week >= kMaxWeek) return encode(error_body("INVALID_PHASE", "已达经营上限"));
-        if (!state.events.pending.empty()) {
+        // DEC-EVENT-001：只有未查看的待处理事件阻塞推进；已查看未处理仍可推进并继续计时。
+        const int unviewed = event::unviewed_count(state);
+        if (unviewed > 0) {
             return encode(error_body("INVALID_PHASE",
-                                     "存在 " + std::to_string(state.events.pending.size()) + " 条待处理事件"));
+                                     "存在 " + std::to_string(unviewed) + " 条未查看的待处理事件"));
         }
         const auto pre_errors = validate(state);
         if (!pre_errors.empty()) return encode(error_body("INVALID_STATE", pre_errors.front()));
@@ -712,7 +741,7 @@ std::string advance_week(const std::string& input) {
         std::sort(ordered_staff.begin(), ordered_staff.end(),
                   [](const Staff* a, const Staff* b) { return a->id < b->id; });
 
-        // ---- 阶段 5：强制费用预检（M1 最小切片：工资 + 运营 + 制作费）----
+        // ---- 阶段 2：刚性支出预检（M1 最小切片：工资 + 运营 + 制作费）----
         // 预检失败一律整周不提交：不推进、不记账、不生产。危机路径是 M2.5，
         // 此处只保证"钱不够时周不会假装过完"。
         std::map<std::string, int> assigned_count;
@@ -739,7 +768,7 @@ std::string advance_week(const std::string& input) {
                                  {"gap", gap}}}});
         }
 
-        // ---- 阶段 6：原子记账（唯一账本，逐条可归因）----
+        // ---- 阶段 3：刚性支出扣款（唯一账本，逐条可归因）----
         auto spend = [&state, week](const std::string& entry_id, std::optional<std::string> work_id,
                                     const char* category, int64_t amount, const std::string& memo) {
             if (amount <= 0) return;
@@ -855,7 +884,48 @@ std::string advance_week(const std::string& input) {
                                         {"fatigue", member.fatigue}, {"morale", member.morale}});
         }
 
-        // ---- 阶段 11：事件抽取（读本周已提交的结果，不碰账）----
+        // ---- 阶段 7：限时事件到期处理（DEC-TIME-003 / DEC-EVENT-002）----
+        // 已查看仍未处理的限时事件到期时，先于事件抽取自动执行预设分支：
+        // 逐条按事件身份处理，不覆盖、不清除其他项目的 pending，也不需要玩家确认。
+        Json timeout_report = Json::array();
+        for (const auto& action : event::expire_deadlines(state, week)) {
+            std::size_t index = state.events.pending.size();
+            for (std::size_t i = 0; i < state.events.pending.size(); ++i) {
+                const auto& pending = state.events.pending[i];
+                if (pending.work_id == action.work_id && pending.event_id == action.event_id) {
+                    index = i;
+                    break;
+                }
+            }
+            if (index >= state.events.pending.size()) continue;
+            const PendingEvent due = state.events.pending[index];
+            Project* work = find_work(state, due.work_id);
+            if (work == nullptr) continue;
+            const EventOptionView* branch = nullptr;
+            for (const auto& option : due.options) {
+                if (option.id == action.option_id) branch = &option;
+            }
+            if (branch == nullptr) continue;
+            // 到期分支的现金支出不得超过现有现金：自动处理不能绕过破产判定。
+            const std::int64_t paid = std::min<std::int64_t>(branch->cost, state.finance.balance);
+            if (paid > 0) {
+                state.finance.entries.push_back(LedgerEntry{
+                    "w" + std::to_string(week) + ".event." + due.event_id + "." + due.work_id, week, due.work_id,
+                    "events", -paid, std::nullopt, due.event_id});
+                state.finance.balance -= paid;
+            }
+            apply_event_effects(state, *work, branch->effects, week, due.event_id);
+            record_event_resolution(state, due, week);
+            state.events.pending.erase(state.events.pending.begin() + static_cast<std::ptrdiff_t>(index));
+            timeout_report.push_back(Json{{"work_id", due.work_id},
+                                          {"event_id", due.event_id},
+                                          {"name", due.name},
+                                          {"option_id", branch->id},
+                                          {"reason", due.escalated ? "breach" : "timeout"},
+                                          {"cost", paid}});
+        }
+
+        // ---- 阶段 8：事件抽取（读本周已提交的结果，不碰账）----
         // 每个 producing 项目各自至多一条；已有待处理事件的项目不再追加。
         const Json events_report = event::draw(state, week);
 
@@ -867,6 +937,7 @@ std::string advance_week(const std::string& input) {
         Json report = Json{{"week", week},
                            {"works", works_report},
                            {"staff", staff_report},
+                           {"timeouts", timeout_report},
                            {"events", events_report},
                            {"funds", Json{{"delta", -total_cost},
                                           {"balance", state.finance.balance},
@@ -953,7 +1024,8 @@ void apply_event_effects(GameState& state, Project& work, const std::vector<Effe
             if (member.employment == "core") targets.push_back(&member);
         }
     }
-    for (const auto& effect : effects) {
+    for (std::size_t index = 0; index < effects.size(); ++index) {
+        const auto& effect = effects[index];
         if (effect.target == "quality") {
             adjust_quality(work, effect.scope == "stage" ? effect.stage : std::string{}, effect.value);
             continue;
@@ -975,12 +1047,25 @@ void apply_event_effects(GameState& state, Project& work, const std::vector<Effe
             const std::int64_t funds = state.finance.balance;
             const std::int64_t amount = std::min<std::int64_t>(funds, -effect.value);
             if (amount > 0) {
+                // 带序号的条目 id：同一选项同时有 cost 与 funds 效果时不能撞 INV-02。
                 state.finance.entries.push_back(LedgerEntry{
-                    "w" + std::to_string(week) + ".event." + event_id + "." + work.id, week, work.id, "events",
-                    -amount, std::nullopt, event_id});
+                    "w" + std::to_string(week) + ".event." + event_id + "." + work.id + ".e" + std::to_string(index),
+                    week, work.id, "events", -amount, std::nullopt, event_id});
                 state.finance.balance -= amount;
             }
         }
+    }
+}
+
+// 冷却与重大事件登记：玩家手动处理与超时自动处理共用同一套记账，避免两条路径分叉。
+void record_event_resolution(GameState& state, const PendingEvent& due, int week) {
+    auto& entry = state.events.per_work[due.work_id];
+    if (due.cooldown_weeks > 0) {
+        entry.cooldowns[due.event_id] = week + due.cooldown_weeks;
+    }
+    if (due.once_per_project &&
+        std::find(entry.major_seen.begin(), entry.major_seen.end(), due.event_id) == entry.major_seen.end()) {
+        entry.major_seen.push_back(due.event_id);
     }
 }
 
@@ -1032,21 +1117,59 @@ std::string resolve_event(const std::string& input) {
             state.finance.balance -= resolution.option->cost;
         }
         apply_event_effects(state, *work, resolution.option->effects, week, event_id);
-
-        auto& entry = state.events.per_work[owner_id];
-        if (resolution.pending->cooldown_weeks > 0) {
-            entry.cooldowns[event_id] = week + resolution.pending->cooldown_weeks;
-        }
-        if (resolution.pending->once_per_project &&
-            std::find(entry.major_seen.begin(), entry.major_seen.end(), event_id) == entry.major_seen.end()) {
-            entry.major_seen.push_back(event_id);
-        }
+        record_event_resolution(state, *resolution.pending, week);
         const std::string message = resolution.pending->name.empty() ? event_id : resolution.pending->name;
         state.events.pending.erase(state.events.pending.begin() + static_cast<std::ptrdiff_t>(index));
 
         const auto post_errors = validate(state);
         if (!post_errors.empty()) return encode(error_body("INTERNAL_ERROR", "处理后状态非法: " + post_errors.front()));
         return encode(Json{{"state", state}, {"message", "已处理「" + message + "」"}});
+    } catch (const Json::exception&) {
+        return encode(error_body("INVALID_INPUT", "JSON 或字段类型无效"));
+    } catch (...) {
+        return encode(error_body("INTERNAL_ERROR", "内部错误"));
+    }
+}
+
+// DEC-EVENT-001：查看与处理是两个独立动作。查看只把目标事件标记为已查看，
+// 不应用选项、不扣款、不移除 pending，也不改动其他项目的任何事件。
+std::string view_event(const std::string& input) {
+    try {
+        const Json request = Json::parse(input);
+        GameState state = decode_state(request);
+        if (state.company.status != "running") return encode(error_body("COMPANY_ENDED", "公司已结束"));
+        if (!request.contains("work_id") || !request.at("work_id").is_string() ||
+            !request.contains("event_id") || !request.at("event_id").is_string()) {
+            return encode(error_body("INVALID_INPUT", "work_id 与 event_id 必须是字符串"));
+        }
+        const std::string work_id = request.at("work_id").get<std::string>();
+        const std::string event_id = request.at("event_id").get<std::string>();
+        if (work_id.empty() || event_id.empty()) {
+            return encode(error_body("INVALID_INPUT", "work_id 与 event_id 不能为空"));
+        }
+
+        const auto pre_errors = validate(state);
+        if (!pre_errors.empty()) return encode(error_body("INVALID_STATE", pre_errors.front()));
+
+        const std::size_t before = state.events.pending.size();
+        if (!event::mark_viewed(state, work_id, event_id)) {
+            return encode(error_body("NOT_FOUND", "该项目没有该待处理事件"));
+        }
+        // 查看是纯状态标记：事件条数不变，其他事件一条都不动。
+        if (state.events.pending.size() != before) {
+            return encode(error_body("INTERNAL_ERROR", "查看事件改变了待处理数量"));
+        }
+        const auto post_errors = validate(state);
+        if (!post_errors.empty()) return encode(error_body("INTERNAL_ERROR", "查看后状态非法: " + post_errors.front()));
+
+        for (const auto& pending : state.events.pending) {
+            if (pending.work_id != work_id || pending.event_id != event_id) continue;
+            return encode(Json{{"state", state},
+                               {"viewed", true},
+                               {"expires_week", pending.expires_week ? Json(*pending.expires_week) : Json(nullptr)},
+                               {"message", "已查看「" + (pending.name.empty() ? event_id : pending.name) + "」"}});
+        }
+        return encode(Json{{"state", state}, {"viewed", true}});
     } catch (const Json::exception&) {
         return encode(error_body("INVALID_INPUT", "JSON 或字段类型无效"));
     } catch (...) {

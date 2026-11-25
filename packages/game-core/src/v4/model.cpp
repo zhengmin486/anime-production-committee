@@ -355,7 +355,12 @@ void to_json(Json& j, const EventState& value) {
                                {"name", event.name},
                                {"work_id", event.work_id},
                                {"triggered_week", event.triggered_week},
+                               {"viewed", event.viewed},
                                {"expires_week", event.expires_week ? Json(*event.expires_week) : Json(nullptr)},
+                               {"timeout_option", event.timeout_option},
+                               {"escalate_on_timeout", event.escalate_on_timeout},
+                               {"escalated_expires_weeks", event.escalated_expires_weeks},
+                               {"escalated", event.escalated},
                                {"cooldown_weeks", event.cooldown_weeks},
                                {"once_per_project", event.once_per_project},
                                {"options", options}});
@@ -381,6 +386,12 @@ void from_json(const Json& j, EventState& value) {
             event.name = raw.value("name", std::string{});
             event.work_id = raw.value("work_id", std::string{});
             event.triggered_week = raw.value("triggered_week", 0);
+            // 缺字段按"未查看"处理：宁可多阻塞一次推进，也不能让旧状态静默越过查看规则。
+            event.viewed = raw.value("viewed", false);
+            event.timeout_option = raw.value("timeout_option", std::string{});
+            event.escalate_on_timeout = raw.value("escalate_on_timeout", false);
+            event.escalated_expires_weeks = raw.value("escalated_expires_weeks", 0);
+            event.escalated = raw.value("escalated", false);
             event.cooldown_weeks = raw.value("cooldown_weeks", 0);
             event.once_per_project = raw.value("once_per_project", false);
             if (raw.contains("expires_week") && raw.at("expires_week").is_number_integer()) {
