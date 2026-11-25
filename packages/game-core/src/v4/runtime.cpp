@@ -406,6 +406,7 @@ std::vector<std::string> validate(const GameState& state) {
         if (event.expires_week && *event.expires_week < event.triggered_week) {
             error("INV-23 expires_week 早于触发周: " + event.event_id);
         }
+        if (event.expires_week) error("INV-23 首版不支持处理期限，expires_week 必须为 null: " + event.event_id);
         if (event.options.empty()) error("INV-23 待处理事件缺少选项快照: " + event.event_id);
     }
     for (const auto& [work_id, entry] : state.events.per_work) {
@@ -941,7 +942,7 @@ int apply_points(Project& work, const std::string& stage_key, int points) {
     return applied;
 }
 
-void apply_event_effects(GameState& state, Project& work, const event::OptionSpec& option, int week,
+void apply_event_effects(GameState& state, Project& work, const std::vector<EffectView>& effects, int week,
                          const std::string& event_id) {
     std::vector<Staff*> targets;
     for (auto& member : state.staff) {
@@ -952,7 +953,7 @@ void apply_event_effects(GameState& state, Project& work, const event::OptionSpe
             if (member.employment == "core") targets.push_back(&member);
         }
     }
-    for (const auto& effect : option.effects) {
+    for (const auto& effect : effects) {
         if (effect.target == "quality") {
             adjust_quality(work, effect.scope == "stage" ? effect.stage : std::string{}, effect.value);
             continue;
@@ -990,33 +991,30 @@ std::string resolve_event(const std::string& input) {
         const Json request = Json::parse(input);
         GameState state = decode_state(request);
         if (state.company.status != "running") return encode(error_body("COMPANY_ENDED", "公司已结束"));
-        if (!request.contains("event_id") || !request.at("event_id").is_string() ||
+        // M0 命令 19（PR #94 冻结）：work_id / event_id / option_id 全部必填。
+        if (!request.contains("work_id") || !request.at("work_id").is_string() ||
+            !request.contains("event_id") || !request.at("event_id").is_string() ||
             !request.contains("option_id") || !request.at("option_id").is_string()) {
-            return encode(error_body("INVALID_INPUT", "event_id 与 option_id 必须是字符串"));
+            return encode(error_body("INVALID_INPUT", "work_id、event_id 与 option_id 必须是字符串"));
         }
-        std::string work_id;
-        if (request.contains("work_id") && !request.at("work_id").is_null()) {
-            if (!request.at("work_id").is_string()) {
-                return encode(error_body("INVALID_INPUT", "work_id 必须是字符串或 null"));
-            }
-            work_id = request.at("work_id").get<std::string>();
-        }
+        const std::string work_id = request.at("work_id").get<std::string>();
         const std::string event_id = request.at("event_id").get<std::string>();
         const std::string option_id = request.at("option_id").get<std::string>();
+        if (work_id.empty()) return encode(error_body("INVALID_INPUT", "work_id 不能为空"));
 
         const auto pre_errors = validate(state);
         if (!pre_errors.empty()) return encode(error_body("INVALID_STATE", pre_errors.front()));
 
-        const auto resolution = event::inspect(state, event_id, work_id, option_id);
-        if (resolution.spec == nullptr || resolution.option == nullptr) {
+        // 只读 pending 里的冻结快照，不回查可能已变化的内容目录。
+        const auto resolution = event::inspect(state, work_id, event_id, option_id);
+        if (resolution.pending == nullptr || resolution.option == nullptr) {
             return encode(error_body(resolution.code.c_str(), resolution.message));
         }
 
-        // 定位到具体的那一条 pending（work_id 为空时 inspect 已保证唯一）。
         std::size_t index = state.events.pending.size();
         for (std::size_t i = 0; i < state.events.pending.size(); ++i) {
             const auto& pending = state.events.pending[i];
-            if (pending.event_id == event_id && (work_id.empty() || pending.work_id == work_id)) {
+            if (pending.event_id == event_id && pending.work_id == work_id) {
                 index = i;
                 break;
             }
@@ -1033,21 +1031,22 @@ std::string resolve_event(const std::string& input) {
                 -resolution.option->cost, std::nullopt, event_id});
             state.finance.balance -= resolution.option->cost;
         }
-        apply_event_effects(state, *work, *resolution.option, week, event_id);
+        apply_event_effects(state, *work, resolution.option->effects, week, event_id);
 
         auto& entry = state.events.per_work[owner_id];
-        if (resolution.spec->cooldown_weeks > 0) {
-            entry.cooldowns[resolution.spec->id] = week + resolution.spec->cooldown_weeks;
+        if (resolution.pending->cooldown_weeks > 0) {
+            entry.cooldowns[event_id] = week + resolution.pending->cooldown_weeks;
         }
-        if (resolution.spec->once_per_project &&
-            std::find(entry.major_seen.begin(), entry.major_seen.end(), resolution.spec->id) == entry.major_seen.end()) {
-            entry.major_seen.push_back(resolution.spec->id);
+        if (resolution.pending->once_per_project &&
+            std::find(entry.major_seen.begin(), entry.major_seen.end(), event_id) == entry.major_seen.end()) {
+            entry.major_seen.push_back(event_id);
         }
+        const std::string message = resolution.pending->name.empty() ? event_id : resolution.pending->name;
         state.events.pending.erase(state.events.pending.begin() + static_cast<std::ptrdiff_t>(index));
 
         const auto post_errors = validate(state);
         if (!post_errors.empty()) return encode(error_body("INTERNAL_ERROR", "处理后状态非法: " + post_errors.front()));
-        return encode(Json{{"state", state}, {"message", "已处理「" + resolution.spec->name + "」"}});
+        return encode(Json{{"state", state}, {"message", "已处理「" + message + "」"}});
     } catch (const Json::exception&) {
         return encode(error_body("INVALID_INPUT", "JSON 或字段类型无效"));
     } catch (...) {

@@ -112,7 +112,9 @@ bool parse_card(const Json& raw, Checker& checker, std::set<std::string>& ids, E
         checker.fail(id, "random_weight", "random_weight 必须在 0..1000");
     }
     const int expires = int_field(raw, "expires_weeks", 0);
-    if (expires < 0 || expires > 8) checker.fail(id, "expires_weeks", "expires_weeks 必须在 0..8");
+    // 首版没有处理期限/超时升级的运行时行为（M2-b 规则未落地），
+    // 严格拒绝非 0，避免内容作者误以为到期会产生效果。
+    if (expires != 0) checker.fail(id, "expires_weeks", "首版不支持处理期限，expires_weeks 必须为 0");
 
     // trigger
     std::string metric, op;
@@ -413,11 +415,24 @@ bool candidate_before(const EventSpec* left, const EventSpec* right) {
 PendingEvent build_instance(const EventSpec& spec, const std::string& work_id, int week) {
     PendingEvent event;
     event.event_id = spec.id;
+    event.name = spec.name;
     event.work_id = work_id;
     event.triggered_week = week;
+    event.cooldown_weeks = spec.cooldown_weeks;
+    event.once_per_project = spec.once_per_project;
     if (spec.expires_weeks > 0) event.expires_week = week + spec.expires_weeks;
     for (const auto& option : spec.options) {
-        event.options.push_back(EventOptionView{option.id, option.label, option.kind, option.risk_hint, option.cost});
+        EventOptionView view;
+        view.id = option.id;
+        view.label = option.label;
+        view.kind = option.kind;
+        view.risk_hint = option.risk_hint;
+        view.cost = option.cost;
+        // 冻结完整效果载荷：存档或目录更新后仍执行触发时的效果。
+        for (const auto& effect : option.effects) {
+            view.effects.push_back(EffectView{effect.scope, effect.target, effect.stage, effect.value});
+        }
+        event.options.push_back(std::move(view));
     }
     return event;
 }
@@ -463,30 +478,20 @@ Json draw(GameState& state, int week) {
     return Json{{"drawn", !drawn.empty()}, {"count", static_cast<int>(drawn.size())}, {"events", drawn}};
 }
 
-Resolution inspect(const GameState& state, const std::string& event_id, const std::string& work_id,
+Resolution inspect(const GameState& state, const std::string& work_id, const std::string& event_id,
                    const std::string& option_id) {
     Resolution result;
-    std::vector<const PendingEvent*> matches;
     for (const auto& event : state.events.pending) {
-        if (event.event_id == event_id && (work_id.empty() || event.work_id == work_id)) matches.push_back(&event);
+        if (event.work_id != work_id || event.event_id != event_id) continue;
+        result.pending = &event;
+        break;
     }
-    if (matches.empty()) {
+    if (result.pending == nullptr) {
         result.code = "NOT_FOUND";
-        result.message = work_id.empty() ? "当前没有该待处理事件" : "该项目没有该待处理事件";
+        result.message = "该项目没有该待处理事件";
         return result;
     }
-    if (matches.size() > 1) {
-        result.code = "INVALID_INPUT";
-        result.message = "多个项目存在同名事件，请指定 work_id";
-        return result;
-    }
-    result.spec = find(event_id);
-    if (result.spec == nullptr) {
-        result.code = "NOT_FOUND";
-        result.message = "事件不在当前内容目录中";
-        return result;
-    }
-    for (const auto& option : result.spec->options) {
+    for (const auto& option : result.pending->options) {
         if (option.id == option_id) result.option = &option;
     }
     if (result.option == nullptr) {

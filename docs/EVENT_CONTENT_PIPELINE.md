@@ -37,7 +37,7 @@ content/events/
   "once_per_project": false,         // 重大事件必须 true
   "trigger": { "metric": "stage_quality", "op": "<", "threshold": 55 },
   "random_weight": 0,                // 0..1000‰；表现条件不成立时按此概率进随机池
-  "expires_weeks": 0,                // 0 = 无期限；>0 时记录绝对截止周
+  "expires_weeks": 0,                // 首版必须为 0；期限/超时升级未实现，非 0 会被校验拒绝
   "description": "…",
   "foreshadow": "…",                 // 可选：前兆文案
   "options": [
@@ -108,8 +108,10 @@ npm run test:v4              # 构建 WASM 并跑契约测试（需 emsdk）
 - `events.pending` 是数组；每个 `producing` 项目每周最多触发一个事件，不同项目可以在同一周各自触发。
 - 已有待处理事件的项目不会再次抽取；新事件不得覆盖、丢弃或合并旧事件。
 - 数组非空时 `advance_week()` 返回 `INVALID_PHASE`；全部处理完才允许推进。
-- `resolve_event(event_id, option_id)` 增加可选 `work_id`：同名事件跨项目时必须指定，否则返回 `INVALID_INPUT`；只删除命中的那一条。
+- `resolve_event(work_id, event_id, option_id)`：三个参数全部必填（M0 命令 19，PR #94 冻结）；只删除 `(work_id, event_id)` 命中的那一条，其他项目事件原样保留。
 - 冷却（`cooldown_weeks`）与重大事件 `major_seen` 都按项目记录在 `events.per_work[work_id]`。
+- **选项效果快照**：触发时把 `effects`（scope/target/stage/value）、`cost`、`cooldown_weeks`、`once_per_project` 与事件名一起冻结进 `events.pending[]`；`resolve_event` 只读快照，不回查内容目录。存档或卡片改版后，已触发事件仍执行触发时的效果。
+- `expires_week` 首版恒为 `null`；校验器与运行时都会拒绝非 0 `expires_weeks`。
 
 ## 6. 旧样例迁移映射
 
@@ -128,16 +130,17 @@ npm run test:v4              # 构建 WASM 并跑契约测试（需 emsdk）
 
 ## 7. 测试与证据
 
-`scripts/v4.test.mjs` 新增 6 条（总 31 条）：
+`scripts/v4.test.mjs` 共 32 条，其中事件相关 7 条：
 
 1. 内嵌目录 7 张卡、无 issue、id 稳定；
-2. 非法卡夹具：重复 id、未知 target、`funds` 为正、缺 label、schema_version 错误、空目录，错误定位到 card/field；
-3. 双项目同周各自触发，互不覆盖；同名事件不带 `work_id` 被拒；处理一条后另一条保留；
+2. 非法卡夹具：重复 id、未知 target、`funds` 为正、缺 label、schema_version 错误、`expires_weeks≠0`、空目录，错误定位到 card/field；
+3. 双项目同周各自触发，互不覆盖；省略 `work_id` 被拒；处理一条后另一条保留；
 4. 效果只作用于归属项目（A 质量 −3，B 不变）；
 5. 重大事件同项目只触发一次，下一周让位给普通事件；
-6. 同 seed 同操作，pending 与哈希一致；同项目多条 pending / 归属无效被 INV-23 拒绝。
+6. 同 seed 同操作，pending 与哈希一致；同项目多条 pending / 归属无效被 INV-23 拒绝；
+7. 选项效果快照：篡改快照后再走 JSON 往返，结算仍按快照值执行，不回查目录。
 
-本机无 Emscripten，31 条用 MSVC 19.51 原生 JSON CLI 跑通（31/31）；`npm run test:v4` 仍需在有 emsdk 的环境复跑。
+本机无 Emscripten，32 条用 MSVC 19.51 原生 JSON CLI 跑通（32/32）；`npm run test:v4` 仍需在有 emsdk 的环境复跑。
 
 ## 8. 边界与后续
 

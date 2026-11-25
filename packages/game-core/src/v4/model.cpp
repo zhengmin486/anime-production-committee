@@ -337,16 +337,27 @@ void to_json(Json& j, const EventState& value) {
     for (const auto& event : value.pending) {
         Json options = Json::array();
         for (const auto& option : event.options) {
+            Json effects = Json::array();
+            for (const auto& effect : option.effects) {
+                effects.push_back(Json{{"scope", effect.scope},
+                                       {"target", effect.target},
+                                       {"stage", effect.stage},
+                                       {"value", effect.value}});
+            }
             options.push_back(Json{{"id", option.id},
                                    {"label", option.label},
                                    {"kind", option.kind},
                                    {"risk_hint", option.risk_hint},
-                                   {"cost", option.cost}});
+                                   {"cost", option.cost},
+                                   {"effects", effects}});
         }
         pending.push_back(Json{{"event_id", event.event_id},
+                               {"name", event.name},
                                {"work_id", event.work_id},
                                {"triggered_week", event.triggered_week},
                                {"expires_week", event.expires_week ? Json(*event.expires_week) : Json(nullptr)},
+                               {"cooldown_weeks", event.cooldown_weeks},
+                               {"once_per_project", event.once_per_project},
                                {"options", options}});
     }
     Json per_work = Json::object();
@@ -367,20 +378,34 @@ void from_json(const Json& j, EventState& value) {
             if (!raw.is_object()) continue;
             PendingEvent event;
             event.event_id = raw.value("event_id", std::string{});
+            event.name = raw.value("name", std::string{});
             event.work_id = raw.value("work_id", std::string{});
             event.triggered_week = raw.value("triggered_week", 0);
+            event.cooldown_weeks = raw.value("cooldown_weeks", 0);
+            event.once_per_project = raw.value("once_per_project", false);
             if (raw.contains("expires_week") && raw.at("expires_week").is_number_integer()) {
                 event.expires_week = raw.at("expires_week").get<int>();
             }
             if (raw.contains("options") && raw.at("options").is_array()) {
                 for (const auto& option : raw.at("options")) {
                     if (!option.is_object()) continue;
-                    event.options.push_back(EventOptionView{
-                        option.value("id", std::string{}),
-                        option.value("label", std::string{}),
-                        option.value("kind", std::string{}),
-                        option.value("risk_hint", std::string{}),
-                        option.value("cost", 0)});
+                    EventOptionView view;
+                    view.id = option.value("id", std::string{});
+                    view.label = option.value("label", std::string{});
+                    view.kind = option.value("kind", std::string{});
+                    view.risk_hint = option.value("risk_hint", std::string{});
+                    view.cost = option.value("cost", 0);
+                    if (option.contains("effects") && option.at("effects").is_array()) {
+                        for (const auto& effect : option.at("effects")) {
+                            if (!effect.is_object()) continue;
+                            view.effects.push_back(EffectView{
+                                effect.value("scope", std::string{}),
+                                effect.value("target", std::string{}),
+                                effect.value("stage", std::string{}),
+                                effect.value("value", 0)});
+                        }
+                    }
+                    event.options.push_back(std::move(view));
                 }
             }
             value.pending.push_back(std::move(event));

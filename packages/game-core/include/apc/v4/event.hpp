@@ -80,15 +80,15 @@ const EventSpec* find(const std::string& id);
 // 追加到 events.pending（不覆盖、不丢弃已有事件）。返回周回执片段。
 Json draw(GameState& state, int week);
 
-// 选项校验：成功时 spec/option 非空；失败时 code/message 非空。
+// 选项校验：只读待处理事件里的冻结快照，不回查内容目录。
 struct Resolution {
-    const EventSpec* spec = nullptr;
-    const OptionSpec* option = nullptr;
+    const PendingEvent* pending = nullptr;
+    const EventOptionView* option = nullptr;
     std::string code;
     std::string message;
 };
-// work_id 为空时要求 event_id 在 pending 中唯一，否则返回 INVALID_INPUT。
-Resolution inspect(const GameState& state, const std::string& event_id, const std::string& work_id,
+// M0 命令 19：resolve_event(work_id, event_id, option_id)，work_id 必填。
+Resolution inspect(const GameState& state, const std::string& work_id, const std::string& event_id,
                    const std::string& option_id);
 
 // 测试/构建诊断入口：返回 { ok, count, ids, issues:[{source,card_id,field,message}] }。
