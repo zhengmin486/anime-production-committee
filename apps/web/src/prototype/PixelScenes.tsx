@@ -310,15 +310,29 @@ function Tree({ x, y, scale = 1 }: { x: number; y: number; scale?: number }) {
   </g>
 }
 
+function MeetingPaper({ x, y, width, height, color }: { x: number; y: number; width: number; height: number; color: string }) {
+  const nearScale = .35 + (y - 250) * .65 / 270
+  const farScale = .35 + (y - height - 250) * .65 / 270
+  const ratio = farScale / nearScale
+  const farWidth = width * ratio
+  const farCenter = 600 + (x + width / 2 - 600) * ratio
+  return <path data-meeting-paper d={`M${x} ${y}H${x + width}L${farCenter + farWidth / 2} ${y - height}H${farCenter - farWidth / 2}z`} fill={color} />
+}
+
 function MeetingRoom() {
   const chairs = [0.08, 0.25, 0.43, 0.62, 0.82, 0.98].map((depth) => ({
-    y: 249 + depth * 276,
-    left: 500 - depth * 180,
-    right: 700 + depth * 180,
-    size: .62 + depth * .55,
+    y: 250 + depth * 230,
+    left: 510 - depth * 245,
+    right: 690 + depth * 245,
+    size: .55 + depth * .45,
   }))
+  const floorRows = [244, 270, 305, 350, 405, 472]
+  const floorColumns = Array.from({ length: 13 }, (_, index) => -120 + index * 120)
+  const floorBackLeft = 425.64
+  const floorBackRight = 774.36
+  const floorPath = `M${floorBackLeft} 228H${floorBackRight}L1200 560H0z`
   return <>
-    <defs><clipPath id="meeting-floor"><rect x="0" y="228" width="1200" height="332" /></clipPath></defs>
+    <defs><clipPath id="meeting-floor"><path d={floorPath} /></clipPath></defs>
     <rect width="1200" height="560" fill="#b8d7d2" />
     <path d="M0 142h1200v74H0z" fill="#82b7aa" />
     <path d="M0 191h1200v55H0z" fill="#9bc6bd" />
@@ -331,23 +345,15 @@ function MeetingRoom() {
     <path d="M521 116h155M521 139h119" stroke="#849d8e" strokeWidth="7" />
     <rect x="516" y="93" width="12" height="12" fill="#c8795a" /><rect x="516" y="116" width="12" height="12" fill="#d7b65f" />
     <rect x="565" y="184" width="70" height="14" fill="#43534e" /><rect x="593" y="198" width="14" height="32" fill="#43534e" />
-    <rect x="0" y="228" width="1200" height="332" fill="#c4a277" />
-    <g clipPath="url(#meeting-floor)">
-      <path d="M600 228L-260 560M398 228L0 560M600 228L80 560M600 228L420 560M600 228L780 560M802 228L1200 560M600 228L1120 560M600 228L1460 560" stroke="#aa875f" strokeWidth="3" />
-      {[0, 1, 2, 3].map((index) => <path key={index} d={`M0 ${286 + index * 74}h1200`} stroke="#aa875f" strokeWidth="3" />)}
+    <path d={`M0 228H${floorBackLeft}L0 560zM${floorBackRight} 228H1200L1200 560z`} fill="#9eb5a5" />
+    <path data-meeting-floor d={floorPath} fill="#c4a277" />
+    <g data-meeting-floor-seams clipPath="url(#meeting-floor)">
+      <path d={floorColumns.map((x) => `M600 92L${x} 560`).join('')} stroke="#aa875f" strokeWidth="3" />
+      {floorRows.map((y) => <path key={y} d={`M0 ${y}H1200`} stroke="#aa875f" strokeWidth="3" />)}
     </g>
-    <path d="M259 512L941 512 727 251H473z" fill="#c8b995" opacity=".72" />
-    <path d="M0 34L398 123v304L0 560zM1200 34L802 123v304l398 133z" fill="#a9c8c3" opacity=".2" />
-    <path d="M0 34L398 123v304L0 560zM1200 34L802 123v304l398 133z" fill="none" stroke="#596e68" strokeWidth="10" />
-    <path d="M0 78L398 137M1200 78L802 137" stroke="#657b73" strokeWidth="7" />
-    <path d="M199 70V449M1001 70V449M398 123v304M802 123v304" stroke="#657b73" strokeWidth="8" />
-    <path d="M282 518L918 518 704 244h-208z" fill="#654736" />
-    <path d="M282 505L918 505 704 244h-208z" fill="#8b6044" />
-    <path d="M330 505L870 505 680 277h-160z" fill="#986b4b" />
-    <path d="M600 277v228" stroke="#7d563e" strokeWidth="3" />
-    <path d="M326 518l544 0v14l-544 0z" fill="#654636" />
-    <path d="M344 532v-64M856 532v-64M600 520v-86" stroke="#543d31" strokeWidth="12" />
-    {chairs.map(({ y, left, right, size }, index) => <g key={index}>
+    <path d={`M${floorBackLeft} 228L0 560M${floorBackRight} 228L1200 560`} fill="none" stroke="#92734f" strokeWidth="5" />
+    <path d="M0 548H1200V560H0z" fill="#4b9cb5" />
+    {chairs.map(({ y, left, right, size }, index) => <g key={index} data-meeting-chair>
       <g transform={`translate(${left - 37 * size} ${y + 15 * size}) scale(${size})`}>
         <rect x="-23" y="-34" width="46" height="40" fill="#405a54" /><rect x="-18" y="-29" width="36" height="29" fill="#57736b" />
         <rect x="-28" y="1" width="56" height="14" fill="#405a54" /><rect x="-19" y="15" width="8" height="25" fill="#334944" /><rect x="11" y="15" width="8" height="25" fill="#334944" />
@@ -359,22 +365,34 @@ function MeetingRoom() {
         <path d="M-19 40v8M11 40v8M-27 48h8M8 48h8" stroke="#33443f" strokeWidth="4" />
       </g>
     </g>)}
-    {chairs.slice(2).map(({ y, size }, index) => <g key={index}>
-      <rect x={559 - index * 2} y={y - 11 * size} width={28 * size} height="17" fill="#ede2c4" />
-      <rect x={610 + index * 2} y={y + 4 * size} width={28 * size} height="17" fill="#d8cba9" />
-    </g>)}
-    <g transform="translate(600 305)">
-      <rect x="-13" y="-21" width="26" height="31" fill="#e8dfc4" /><path d="M-6-9h12M-6-3h8" stroke="#809687" strokeWidth="3" />
-      <rect x="-16" y="10" width="32" height="17" fill="#6f4d39" /><rect x="-12" y="14" width="24" height="4" fill="#c7ad82" />
-    </g>
-    <g transform="translate(1070 219)">
+    <g data-meeting-person><PixelPerson x={170} y={526} color="#536f70" hair="#4b3b34" role="producer" scale={.96} /></g>
+    <g data-meeting-person><PixelPerson x={1030} y={526} color="#987252" hair="#393339" flip role="artist" scale={.96} /></g>
+    <g transform="translate(1030 475) scale(.55)">
       <rect width="73" height="86" fill="#6f563f" /><rect x="9" y="11" width="55" height="64" fill="#b89666" />
       <path d="M25 12V-35M44 12v-52M58 12V-24" stroke="#50735c" strokeWidth="9" />
       <path d="M25-25L11-10 25 2 40-10zM44-35L25-17l19 13 19-17zM58-18L45-4l13 11 17-15z" fill="#6e9473" />
     </g>
-    <PixelPerson x={310} y={526} color="#536f70" hair="#4b3b34" role="producer" scale={.96} />
-    <PixelPerson x={882} y={527} color="#987252" hair="#393339" flip role="artist" scale={.96} />
-    <path d="M0 548h1200v12H0z" fill="#4b9cb5" />
+    <g data-meeting-table>
+      <path d="M240 520H960V534H240z" fill="#654636" />
+      <path d="M270 534V548M930 534V548" stroke="#543d31" strokeWidth="12" />
+      <path data-meeting-tabletop d="M240 520L960 520 726 250H474z" fill="#8b6044" />
+      <path d="M240 520L960 520 726 250H474z" fill="none" stroke="#543d31" strokeWidth="5" />
+      {chairs.slice(2).map(({ y, size }, index) => {
+        const paperY = y + 10 * size
+        const scale = .35 + (paperY - 250) * .65 / 270
+        const width = 42 * scale
+        const leftEdge = 240 + (520 - paperY) * 234 / 270
+        const rightEdge = 960 - (520 - paperY) * 234 / 270
+        return <g key={index}>
+          <MeetingPaper x={leftEdge + 26 * scale} y={paperY} width={width} height={24 * scale} color="#ede2c4" />
+          <MeetingPaper x={rightEdge - 26 * scale - width} y={paperY} width={width} height={24 * scale} color="#d8cba9" />
+        </g>
+      })}
+      <g transform="translate(600 305)">
+        <rect x="-13" y="-21" width="26" height="31" fill="#e8dfc4" /><path d="M-6-9h12M-6-3h8" stroke="#809687" strokeWidth="3" />
+        <rect x="-16" y="10" width="32" height="17" fill="#6f4d39" /><rect x="-12" y="14" width="24" height="4" fill="#c7ad82" />
+      </g>
+    </g>
   </>
 }
 

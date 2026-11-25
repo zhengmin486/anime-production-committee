@@ -234,6 +234,33 @@ it('四场景以办公室为主入口，导航与数字快捷键共享同一状�
   expect(screen.getByRole('region', { name: '办公室场景' })).toBeVisible()
 })
 
+it('会议室地砖收敛到单一消失点，加宽桌体位于座椅与人物之上', async () => {
+  const user = userEvent.setup()
+  await user.click(screen.getByRole('button', { name: /会议室/ }))
+  const room = screen.getByRole('img', { name: /长会议室/ })
+  const floor = room.querySelector('[data-meeting-floor]')
+  const seams = room.querySelector('[data-meeting-floor-seams]')
+  const table = room.querySelector('[data-meeting-table]')
+
+  expect(floor?.getAttribute('d')).toBe('M425.64 228H774.36L1200 560H0z')
+  expect(room.querySelector('path[stroke="#92734f"]')?.getAttribute('d')).toBe('M425.64 228L0 560M774.36 228L1200 560')
+  expect(seams?.getAttribute('clip-path')).toBe('url(#meeting-floor)')
+  expect(seams?.querySelector('path')?.getAttribute('d')?.match(/M600 92L/g)).toHaveLength(13)
+  expect(seams?.querySelectorAll('path')).toHaveLength(7)
+  expect(room.querySelector('path[stroke="#657b73"]')).toBeNull()
+  expect(table?.querySelector('path')?.getAttribute('d')).toBe('M240 520H960V534H240z')
+  expect(table?.querySelector('[data-meeting-tabletop]')?.getAttribute('fill')).toBe('#8b6044')
+  expect(table?.querySelector('[fill="#986b4b"]')).toBeNull()
+  const papers = table?.querySelectorAll('[data-meeting-paper]') ?? []
+  expect(papers).toHaveLength(8)
+  for (const paper of papers) expect(paper.getAttribute('d')).toMatch(/H.*L.*H/)
+  expect(room.querySelectorAll('[data-meeting-chair]')).toHaveLength(6)
+  expect(room.querySelectorAll('[data-meeting-person]')).toHaveLength(2)
+  for (const item of room.querySelectorAll('[data-meeting-chair], [data-meeting-person]')) {
+    expect(item.compareDocumentPosition(table!) & Node.DOCUMENT_POSITION_FOLLOWING).toBe(Node.DOCUMENT_POSITION_FOLLOWING)
+  }
+})
+
 it('工作室单集选择与展开内容在离开场景后保留', async () => {
   const user = userEvent.setup()
   const nav = screen.getByRole('navigation', { name: '场景切换' })
