@@ -85,6 +85,7 @@
 - [玩法痛点专项研究与验证计划](PLAYABILITY_FOCUSED_RESEARCH_AND_VALIDATION_2026-11-24.md)
 - [重构审查与合并登记](REBUILD_REVIEW_AND_MERGE_REGISTER_2026-11-24.md)
 - [统一重构审查清单](UNIFIED_REBUILD_REVIEW_CHECKLIST_2026-11-24.md)
+- [集数规模、工作量与开局路线初稿（2026-11-26）](PRODUCTION_SCALE_AND_OPENING_ROUTES_DRAFT_2026-11-26.md)：独立设计初稿，记录短篇/10集/12集/14集以上规格、标准 TV 等效产量、4 人开局及单线/多线平衡方向；具体参数尚未冻结。
 
 以上文件的存在不代表其中所有提案均已生效；当前玩法以 DECISION_LOG.md、当前架构以 DOMAIN_ARCHITECTURE.md v1.4 为准，工作分工以 GitHub Issues 实时状态为准。
 
