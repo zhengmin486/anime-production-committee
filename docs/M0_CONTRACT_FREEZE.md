@@ -72,7 +72,7 @@ SaveRecord { version: 4, savedAt: ISO8601, rules_version: string, state: GameSta
 | 对象 | 必填 | 可空 | 关键约束 |
 | --- | --- | --- | --- |
 | `Company` | id, name, founded_week, week, status, reputation, reputation_log | end_reason（仅 running 为 null）, facilities（可空数组） | week ∈ [0,520]；status=running ⇒ week<520 |
-| `Staff` | id, name, role, employment, abilities, experience, potential, revealed_potential, talent_type, weekly_salary, project_fee, fatigue, morale, departure_warning, assignment_work_id | last_participation, temporary_contract | core ⇒ weekly_salary>0 ∧ project_fee=0；temp 反之；temp 的 assignment_work_id = 合同项目 |
+| `Staff` | id, name, role, employment, abilities, experience, potential, revealed_potential, talent_type, weekly_salary, signing_fee, fatigue, morale, departure_warning, assignment_work_id | last_participation, temporary_contract | core 与 temporary 的 `weekly_salary` 均大于 0；临时员工另有一次性 `signing_fee`，且 `assignment_work_id = temporary_contract.work_id` |
 | `Project` | id, offer, mode, investment, channels, opened_week, deadline_week, extension, status, common, episodes, plan | ip_id, committee_id, tv_service, delivery | committee 模式才可有 committee_id；episodes 长度 = offer.episode_count |
 | `CommonProduction` | id, items | — | items 非空 |
 | `EpisodeProduction` | id, index, stages | — | stages 恰 6 个，键固定有序 |
@@ -134,10 +134,10 @@ SaveRecord { version: 4, savedAt: ISO8601, rules_version: string, state: GameSta
 | 2 | `start_work(offer_id, mode, percent, committee_partner_ids)` | running ∧ 非危机 ∧ 企划存在 ∧ 声望与成绩达标 ∧ 模式合法 ∧ 现金 ≥ 投资额 | NOT_FOUND / MODE_NOT_ALLOWED / INSUFFICIENT_FUNDS / CRISIS_COMMITMENT_BLOCKED | 项目+委员会+两笔账+消费企划，一次提交 |
 | 3 | `set_work_plan(work_id, plan)` | 项目 producing ∧ target 引用本项目单集/阶段且至多一个 | NOT_FOUND / INVALID_INPUT | 仅更新计划 |
 | 4 | `assign_staff(staff_id, work_id \| null)` | 项目 producing ∧ 员工存在 ∧ 不违反单项目 | NOT_FOUND / INVALID_PHASE | 仅更新归属 |
-| 5 | `hire_core(staff_id)` | running ∧ 现金充足 | NOT_FOUND / INSUFFICIENT_FUNDS | 名册+签约费 |
-| 6 | `scout(role?, focus_ability?)` | running ∧ 现金充足 ∧ 招聘池非空 | INSUFFICIENT_FUNDS | 池+保底计数+费用 |
-| 7 | `dismiss_staff(staff_id)` | running ∧ 员工存在 | NOT_FOUND | 名册+遣散费+清空归属 |
-| 8 | `hire_temporary(work_id, candidate_id)` | 项目 producing ∧ 现金充足 | NOT_FOUND / INSUFFICIENT_FUNDS | 临时合同+项目费 |
+| 5 | `hire_core(staff_id)` | running ∧ 非危机 ∧ 候选人有效 ∧ 现金足够支付一次性招聘/签约费用 | NOT_FOUND / INSUFFICIENT_FUNDS / CRISIS_COMMITMENT_BLOCKED | 名册+一次性费用即时入账；下一次周结算起可分配并计薪 |
+| 6 | `scout(role?, focus_ability?)` | running ∧ 非危机 ∧ 招聘池非空 ∧ 现金足够支付费用 | INSUFFICIENT_FUNDS / CRISIS_COMMITMENT_BLOCKED | 候选池/保底计数更新、一次性费用即时入账；录用后下一次周结算起可分配并计薪 |
+| 7 | `dismiss_staff(staff_id)` | running ∧ 员工存在且为核心员工 ∧ 公司核心员工数 > 1 | NOT_FOUND / INVALID_INPUT | 移出名册、清空归属；不产生预付遣散费 |
+| 8 | `hire_temporary(work_id, candidate_id)` | 项目 producing ∧ 非危机 ∧ 候选人有效 ∧ 现金足够支付签约费 | NOT_FOUND / INSUFFICIENT_FUNDS / CRISIS_COMMITMENT_BLOCKED | 建立项目绑定合同、签约费即时扣除；周薪从下一次周结算起计提并计入该项目成本 |
 | 9 | `sign_outsourcing(work_id, item_id, supplier_id, work_total, mode)` | 工作项已解锁 ∧ 专业匹配 ∧ 产能余量 ∧ 现金 | DEPENDENCY_UNMET / CAPACITY_EXCEEDED / INSUFFICIENT_FUNDS | 合同+费用+占用 |
 | 10 | `deliver_work(work_id)` | 全部门槛项 delivered ∧ 未过截止 ∧ 项目 producing | GATE_UNMET / INVALID_PHASE | 当次完成交付结算（周数不变） |
 | 11 | `abort_work(work_id)` | 项目 producing | NOT_FOUND | 终止+扣罚+释放占用 |
@@ -148,12 +148,14 @@ SaveRecord { version: 4, savedAt: ISO8601, rules_version: string, state: GameSta
 | 16 | `request_extension(work_id)` | 委员会模式 ∧ 未用过 ∧ 未过截止 ∧ 非危机 ∧ 现金 | MODE_NOT_ALLOWED / INSUFFICIENT_FUNDS | 延期+费用 |
 | 17 | `arrange_financing(provider, amount)` | 危机中或资金压力周 ∧ 额度未超 | INSUFFICIENT_FUNDS / INVALID_PHASE | 现金入账+贷款 |
 | 18 | `advance_week()` | running ∧ `events.pending[]` 为空 ∧ week<520 ∧ 非 closing | INVALID_PHASE | 整周结算（正常 13 阶段 / 危机 7 步） |
-| 19 | `resolve_event(event_id, option_id)` | 存在该待处理事件 ∧ 选项合法 ∧ 现金充足 | NOT_FOUND / INSUFFICIENT_FUNDS | 效果分派+清空事件 |
+| 19 | `resolve_event(event_id, option_id)` | `events.pending[]` 中存在指定事件 ∧ 选项合法 ∧ 现金充足（若需付款） | NOT_FOUND / INSUFFICIENT_FUNDS | 效果分派+仅移除指定事件，其他待处理事件保留 |
 | 20 | `end_company()` | running | INVALID_PHASE | 锁 closing，未交付转 delivering |
 | 21 | `finalize_delivery(work_id)` | 项目 delivering（关闭路径） | INVALID_PHASE | 交付结算 |
 | 22 | `finalize_company()` | 公司 ended 且项目已结清 | INVALID_PHASE | 生成结局，只执行一次 |
 
 **通用原子性**：除 `initialize_game` 外，所有命令都是"工作副本 + 一次提交"。任一守卫或内部步骤失败 ⇒ 状态与调用前逐字段一致。
+
+**员工费用与退出补充约束（DEC-STAFF-003 / DEC-ECON-001 / DEC-PLAY-003）**：核心员工与临时员工均按周支付周薪；临时员工另有一次性签约费，签约费即时支付，周薪从招聘后的下一次周结算起计提。临时员工签约费与周薪均归属绑定项目。核心员工可随时解雇，但公司至少保留 1 名核心员工，解雇不产生预付遣散费。临时员工合同原则上持续至项目交付或中止并自动解绑；只有特定危机/裁减事件明确提供选项时才可提前解除，已发生签约费和周薪不追溯免除，解除后停止后续周薪。临时员工提前解除通过事件选项执行，不开放通用 `dismiss_staff` 解约路径。
 
 **通用幂等性**：命令不保证幂等；重复提交同一命令按新一次业务动作校验（例如重复 `deliver_work` 因项目已 settled 而失败）。
 
