@@ -133,21 +133,21 @@ SaveRecord { version: 4, savedAt: ISO8601, rules_version: string, state: GameSta
 | # | 命令 | 关键守卫 | 主要失败码 | 原子范围 |
 | --- | --- | --- | --- | --- |
 | 1 | `initialize_game(seed)` | 无（唯一不带 state 的命令） | INVALID_INPUT | 建立公司/名册/供应商/合作方/市场首轮 |
-| 2 | `start_work(offer_id, mode, percent, committee_partner_ids)` | running ∧ 企划存在且有效 ∧ 模式合法 ∧（普通企划满足 `min_reputation/required_works` ∨ 有效原创草稿存在）∧ 现金 ≥ 全部应付款 | NOT_FOUND / MODE_NOT_ALLOWED / INSUFFICIENT_FUNDS / CRISIS_COMMITMENT_BLOCKED | 项目+委员会+两笔账+消费企划，一次提交；原创在此正式开工 |
+| 2 | `start_work(offer_id, mode, percent, committee_partner_ids)` | running ∧ 企划存在且有效 ∧ 模式合法 ∧（普通企划满足 `min_reputation/required_works` ∨ 有效原创草稿存在）∧ 现金 ≥ 全部应付款 | NOT_FOUND / MODE_NOT_ALLOWED / INSUFFICIENT_FUNDS | 项目+委员会+两笔账+消费企划，一次提交；原创在此正式开工 |
 | 3 | `set_work_plan(work_id, plan)` | 项目 producing ∧ target 引用本项目单集/阶段且至多一个 | NOT_FOUND / INVALID_INPUT | 仅更新计划 |
 | 4 | `assign_staff(staff_id, work_id \| null)` | 项目 producing ∧ 员工存在 ∧ 不违反单项目 | NOT_FOUND / INVALID_PHASE | 仅更新归属 |
-| 5 | `hire_core(staff_id)` | running ∧ 候选人存在 ∧ 现金 ≥ signing_fee ∧ 名册上限（若有） | NOT_FOUND / INSUFFICIENT_FUNDS / CRISIS_COMMITMENT_BLOCKED | 签约即入职并加入核心名册，当周可分配；signing_fee 立即入账，首周周薪计入本周下一次周结算 |
-| 6 | `scout(role?, focus_ability?)` | running ∧ 非危机 ∧ 现金 ≥ 本次费用 ∧ 招聘池非空 | INSUFFICIENT_FUNDS / CRISIS_COMMITMENT_BLOCKED | 池+保底计数+费用 |
+| 5 | `hire_core(staff_id)` | running ∧ 候选人存在 ∧ 现金 ≥ signing_fee ∧ 名册上限（若有） | NOT_FOUND / INSUFFICIENT_FUNDS | 签约即入职并加入核心名册，当周可分配；signing_fee 立即入账，首周周薪计入本周下一次周结算 |
+| 6 | `scout(role?, focus_ability?)` | running ∧ 现金 ≥ 本次费用 ∧ 招聘池非空 | INSUFFICIENT_FUNDS | 池+保底计数+费用 |
 | 7 | `dismiss_staff(staff_id)` | running ∧ core 员工存在 ∧ 解雇后 core 数 ≥1 | NOT_FOUND / INVALID_INPUT | 移出名册+清空归属；不预付遣散费 |
-| 8 | `hire_temporary(work_id, candidate_id)` | running ∧ 非危机 ∧ 项目 producing ∧ 现金 ≥ signing_fee | NOT_FOUND / INSUFFICIENT_FUNDS / CRISIS_COMMITMENT_BLOCKED | 临时合同+signing_fee 即时入账；weekly_salary 从后续周结算计提；归属合同项目 |
+| 8 | `hire_temporary(work_id, candidate_id)` | running ∧ 项目 producing ∧ 现金 ≥ signing_fee | NOT_FOUND / INSUFFICIENT_FUNDS | 临时合同+signing_fee 即时入账；weekly_salary 从后续周结算计提；归属合同项目 |
 | 9 | `sign_outsourcing(work_id, item_id, supplier_id, work_total, mode)` | 工作项已解锁 ∧ 专业匹配 ∧ 产能余量 ∧ 现金 | DEPENDENCY_UNMET / CAPACITY_EXCEEDED / INSUFFICIENT_FUNDS | 合同+费用+占用 |
 | 10 | `deliver_work(work_id)` | 全部门槛项 delivered ∧ 未过截止 ∧ 项目 producing | GATE_UNMET / INVALID_PHASE | 当次完成交付结算（周数不变） |
 | 11 | `abort_work(work_id)` | 项目 producing | NOT_FOUND | 终止+扣罚+释放占用 |
-| 12 | `create_custom_offer(name, source, scale, style)` | running ∧ 非危机 ∧ 基础声望等草稿资格满足 ∧ 原创草稿槽可用；不检查全部投资资金 | CRISIS_COMMITMENT_BLOCKED / INVALID_INPUT | 只创建原创草稿，不建立 Project、不扣全部投资资金；草稿开发费时点待确认 |
+| 12 | `create_custom_offer(name, source, scale, style)` | running ∧ 基础声望等草稿资格满足 ∧ 原创草稿槽可用；不检查全部投资资金 | INVALID_INPUT | 只创建原创草稿，不建立 Project、不扣全部投资资金；草稿开发费时点待确认 |
 | 13 | `adopt_proposal()` | 存在提案 ∧ running | NOT_FOUND | 提案→自定槽 |
 | 14 | `reject_proposal()` | 存在提案 | NOT_FOUND | 清空提案 |
-| 15 | `buy_tv_service(work_id)` | 委员会模式 ∧ 未购买 ∧ 非危机 ∧ 现金 | MODE_NOT_ALLOWED / INSUFFICIENT_FUNDS | 渠道+发行费 |
-| 16 | `request_extension(work_id)` | 委员会模式 ∧ 未用过 ∧ 未过截止 ∧ 非危机 ∧ 现金 | MODE_NOT_ALLOWED / INSUFFICIENT_FUNDS | 延期+费用 |
+| 15 | `buy_tv_service(work_id)` | 委员会模式 ∧ 未购买 ∧ 现金 | MODE_NOT_ALLOWED / INSUFFICIENT_FUNDS | 渠道+发行费 |
+| 16 | `request_extension(work_id)` | 委员会模式 ∧ 未用过 ∧ 未过截止 ∧ 现金 | MODE_NOT_ALLOWED / INSUFFICIENT_FUNDS | 延期+费用 |
 | 17 | `arrange_financing(provider, amount)` | 资金压力周（未进入终局）∧ 额度未超 | INSUFFICIENT_FUNDS / INVALID_PHASE | 现金入账+贷款 |
 | 18 | `advance_week()` | running ∧ `events.pending[]` 为空 ∧ week<520 ∧ 非 closing | INVALID_PHASE | 八阶段原子周结算；刚性支出预检失败则回滚并直接破产终局 |
 | 19 | `resolve_event(work_id, event_id, option_id)` | 该 work 存在对应 pending 事件 ∧ 选项合法 ∧ 现金充足（若需付款） | NOT_FOUND / INVALID_INPUT / INSUFFICIENT_FUNDS | 效果分派；只移除 `(work_id,event_id)` 对应事件 |
