@@ -30,4 +30,12 @@ std::string hash_state(const std::string& input);        // {state}
 std::string initialize_game(const std::string& input);   // M0 命令 1：{seed}
 std::string set_work_plan(const std::string& input);     // M0 命令 3：{state, work_id, plan}
 
+// M2 单项目纵切：立项、交付、中止。
+// start_work 是 M0 命令 2 的 M2 切片：本阶段用请求内传入的 blueprint/offer
+// 代替 M3 的企划槽，只支持 contract 模式（委员会属 M4）；制作费在立项时
+// 一次性入账（DEC-COMM-003）。完整守卫待 M3/M4 接入企划与委员会后补齐。
+std::string start_work(const std::string& input);        // {state, work_id, blueprint, contract_budget, ...}
+std::string deliver_work(const std::string& input);      // M0 命令 10：{state, work_id}
+std::string abort_work(const std::string& input);        // M0 命令 11：{state, work_id}
+
 }  // namespace apc::v4
