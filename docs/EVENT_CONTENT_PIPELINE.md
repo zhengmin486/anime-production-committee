@@ -103,7 +103,16 @@ npm run test:v4              # 构建 WASM 并跑契约测试（需 emsdk）
   content/events/key_cut_rework.json: card key_cut_rework [options[1].effects[0].stage]: 效果阶段不在卡片适用阶段内
 ```
 
-## 5. 运行时仲裁（M0 §14.1）
+### 4.1 流水线门禁
+
+`.github/workflows/v4-contract.yml` 在改动 `content/events/**`、`packages/game-core/**`、事件脚本或该工作流本身时运行两个 job：
+
+- **事件内容校验**：`node scripts/validate-event-content.mjs`，随后重跑 `build-event-catalog.mjs` 并 `git diff --exit-code` 生成文件——只改内容不重跑打包即失败；
+- **v4 契约测试（WASM）**：现场安装 Emscripten SDK 后执行 `npm run test:v4`，即 §7 的全部用例（含快照 JSON 往返与查看语义）。
+
+此前的 `economic-simulator.yml` 只覆盖 Python 经济仿真，不构建 WASM；v4 契约测试的 CI 缺口由本工作流补上。工作流失败时以流水线实际结果为准，本地通过不能替代绿灯。
+
+## 5. 运行时仲裁（M0 §14.1 / §14.12）
 
 - `events.pending` 是数组；每个 `producing` 项目每周最多触发一个事件，不同项目可以在同一周各自触发。
 - 已有待处理事件的项目不会再次抽取；新事件不得覆盖、丢弃或合并旧事件。
@@ -111,8 +120,9 @@ npm run test:v4              # 构建 WASM 并跑契约测试（需 emsdk）
 - `advance_week()` 只拒绝**未查看**事件；已查看未处理事件允许推进并继续留在 pending。
 - `resolve_event(work_id, event_id, option_id)`：三个参数全部必填（M0 命令 19，PR #94 冻结）；只删除 `(work_id, event_id)` 命中的那一条，其他项目事件原样保留。
 - 冷却（`cooldown_weeks`）与重大事件 `major_seen` 都按项目记录在 `events.per_work[work_id]`。
+- 事件支出按 `category=events` 记入唯一账本，`work_id` 与 `memo`（事件 id）可归因；同一选项的 `cost` 与 `funds` 效果同周入账时条目 id 互不相同（INV-02）。
 - **选项效果快照**：触发时把 `effects`（scope/target/stage/value）、`cost`、`cooldown_weeks`、`once_per_project` 与事件名一起冻结进 `events.pending[]`；`resolve_event` 只读快照，不回查内容目录。存档或卡片改版后，已触发事件仍执行触发时的效果。
-- `expires_week` 首版恒为 `null`；校验器与运行时都会拒绝非 0 `expires_weeks`。**INV-29 的期限倒计时/默认分支/一次性升级尚未实现**：现有内容 schema 没有 `timeout` 默认分支与升级载荷字段，需先冻结内容字段再开放，避免内容作者误以为非 0 会产生行为。
+- `expires_week` 首版恒为 `null`；校验器与运行时都会拒绝非 0 `expires_weeks`。**M0 §14.11 的期限倒计时/默认分支/一次性升级尚未实现**：现有内容 schema 没有 `timeout` 默认分支与升级载荷字段，需先冻结内容字段再开放，避免内容作者误以为非 0 会产生行为。
 
 ## 6. 旧样例迁移映射
 
@@ -131,7 +141,7 @@ npm run test:v4              # 构建 WASM 并跑契约测试（需 emsdk）
 
 ## 7. 测试与证据
 
-`scripts/v4.test.mjs` 共 33 条，其中事件相关 8 条：
+`scripts/v4.test.mjs` 共 34 条，其中事件相关 9 条：
 
 1. 内嵌目录 7 张卡、无 issue、id 稳定；
 2. 非法卡夹具：重复 id、未知 target、`funds` 为正、缺 label、schema_version 错误、`expires_weeks≠0`、空目录，错误定位到 card/field；
@@ -140,9 +150,10 @@ npm run test:v4              # 构建 WASM 并跑契约测试（需 emsdk）
 5. 重大事件同项目只触发一次，下一周让位给普通事件；
 6. 同 seed 同操作，pending 与哈希一致；同项目多条 pending / 归属无效被 INV-23 拒绝；
 7. 选项效果快照：篡改快照后再走 JSON 往返，结算仍按快照值执行，不回查目录；
-8. 查看语义：只标记目标事件、查看不等于处理、未查看阻塞推进、全部查看后允许推进。
+8. 查看语义：只标记目标事件、查看不等于处理、未查看阻塞推进、全部查看后允许推进；
+9. 结算账务：同一选项的 `cost` 与 `funds` 效果同周入账时账本 id 不冲突（INV-02），现金不因事件转负。
 
-本机无 Emscripten，33 条用 MSVC 19.51 原生 JSON CLI 跑通（33/33）；`npm run test:v4` 仍需在有 emsdk 的环境复跑。
+本机 `.tools/emsdk` 可用，34 条已通过真实 WASM 构建复跑（`npm run test:v4`，34/34）；同一套用例另用 MSVC 19.51 原生 JSON 壳交叉验证过，原生壳只是临时工具、放在 `build/`（已 gitignore）不入库。
 
 ## 8. 边界与后续
 

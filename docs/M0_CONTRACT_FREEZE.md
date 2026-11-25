@@ -131,7 +131,7 @@ SaveRecord { version: 4, savedAt: ISO8601, rules_version: string, state: GameSta
 
 命令是**用例级**的：每个命令独立 schema、独立守卫、独立错误码，不存在"万能 decision 联合类型"。
 
-22 个命令（下表 19 行，其中两行各含多个命令）。
+23 个命令（下表 23 行，其中两行各含多个命令；命令 23 由 #50 追加，编号按合入顺序排在末尾，命令 19 的冻结编号不变）。
 
 | # | 命令 | 关键守卫 | 主要失败码 | 原子范围 |
 | --- | --- | --- | --- | --- |
@@ -157,6 +157,7 @@ SaveRecord { version: 4, savedAt: ISO8601, rules_version: string, state: GameSta
 | 20 | `end_company()` | running | INVALID_PHASE | 锁 closing，未交付转 delivering |
 | 21 | `finalize_delivery(work_id)` | 项目 delivering（关闭路径） | INVALID_PHASE | 交付结算 |
 | 22 | `finalize_company()` | 公司 ended 且项目已结清 | INVALID_PHASE | 生成结局，只执行一次 |
+| 23 | `view_event(work_id, event_id)` | 该 work 存在对应 pending 事件 ∧ 事件未查看（已查看按幂等成功） | NOT_FOUND / INVALID_INPUT / COMPANY_ENDED | 只把目标事件标记为已查看，解除它对命令 18 的阻塞；不结算、不扣款、不移除（语义见 §14.12） |
 
 **通用原子性**：除 `initialize_game` 外，所有命令都是"工作副本 + 一次提交"。任一守卫或内部步骤失败 ⇒ 状态与调用前逐字段一致。
 
@@ -517,4 +518,13 @@ v3 的单项目、五阶段、全局 phase、单事件槽、双份财务汇总�
 - 高权重关键事件可配置一次超时升级；升级沿用同一事件身份替换原 pending 条目，升级事件再次超时才触发预设硬性违约惩罚。最多升级一次，不得循环延期。
 - 超时处理按事件身份执行，不得覆盖或清除其他项目 pending；超时自动处理不需要玩家确认。
 - 事件期限、升级门槛、默认分支效果与违约惩罚数值由内容配置及数值标定确定。
+
+### 14.12 事件查看命令的工程登记（#50 落地增补）
+
+- 命令 23 `view_event(work_id, event_id)` 承载 §14.1"查看与处理分离"的查看动作：`work_id`、`event_id` 均为必填字符串，缺失或类型不符返回 `INVALID_INPUT`；pending 中无匹配项返回 `NOT_FOUND`；公司非 `running` 返回 `COMPANY_ENDED`。
+- 查看只把命中条目的 `viewed` 置为 `true`：不应用选项效果、不扣款、不记账、不写冷却、不改周数、不移除 pending；重复查看按幂等成功返回，回执 `{state, viewed, already_viewed}`。
+- 命令 18 的推进守卫只统计 `viewed=false` 的条目，`INVALID_PHASE` 消息给出未查看条数；已查看未处理事件原样保留在 `events.pending[]` 并可随周推进继续存在。
+- `events.pending[]` 每条必须带 `work_id/event_id/triggered_week/viewed`（INV-23）。`viewed` 缺失按非法输入拒绝，不静默当作未查看，避免旧形状存档被默认值放行推进。
+- 同一事件选项的 `cost` 与 `funds` 效果在同周产生多条流水时，账本条目 id 必须互不相同（INV-02）；事件强制支出以当前余额封顶，不得让现金转负。
+- 本条只登记已实现语义。§14.11 的到期倒计时、默认分支与一次性升级需要先在内容契约中冻结默认分支与升级载荷字段，首版 `expires_weeks` 仍按非 0 拒绝，作为未实现边界跟踪（#53 数据字典 / #13 内容标定）。
 
