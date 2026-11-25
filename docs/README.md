@@ -96,7 +96,7 @@
 | 经济实验 | [经济模拟报告 V0.2](ECONOMIC_SIMULATION_REPORT_V0.2.md)、[V0.3](ECONOMIC_SIMULATION_REPORT_V0.3.md)、[V0.4](ECONOMIC_SIMULATION_REPORT_V0.4.md)、[V0.5](ECONOMIC_SIMULATION_REPORT_V0.5.md)、[V0.6](ECONOMIC_SIMULATION_REPORT_V0.6.md)、[V1 平衡提案](V1_BALANCE_PROPOSAL.md) |
 | 事件系统 | [事件模块设计](EVENT_MODULE_DESIGN.md)、[事件内容指南](EVENT_CONTENT_GUIDE.md) |
 | 其他工程专项 | [核心校验器重构设计](CORE_VALIDATOR_REFACTOR_DESIGN.md)、[M2 集成检查表](M2_INTEGRATION_CHECKLIST.md)、[M2 集成审查](M2_INTEGRATION_REVIEW.md) |
-| 前端信息架构与原型 | [WP10 原型交付说明](FRONTEND_WP10_PROTOTYPE.md) |
+| 前端信息架构与原型 | [前端方向与信息架构（v2 候选）](FRONTEND_DIRECTION_DRAFT_2026-11-24.md)、[WP10 原型交付说明](FRONTEND_WP10_PROTOTYPE.md) |
 
 规则文档描述的是相应版本的规则口径；需要判断是否已实现时，必须进一步检查代码、测试和进度记录。
 
