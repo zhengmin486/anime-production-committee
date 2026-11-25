@@ -918,7 +918,7 @@ crisis --(deadline 用尽仍失败)--> 由应用层置 Company.closing/bankrupt
 ```text
 EventState {
   pending: [{ event_id, work_id, episode_id: null|episode_id, stage: null|stage_key,
-             item_id: null|item_id, triggered_week,
+             item_id: null|item_id, triggered_week, viewed,
              options[{id,label,cost,risk_hint}], expires_week, escalation }]
   last_event_week
   per_work: { work_id: { cooldowns{event_id: week}, major_seen[] } }
