@@ -1040,7 +1040,7 @@ std::string resolve_event(const std::string& input) {
         const Json request = Json::parse(input);
         GameState state = decode_state(request);
         if (state.company.status != "running") return encode(error_body("COMPANY_ENDED", "公司已结束"));
-        // M0 命令 19（PR #94 冻结）：work_id / event_id / option_id 全部必填。
+        // M0 命令 18（PR #94 冻结）：work_id / event_id / option_id 全部必填。
         if (!request.contains("work_id") || !request.at("work_id").is_string() ||
             !request.contains("event_id") || !request.at("event_id").is_string() ||
             !request.contains("option_id") || !request.at("option_id").is_string()) {

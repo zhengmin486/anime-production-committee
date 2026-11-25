@@ -118,7 +118,7 @@ npm run test:v4              # 构建 WASM 并跑契约测试（需 emsdk）
 - 已有待处理事件的项目不会再次抽取；新事件不得覆盖、丢弃或合并旧事件。
 - **查看与处理分离（INV-23）**：每条 pending 带 `viewed`，触发时为 `false`。`view_event(work_id, event_id)` 只把目标事件标记为已查看，不结算、不扣款、不移除；已查看再调用幂等成功。
 - `advance_week()` 只拒绝**未查看**事件；已查看未处理事件允许推进并继续留在 pending。
-- `resolve_event(work_id, event_id, option_id)`：三个参数全部必填（M0 命令 19，PR #94 冻结）；只删除 `(work_id, event_id)` 命中的那一条，其他项目事件原样保留。
+- `resolve_event(work_id, event_id, option_id)`：三个参数全部必填（M0 命令 18，PR #94 冻结）；只删除 `(work_id, event_id)` 命中的那一条，其他项目事件原样保留。
 - 冷却（`cooldown_weeks`）与重大事件 `major_seen` 都按项目记录在 `events.per_work[work_id]`。
 - 事件支出按 `category=events` 记入唯一账本，`work_id` 与 `memo`（事件 id）可归因；同一选项的 `cost` 与 `funds` 效果同周入账时条目 id 互不相同（INV-02）。
 - **选项效果快照**：触发时把 `effects`（scope/target/stage/value）、`cost`、`cooldown_weeks`、`once_per_project` 与事件名一起冻结进 `events.pending[]`；`resolve_event` 只读快照，不回查内容目录。存档或卡片改版后，已触发事件仍执行触发时的效果。

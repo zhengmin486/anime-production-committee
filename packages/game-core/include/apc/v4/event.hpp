@@ -87,7 +87,7 @@ struct Resolution {
     std::string code;
     std::string message;
 };
-// M0 命令 19：resolve_event(work_id, event_id, option_id)，work_id 必填。
+// M0 命令 18：resolve_event(work_id, event_id, option_id)，work_id 必填。
 Resolution inspect(const GameState& state, const std::string& work_id, const std::string& event_id,
                    const std::string& option_id);
 

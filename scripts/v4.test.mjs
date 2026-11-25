@@ -659,7 +659,7 @@ test('事件仲裁：两个项目同周各自触发，互不覆盖，处理前�
   assert.equal(blocked.error.code, 'INVALID_PHASE')
   assert.ok(blocked.error.message.includes('2'))
 
-  // M0 命令 19：work_id 必填，省略即拒绝
+  // M0 命令 18：work_id 必填，省略即拒绝
   const ambiguous = call('resolve_event', { state, event_id: 'schedule_slip', option_id: 'accept' })
   assert.equal(ambiguous.error.code, 'INVALID_INPUT')
   assert.ok(ambiguous.error.message.includes('work_id'))
