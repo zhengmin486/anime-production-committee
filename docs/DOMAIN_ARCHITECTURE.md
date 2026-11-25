@@ -525,7 +525,7 @@ Staff {
 
 **不变式**
 - `weekly_salary>0` 适用于核心员工与临时项目员工；临时员工另有一次性 `signing_fee`，不得用 `weekly_salary=0` 表示临时员工。
-- 核心员工不绑定项目合同；临时员工必须有 `temporary_contract.work_id`，且 `assignment_work_id` 恒等于合同项目。临时员工签约费即时扣除，周薪从招聘后的下一次周结算起计提，并归属该项目。
+- 核心员工不绑定项目合同；临时员工必须有 `temporary_contract.work_id`，且 `assignment_work_id` 恒等于合同项目。临时员工签约费即时扣除，周薪从招聘后的下一次周结算起计提，并归属该项目；签约费与周薪合计成本高于同等核心员工。
 - `assignment_work_id` 为 null 或指向 `works` 中处于 `producing` 的项目；临时人员的归属恒等于其合同项目。
 - 不存在 `support` / 支援份额 / 工时拆分字段：同周一人只出现一次（[已确认] DEC-STAFF-001）。
 - `last_participation.week` 只能是 `week-1`：每次结算覆盖，不累积历史。
