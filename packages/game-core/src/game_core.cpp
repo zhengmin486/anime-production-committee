@@ -750,7 +750,6 @@ void check_production_execution(const Json& state, const Json& config) {
         execution_staff_spec(*person);
     }
     const auto& project = state.at("project");
-    if (project.at("mode") == "committee") not_allowed(u8"委员会制作规则尚未接入，不能按承制规则推进。");
     for (const auto& task : project.at("outsourcing"))
         if (task.at("status") == "active") not_allowed(u8"外包交付规则尚未接入，不能忽略在途外包推进制作周。");
 }
@@ -863,9 +862,7 @@ std::string start_project(std::string input) {
         if (state.at("phase") != "idle") wrong_phase();
         const auto id = text(request.at("offer_id"));
         const auto mode = text(request.at("mode"));
-        if (mode == "committee") not_allowed(u8"委员会投资与商业分成规则将在后续里程碑实现，当前仅开放承制路线。");
-        if (mode != "contract") invalid();
-        require(num(request, "investment_percent") == 0);
+        if (mode != "contract" && mode != "committee") invalid();
         const Json* offer_json = nullptr;
         for (const auto& item : state.at("offers")) if (item.at("id") == id) offer_json = &item;
         const auto& custom = optional_slot(state, "custom_offer");
@@ -876,7 +873,18 @@ std::string start_project(std::string input) {
         if (optional_amount(*offer_json, "min_reputation") > num(state.at("company"), "reputation")) not_allowed(u8"公司声望尚未达到该企划的接约要求。");
         if (offer_json->contains("required_works")) not_allowed(u8"成绩解锁规则尚未接入，暂不能承接该企划。");
         check_style_execution(*offer_json);
+        const auto investment_percent = num(request, "investment_percent");
+        if (mode == "contract") require(investment_percent == 0);
+        else require(investment_percent >= 10 && investment_percent <= 100);
         const auto grant = num(*offer_json, "contract_budget");
+        const auto opening = num(state.at("company"), "funds");
+        Integer total_investment = 0;
+        Integer investment = 0;
+        if (mode == "committee") {
+            total_investment = add(grant, grant);
+            investment = scale(total_investment, static_cast<int>(investment_percent) * 10);
+            if (signed_number(state.at("company").at("funds")) < investment) invalid();
+        }
         Json stages = Json::object();
         for (std::size_t i = 0; i < rules::stages.size(); ++i) {
             stages[rules::stages[i]] = {
@@ -884,14 +892,23 @@ std::string start_project(std::string input) {
                 {"configuration", nullptr}, {"recommended_configuration", nullptr}, {"result", nullptr}
             };
         }
-        state["project"] = {
-            {"offer", *offer_json}, {"mode", "contract"}, {"investment_percent", 0},
-            {"opening_funds", num(state.at("company"), "funds")}, {"start_week", num(state.at("company"), "week")},
+        Json finance = empty_finance(grant);
+        if (mode == "committee") finance["investment_paid"] = investment;
+        Json project = {
+            {"offer", *offer_json}, {"mode", mode}, {"investment_percent", investment_percent},
+            {"opening_funds", opening}, {"start_week", num(state.at("company"), "week")},
             {"deadline_week", add(num(state.at("company"), "week"), num(*offer_json, "duration_weeks"))},
             {"current_stage", std::string(rules::stages[0])}, {"stages", stages},
-            {"extension_count", 0}, {"committee_pressure", nullptr}, {"finance", empty_finance(grant)},
+            {"extension_count", 0}, {"committee_pressure", mode == "committee" ? Json(0) : Json(nullptr)},
+            {"finance", std::move(finance)},
             {"temporary_staff", Json::array()}, {"outsourcing", Json::array()}, {"delivery_reason", nullptr}
         };
+        if (mode == "committee") project["total_investment"] = total_investment;
+        state["project"] = std::move(project);
+        if (mode == "committee") {
+            state["company"]["funds"] = sub(opening, investment);
+            state["company"]["finance"]["investment_paid"] = add(num(state.at("company").at("finance"), "investment_paid"), investment);
+        }
         state["company"]["funds"] = add(num(state.at("company").at("funds")), grant);
         state["company"]["finance"]["contract_received"] = add(num(state.at("company").at("finance"), "contract_received"), grant);
         state["offers"] = Json::array();
@@ -899,7 +916,9 @@ std::string start_project(std::string input) {
         state["phase"] = "producing";
         state["project"]["stages"]["script"]["recommended_configuration"] = recommended_configuration(state, "script");
         refresh_preview(state);
-        return response(std::move(state), u8"企划已接手，合同预算 " + std::to_string(grant) + u8" 日元一次性到账；投资差额由出品方承担。请完成「脚本」阶段配置后再推进。");
+        return response(std::move(state), mode == "committee"
+            ? u8"企划已接手（委员会）：公司出资 " + std::to_string(investment) + u8" 日元，制作预算 " + std::to_string(grant) + u8" 日元一次性到账。请完成「脚本」阶段配置后再推进。"
+            : u8"企划已接手，合同预算 " + std::to_string(grant) + u8" 日元一次性到账；投资差额由出品方承担。请完成「脚本」阶段配置后再推进。");
     });
 }
 
@@ -1151,7 +1170,6 @@ std::string calculate_result(std::string input) {
             const auto& offer = project.at("offer");
             check_style_execution(offer);
             const auto id = text(offer.at("id"));
-            if (project.at("mode") == "committee") not_allowed(u8"委员会渠道结算规则尚未接入，不能按承制规则结算。");
             const auto reason = text(project.at("delivery_reason"));
             Integer weighted = 0;
             for (std::size_t i = 0; i < rules::stages.size(); ++i) weighted += num(project.at("stages").at(rules::stages[i]), "quality") * rules::quality_weights[i];
@@ -1172,6 +1190,13 @@ std::string calculate_result(std::string input) {
             else if (reason == "completed") change_reputation(state, rules::below_target_reputation, "project_settled_below_target");
             else if (reason == "deadline") change_reputation(state, rules::deadline_reputation, "project_settled_deadline");
             auto finance = project.at("finance");
+            const auto pct = num(project, "investment_percent");
+            if (project.at("mode") == "committee") {
+                const auto share = scale(revenue, static_cast<int>(pct) * 10);
+                state["company"]["funds"] = add(signed_number(state.at("company").at("funds")), share);
+                state["company"]["finance"]["commercial_share_received"] = add(num(state.at("company").at("finance"), "commercial_share_received"), share);
+                finance["commercial_share_received"] = share;
+            }
             Json team = Json::array();
             std::set<std::string> seen;
             bool has_completed_stage = false;
@@ -1200,11 +1225,11 @@ std::string calculate_result(std::string input) {
             }
             Json record = {
                 {"id", id}, {"name", offer.at("name")}, {"source", offer.at("source")}, {"scale", offer.at("scale")},
-                {"previous_work_id", offer.at("previous_work_id")}, {"mode", project.at("mode")}, {"investment_percent", 0},
+                {"previous_work_id", offer.at("previous_work_id")}, {"mode", project.at("mode")}, {"investment_percent", pct},
                 {"start_week", project.at("start_week")}, {"end_week", num(state.at("company"), "week")},
                 {"end_reason", reason}, {"quality_score", quality}, {"commercial_score", commercial_score},
                 {"commercial_revenue", revenue}, {"finance", finance},
-                {"profit", sub(num(finance, "contract_received"), costs_total(finance.at("costs")))}, {"team", team}, {"stages", project.at("stages")}
+                {"profit", sub(add(num(finance, "contract_received"), num(finance, "commercial_share_received")), add(num(finance, "investment_paid"), costs_total(finance.at("costs"))))}, {"team", team}, {"stages", project.at("stages")}
             };
             for (auto key : {"origin", "style"}) if (offer.contains(key)) record[key] = offer.at(key);
             state["history"].push_back(record);

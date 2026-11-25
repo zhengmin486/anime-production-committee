@@ -172,6 +172,17 @@ void make_committee(Json& state, int investment = 30) {
     project["finance"]["investment_paid"] = 1000000;
     project.erase("committee");
 }
+Json committee_offer_state(std::int64_t budget, std::uint32_t seed = 12345) {
+    auto state = initialize(seed);
+    Json offer = state["offers"][0];
+    offer["id"] = "proj_committee_01";
+    offer["source"] = "game";
+    offer["contract_budget"] = budget;
+    offer["allowed_modes"] = Json::array({"contract", "committee"});
+    state["offers"] = Json::array({offer});
+    return state;
+}
+std::int64_t scalei(std::int64_t value, int permille) { return (value / 1000) * permille + (value % 1000) * permille / 1000; }
 Json pending_event() {
     return {{"id", "event_dynamic"}, {"category", "budget"}, {"stage", "script"}, {"title", "Budget review"},
         {"description", "A signed budget threshold was crossed."}, {"trigger", {{"metric", "cash_delta"}, {"value", -123}, {"threshold", -100}}},
@@ -245,6 +256,62 @@ TEST(StartProject, GrantGatesModesAndErrors) {
     EXPECT_TRUE(output.at("project").at("stages").at("script").at("recommended_configuration").is_object());
     EXPECT_TRUE(output.at("preview").is_null());
     expect_error(apc::start_project(Json{{"state", output}, {"offer_id", "proj_short_01"}, {"mode", "contract"}, {"investment_percent", 0}}.dump()), "INVALID_PHASE");
+}
+TEST(StartProject, CommitteeInvestsBeforeGrant) {
+    const std::int64_t budget = 1000000;
+    const auto state = committee_offer_state(budget);
+    const auto before = state.dump();
+    const auto out = call(apc::start_project, {{"state", state}, {"offer_id", "proj_committee_01"}, {"mode", "committee"}, {"investment_percent", 10}}).at("state");
+    const std::int64_t invest = scalei(budget * 2, 100);
+    EXPECT_EQ(out.at("project").at("mode"), "committee");
+    EXPECT_EQ(out.at("project").at("total_investment"), budget * 2);
+    EXPECT_EQ(out.at("project").at("investment_percent"), 10);
+    EXPECT_EQ(out.at("project").at("committee_pressure"), 0);
+    EXPECT_EQ(out.at("project").at("opening_funds"), 2000000);
+    EXPECT_EQ(out.at("project").at("finance").at("investment_paid"), invest);
+    EXPECT_EQ(out.at("project").at("finance").at("contract_received"), budget);
+    EXPECT_EQ(out.at("company").at("finance").at("investment_paid"), invest);
+    EXPECT_EQ(out.at("company").at("finance").at("contract_received"), budget);
+    EXPECT_EQ(out.at("company").at("funds"), 2000000 - invest + budget);
+    EXPECT_NO_THROW(apc::validate_state(out));
+    EXPECT_EQ(state.dump(), before);
+}
+TEST(StartProject, CommitteeGuardsPercentAffordabilityAndMode) {
+    const auto state = committee_offer_state(1000000);
+    expect_error(apc::start_project(Json{{"state", state}, {"offer_id", "proj_committee_01"}, {"mode", "committee"}, {"investment_percent", 0}}.dump()), "INVALID_INPUT");
+    expect_error(apc::start_project(Json{{"state", state}, {"offer_id", "proj_committee_01"}, {"mode", "committee"}, {"investment_percent", 5}}.dump()), "INVALID_INPUT");
+    expect_error(apc::start_project(Json{{"state", state}, {"offer_id", "proj_committee_01"}, {"mode", "committee"}, {"investment_percent", 101}}.dump()), "INVALID_INPUT");
+    const auto big = committee_offer_state(3000000);
+    expect_error(apc::start_project(Json{{"state", big}, {"offer_id", "proj_committee_01"}, {"mode", "committee"}, {"investment_percent", 100}}.dump()), "INVALID_INPUT");
+    expect_error(apc::start_project(Json{{"state", initialize()}, {"offer_id", "proj_ova_01"}, {"mode", "committee"}, {"investment_percent", 10}}.dump()), "MODE_NOT_ALLOWED");
+}
+TEST(CalculateResult, CommitteeSettlementSplitsShare) {
+    const std::int64_t budget = 2000000;
+    const int pct = 10;
+    auto state = call(apc::start_project, {{"state", committee_offer_state(budget)}, {"offer_id", "proj_committee_01"}, {"mode", "committee"}, {"investment_percent", pct}}).at("state");
+    const auto invest = state.at("project").at("finance").at("investment_paid").get<std::int64_t>();
+    state = play_until_ready(state);
+    const auto before = state.dump();
+    const auto out = call(apc::calculate_result, {{"state", state}, {"scope", "project"}});
+    const auto settled = out.at("state");
+    const auto& record = out.at("result");
+    const auto& fin = record.at("finance");
+    const std::int64_t revenue = record.at("commercial_revenue").get<std::int64_t>();
+    const std::int64_t share = scalei(revenue, pct * 10);
+    EXPECT_EQ(record.at("mode"), "committee");
+    EXPECT_EQ(record.at("investment_percent"), pct);
+    EXPECT_EQ(fin.at("commercial_share_received").get<std::int64_t>(), share);
+    EXPECT_EQ(fin.at("investment_paid").get<std::int64_t>(), invest);
+    const std::int64_t profit = fin.at("contract_received").get<std::int64_t>() + share - invest - costs_total(fin);
+    EXPECT_EQ(record.at("profit").get<std::int64_t>(), profit);
+    EXPECT_EQ(settled.at("company").at("finance").at("commercial_share_received").get<std::int64_t>(), share);
+    const auto& cf = settled.at("company").at("finance");
+    const std::int64_t expected_funds = settled.at("company").at("initial_funds").get<std::int64_t>()
+        + cf.at("contract_received").get<std::int64_t>() + cf.at("commercial_share_received").get<std::int64_t>()
+        - cf.at("investment_paid").get<std::int64_t>() - costs_total(cf);
+    EXPECT_EQ(settled.at("company").at("funds").get<std::int64_t>(), expected_funds);
+    EXPECT_NO_THROW(apc::validate_state(settled));
+    EXPECT_EQ(state.dump(), before);
 }
 TEST(Decision, ConfigureLocksStageAndChargesNothing) {
     const auto state = start();
@@ -1551,7 +1618,7 @@ TEST(DynamicExecution, UnassignedDynamicStaffRestAndStaticStaffBeyondIndexFourWo
     expect_validation(next, true);
 }
 
-TEST(DynamicExecution, ActiveOutsourcingAndCommitteeGameplayAreExplicitlyBlocked) {
+TEST(DynamicExecution, ActiveOutsourcingIsBlockedAndCommitteeGameplayRuns) {
     auto outsourced = configure(start());
     outsourced["suppliers"] = Json::array({supplier()});
     outsourced["project"]["outsourcing"] = Json::array({outsource_task()});
@@ -1575,14 +1642,18 @@ TEST(DynamicExecution, ActiveOutsourcingAndCommitteeGameplayAreExplicitlyBlocked
     auto committee = configure(start());
     make_committee(committee);
     expect_validation(committee, true);
-    expect_mode_blocked(apc::advance_week, {{"state", committee}});
-    committee["phase"] = "project_ready";
-    committee["project"]["delivery_reason"] = "company_closed";
-    committee["company"]["status"] = "closing";
-    committee["company"]["end_reason"] = "voluntary";
-    committee["preview"] = nullptr;
-    expect_validation(committee, true);
-    expect_mode_blocked(apc::calculate_result, {{"state", committee}, {"scope", "project"}});
+    const auto advanced = call(apc::advance_week, {{"state", committee}});
+    expect_validation(advanced.at("state"), true);
+    auto closing = advanced.at("state");
+    closing["phase"] = "project_ready";
+    closing["project"]["delivery_reason"] = "company_closed";
+    closing["company"]["status"] = "closing";
+    closing["company"]["end_reason"] = "voluntary";
+    closing["preview"] = nullptr;
+    expect_validation(closing, true);
+    const auto settled = call(apc::calculate_result, {{"state", closing}, {"scope", "project"}});
+    EXPECT_EQ(settled.at("result").at("mode"), "committee");
+    expect_validation(settled.at("state"), true);
 }
 
 TEST(DynamicExecution, TemporarySnapshotsSurviveSettlementWithoutExperienceGain) {
