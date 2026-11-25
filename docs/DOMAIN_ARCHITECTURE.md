@@ -508,9 +508,9 @@ Company {
   end_reason: null | time_limit | bankrupt | voluntary
   reputation: >=0 ; reputation_log[{week, reason, delta, after}]
   office_tier: small | medium | large  // 玩家主动扩容后的当前办公场地规模
-  base_weekly_rent: >=0                // 办公场地规模对应的每周基础房租
+  base_weekly_rent: >=0                // 当前办公场地规模对应的每周基础房租；扩容新增增量从确认后的下一次周结算起计提
   facilities: []                       // 已建造设施；可用槽位由 office_tier 推导
-  // core_staff_capacity 由公司成长里程碑独立推导，不依赖 office_tier / facilities
+  // core_staff_capacity 由已达成的公司成长里程碑推导；只统计 core 员工名册，临时员工不占用；解锁后永久保留、只增不减，不依赖 office_tier / facilities
 }
 
 Staff {
@@ -1726,7 +1726,8 @@ SaveRecord { version: 4, savedAt: ISO8601, rules_version, state: GameState }
 
 ### 21.5 计划态预览与提醒（Q6–Q9、Q11）
 
-- 周内人员归属和制作方针修改只更新当前未结算经营周的计划态；预览从最终计划态派生，不写入存档，不提前产生进度、磨合损失、现金或合同承诺。
+- 周内人员归属和制作方针修改只更新当前未结算经营周的计划态；计划态可反复撤销、覆盖和调整，预览从推进前最后确认的计划态派生，不写入存档，不提前产生进度、磨合损失、现金或合同承诺。
+- 即时操作必须整条命令原子提交；校验或执行任一步骤失败时，回滚该命令全部状态变化，不留下部分扣款、名额占用、合同或人员状态。
 - 预览至少能解释调出与调入双方的产出区间、交付区间/合同死线余量、职业适配、磨合、质量贡献和疲劳代价；预测必须标明不确定性。
 - 普通人员磨合由 WorkItem.contributors 记录实际参与历史；同一员工曾实际参与该工作项，离开后再回来不重复扣个人磨合。
 - 监督 management 能力与团队润滑特性减免合计最多 50%；监督本人切换项目产生的团队级损失独立计算，不享受该减免。
