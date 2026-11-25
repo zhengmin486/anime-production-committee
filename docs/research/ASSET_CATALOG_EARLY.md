@@ -79,7 +79,7 @@ superseded_by: []
 
 ## 生成、复用与未采用记录
 
-完整提示词和来源见 [asset_prompts.json](asset_prompts.json)：
+完整提示词和来源见 [asset_prompts.json](../asset_prompts.json)：
 
 - `current_delivery`：当前初期 3 张范围、处理方法、数量与共同授权状态。
 - `revised_assets`：修订标准后的实际素材记录，逐项包含工具、日期、完整提示词、参考图、原图路径、原始尺寸、最终尺寸、裁切、审核结论与用途。
