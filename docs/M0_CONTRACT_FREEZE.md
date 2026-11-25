@@ -73,7 +73,7 @@ SaveRecord { version: 4, savedAt: ISO8601, rules_version: string, state: GameSta
 
 | 对象 | 必填 | 可空 | 关键约束 |
 | --- | --- | --- | --- |
-| `Company` | id, name, founded_week, week, status, reputation, reputation_log | end_reason（仅 running 为 null）, facilities（可空数组） | week ∈ [0,520]；status=running ⇒ week<520 |
+| `Company` | id, name, founded_week, week, status, reputation, reputation_log | end_reason（仅 running 为 null）, facilities（可空数组） | week ∈ [0,520]；status=running ⇒ week<520；core_staff_capacity 由成长里程碑单调推导，仅统计核心员工名册，不含临时员工 |
 | `Staff` | id, name, role, employment, abilities, experience, potential, revealed_potential, talent_type, signing_fee, weekly_salary, fatigue, morale, departure_warning, assignment_work_id | last_participation, temporary_contract | core/temp 均使用一次性 signing_fee + weekly_salary>0；不再使用 project_fee；core 的 temporary_contract=null；temp 的 assignment_work_id = 合同项目；公司至少保留 1 名 core |
 | `Project` | id, offer, mode, investment, channels, opened_week, deadline_week, extension, status, common, episodes, plan | ip_id, committee_id, tv_service, delivery | committee 模式才可有 committee_id；episodes 长度 = offer.episode_count |
 | `CommonProduction` | id, items | — | items 非空 |
@@ -137,7 +137,7 @@ SaveRecord { version: 4, savedAt: ISO8601, rules_version: string, state: GameSta
 | 2 | `start_work(offer_id, mode, percent, committee_partner_ids)` | running ∧ 企划存在且有效 ∧ 模式合法 ∧（普通企划满足 `min_reputation/required_works` ∨ 有效原创草稿存在）∧ 现金 ≥ 全部应付款 | NOT_FOUND / MODE_NOT_ALLOWED / INSUFFICIENT_FUNDS | 项目+委员会+两笔账+消费企划，一次提交；原创在此正式开工 |
 | 3 | `set_work_plan(work_id, plan)` | 项目 producing ∧ target 引用本项目单集/阶段且至多一个 | NOT_FOUND / INVALID_INPUT | 仅更新计划 |
 | 4 | `assign_staff(staff_id, work_id \| null)` | 项目 producing ∧ 员工存在 ∧ 不违反单项目 ∧ 调整后所有 producing 项目仍恰有一名监督 | NOT_FOUND / INVALID_PHASE | 仅更新归属；监督更换不得留下空缺或重复 |
-| 5 | `hire_core(staff_id)` | running ∧ 候选人存在 ∧ 现金 ≥ signing_fee ∧ 名册上限（若有） | NOT_FOUND / INSUFFICIENT_FUNDS | 签约即入职并加入核心名册，当周可分配；signing_fee 立即入账，首周周薪计入本周下一次周结算 |
+| 5 | `hire_core(staff_id)` | running ∧ 候选人存在 ∧ 现金 ≥ signing_fee ∧ 当前核心员工数 < 已解锁 core_staff_capacity | NOT_FOUND / INSUFFICIENT_FUNDS / CAPACITY_EXCEEDED | 签约即入职并加入核心名册，当周可分配；临时员工不占核心编制；signing_fee 立即入账，首周周薪计入本周下一次周结算 |
 | 6 | `scout(role?, focus_ability?)` | running ∧ 现金 ≥ 本次费用 ∧ 招聘池非空 | INSUFFICIENT_FUNDS | 池+保底计数+费用 |
 | 7 | `dismiss_staff(staff_id)` | running ∧ core 员工存在 ∧ 解雇后 core 数 ≥1 ∧ 不使任何 producing 项目失去唯一监督 | NOT_FOUND / INVALID_INPUT / INVALID_PHASE | 移出名册+清空归属；不预付遣散费 |
 | 8 | `hire_temporary(work_id, candidate_id)` | running ∧ 项目 producing ∧ 现金 ≥ signing_fee | NOT_FOUND / INSUFFICIENT_FUNDS | 临时合同+signing_fee 即时入账；weekly_salary 从后续周结算计提；归属合同项目 |
@@ -473,7 +473,8 @@ v3 的单项目、五阶段、全局 phase、单事件槽、双份财务汇总�
 - 若阶段 2 现金不足，阶段 3–8 全部跳过，状态回滚至阶段 1 快照，现金不发生部分扣款，项目/人员/延迟状态/事件/周数均不变化，并直接触发破产终局。
 - 不设置额外危机拯救窗口；旧版危机 7 步、负现金欠付、危机周推进和相关命令白名单均由本条覆盖。相关字段、守卫、错误码与终局处理属于 C 级契约修订，必须同步实现和测试。第 7 节危机期白名单仅作历史记录，不再作为命令授权依据。
 - 延迟状态统一按“第 W 周触发即占当周计数，每周末阶段 7 减 1，归零后下一周开局生效”。设施建设期不计维护费，启用周阶段 2 起计费；红灯触发周照常工作和计薪，下一周开始休养，满期后再下一周恢复；企划定金/机会有效 M 周覆盖 W 至 W+M-1，最后有效周末未确认则失效且定金不退。
-- 周内计划态允许反复覆盖、撤销，推进时使用最后确认快照；即时签约/扣款类命令失败必须原子回滚。
+- 周内计划态允许反复撤销、覆盖和调整，推进时使用推进前最后一次确认的计划快照；计划态变更不提前产生实际效果。
+- 所有即时操作均须整条命令原子提交；任何校验或执行失败都必须回滚该命令全部状态变化，不得留下部分扣款、名额占用、合同或人员状态。
 - 只读预演接口至少返回刚性周支出、岗位硬资格、预计疲劳变化区间、预计完工周数；不得剧透随机波动实际结果或未触发事件。
 
 ### 14.8 监督统筹兼任与工作项多人协作（DEC-STAFF-008）
@@ -484,3 +485,11 @@ v3 的单项目、五阶段、全局 phase、单事件槽、双份财务汇总�
 - 工作项允许多名主责共同承担，不设人数上限；具备主责硬资格者均计为主责。协力是具备协力资格但不具备主责资格的参与者，贡献进度并按工作项基准线拉近/稳定质量下限，但不得突破主责团队决定的质量上限。
 - 不适配员工不计入该工作项正常产能与质量贡献。
 - 监督统筹占比与剩余精力产能折算、多主责质量聚合、协力质量下限贡献及主责质量上限公式均为待标定参数。本节冻结资格和结果边界，不冻结公式。
+
+
+### 14.9 核心编制成长与办公场地扩容时序（DEC-COMPANY-003 / DEC-COMPANY-002 补充）
+
+- 公司成长里程碑达成时，新增核心员工名额立即解锁；`core_staff_capacity` 只统计核心员工，不包含临时员工。
+- 已解锁核心员工名额永久保留、只增不减；声望或其他成长指标回落不得回收已解锁名额。容量由公司成长进度单调推导，不绑定设施或办公场地等级。
+- 办公场地扩容允许跨级；满足目标规模条件即可直接扩至目标规模，不要求逐级经过中间规模。
+- 扩容确认时即时扣除一次性搬迁费并立即开放目标规模槽位；新增基础房租增量从确认后的下一次 `advance_week` 周结算起计提，不追溯确认当周。
