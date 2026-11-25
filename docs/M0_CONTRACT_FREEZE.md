@@ -117,13 +117,13 @@ SaveRecord { version: 4, savedAt: ISO8601, rules_version: string, state: GameSta
 | INV-20 | 合同 `item_id` 属于同一 `work_id`；累计交付不超过该项 `work_total` | INVALID_STATE |
 | INV-21 | `running ⇒ week < 520`；`week` 只由 `advance_week` 改变 | INVALID_PHASE |
 | INV-22 | Archive 只追加；`WorkRecord.id` 唯一；`previous_work_id` 指向更早记录 | INVALID_STATE |
-| INV-23 | `events.pending[]` 可同时包含多个项目事件；每条带 `work_id/event_id/triggered_week`，pending 中每项目至多一条；同一项目每周最多触发一个；`last_event_week` 不得全局限流；未处理事件不得覆盖/丢弃 | INVALID_STATE |
+| INV-23 | `events.pending[]` 可同时包含多个项目事件；每条带 `work_id/event_id/triggered_week/viewed`，pending 中每项目至多一条；同一项目每周最多触发一个；未查看事件阻塞推进，已查看未处理事件不阻塞；`last_event_week` 不得全局限流；事件不得覆盖/丢弃 | INVALID_STATE |
 | INV-24 | `market.slots ≤ 4`；自定/提案槽与市场槽、历史 id 互斥 | INVALID_STATE |
 | INV-25 | 负余额只允许出现在 `company.status=closing(bankrupt)`；正常经营状态不得出现负余额 | INVALID_STATE |
 | INV-26 | 存档中不含派生值（§2 列表）；加载时重算 | SAVE_CORRUPT |
 | INV-27 | 每个 producing 项目恰有一名已通过任职资格校验并已分配到该项目的监督；资格仅在任职/分配时校验，任职后不因属性波动撤销；不得出现监督空缺或重复 | INVALID_STATE |
 | INV-28 | forced_rest 员工保留原项目归属与岗位占位但不贡献产能；满期次周开局恢复原岗位；监督已被替补时原监督回归不得顶替现任监督 | INVALID_STATE |
-| INV-29 | 限时事件阶段 7 超时必须执行默认分支或一次性升级；升级事件再次超时执行违约分支；超时处理不得丢失其他项目 pending | INVALID_STATE |
+| INV-29 | 限时事件触发周计入有效期；仅已查看且仍未处理的限时事件可随周推进倒计时，阶段 7 到期执行默认分支或一次性升级；升级事件再次超时执行违约分支；未查看事件阻塞推进；超时处理不得丢失其他项目 pending | INVALID_STATE |
 
 ---
 
@@ -152,7 +152,7 @@ SaveRecord { version: 4, savedAt: ISO8601, rules_version: string, state: GameSta
 | 15 | `buy_tv_service(work_id)` | 委员会模式 ∧ 未购买 ∧ 现金 | MODE_NOT_ALLOWED / INSUFFICIENT_FUNDS | 渠道+发行费 |
 | 16 | `request_extension(work_id)` | 委员会模式 ∧ 未用过 ∧ 未过截止 ∧ 现金 | MODE_NOT_ALLOWED / INSUFFICIENT_FUNDS | 延期+费用 |
 | 17 | `arrange_financing(provider, amount)` | 资金压力周（未进入终局）∧ 额度未超 | INSUFFICIENT_FUNDS / INVALID_PHASE | 现金入账+贷款 |
-| 18 | `advance_week()` | running ∧ `events.pending[]` 为空 ∧ week<520 ∧ 非 closing | INVALID_PHASE | 八阶段原子周结算；刚性支出预检失败则回滚并直接破产终局 |
+| 18 | `advance_week()` | running ∧ 不存在 `viewed=false` 的 pending 事件 ∧ week<520 ∧ 非 closing | INVALID_PHASE | 八阶段原子周结算；刚性支出预检失败则回滚并直接破产终局 |
 | 19 | `resolve_event(work_id, event_id, option_id)` | 该 work 存在对应 pending 事件 ∧ 选项合法 ∧ 现金充足（若需付款） | NOT_FOUND / INVALID_INPUT / INSUFFICIENT_FUNDS | 效果分派；只移除 `(work_id,event_id)` 对应事件 |
 | 20 | `end_company()` | running | INVALID_PHASE | 锁 closing，未交付转 delivering |
 | 21 | `finalize_delivery(work_id)` | 项目 delivering（关闭路径） | INVALID_PHASE | 交付结算 |
@@ -421,11 +421,14 @@ v3 的单项目、五阶段、全局 phase、单事件槽、双份财务汇总�
 - 每条待处理事件必须包含项目标识 `work_id`，并指向仍有效的项目。
 - 每个项目每周最多触发一个事件；多个项目可以在同一周分别触发事件。
 - 未处理事件必须留在数组中；新事件不得覆盖、丢弃或自动合并旧事件。
-- 玩家可以按任意顺序处理待处理事件；不要求全局 FIFO。
-- 处理命令为 `resolve_event(work_id, event_id, option_id)`，成功后只移除目标事件，其他项目事件原样保留。
-- 数组非空时禁止 `advance_week()`；全部事件处理完成后才允许推进。
-- 本次规则不再存在可持续推进的资金危机周；若周结算预检失败，按 §14.7 直接破产。既有 pending 事件的处理规则仍有效，但不得触发危机周或绕过破产终局。
-- 校验器必须覆盖：同周多个项目各一事件合法、同一项目同周第二事件非法、处理一条不清除其他项目事件、事件未清空时推进周失败。
+- 玩家可以按任意顺序查看和处理待处理事件；不要求全局 FIFO。
+- 每条事件具有独立的 `viewed` 状态，初始为 false。玩家打开事件详情时，必须原子地将目标事件标记为已查看；该动作不应用事件选项、不扣款、不改变事件效果，也不移除 pending。
+- **推进守卫只检查是否存在未查看事件**：只要有任意 pending 事件的 `viewed=false`，禁止 `advance_week()`；所有 pending 均已查看后，即使仍未选择，仍允许推进。
+- 已查看未选择的事件继续留在 pending；玩家可随后选择选项，或明确放弃处理。放弃处理不等于结算，不移除 pending，也不暂停其期限倒计时。
+- 处理命令为 `resolve_event(work_id, event_id, option_id)`，成功后只移除目标事件，其他项目事件原样保留。放弃处理是独立的显式动作，不得伪装成 resolve_event 的有效选项，除非该事件内容明确配置了对应选项。
+- 未查看事件阻塞玩家推进，因此其期限不会在玩家未查看时通过正常周推进而超时；已查看未处理事件可随周推进倒计时，并在阶段 7 到期时执行默认分支或升级。
+- 本次规则不再存在可持续推进的资金危机周；若周结算预检失败，按 §14.7 直接破产。
+- 校验器必须覆盖：同周多个项目各一事件合法、同一项目同周第二事件非法、查看一条只更新该事件 viewed、查看不等于处理、已查看未处理事件允许推进、任一未查看事件阻止推进、处理一条不清除其他项目事件、已查看事件超时不影响其他项目 pending。
 
 ### 14.2 资金预检失败与破产语义（覆盖旧危机规则）
 
@@ -509,6 +512,7 @@ v3 的单项目、五阶段、全局 phase、单事件槽、双份财务汇总�
 ### 14.11 限时事件超时与升级（DEC-EVENT-002）
 
 - 限时事件触发当周计入有效期；每周末阶段 7 统一倒计时减 1 周。
+- 未查看事件阻塞周推进，不会在玩家完全未查看的状态下随正常推进超时；玩家查看后，即使未作选择或明确放弃处理，仍可推进周数并继续倒计时。
 - 到期仍未处理时，在阶段 7 末尾自动执行事件预设的默认消极/保守分支，并移出 `events.pending[]`。
 - 高权重关键事件可配置一次超时升级；升级沿用同一事件身份替换原 pending 条目，升级事件再次超时才触发预设硬性违约惩罚。最多升级一次，不得循环延期。
 - 超时处理按事件身份执行，不得覆盖或清除其他项目 pending；超时自动处理不需要玩家确认。
