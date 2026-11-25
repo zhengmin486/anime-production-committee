@@ -511,10 +511,10 @@ Company {
 Staff {
   id, name, role, employment: core | temporary
   abilities{planning,direction,drawing,animation,management,postproduction}: 0..100
-  experience{...}: >=0               // 累计，能力增长由内核换算
-  potential{...}, revealed{...}      // 潜力不低于当前能力
+  experience{...}: >=0               // 各能力独立累计；仅有效实战产出获得经验
+  potential{...}, revealed{...}      // 各能力独立潜力上限与揭示状态
   talent_type, traits[]
-  weekly_salary (core>0, temp=0) | project_fee (temp>0, core=0)
+  weekly_salary (core>0, temporary>0) | signing_fee (temporary one-time fee)
   fatigue: 0..100 ; morale: 0..100 ; departure_warning: bool
   assignment_work_id: null | work_id      // 本周唯一归属；null = 未参与任何项目
   last_participation: null | { work_id, unit_id, week }   // 上次实际参与的单元，磨合判定用
@@ -523,8 +523,12 @@ Staff {
 }
 ```
 
-**不变式**
-- `employment=core ⇒ weekly_salary>0 ∧ project_fee=0`；反之亦然（沿用 V3）。
+**概念与不变式**
+- `Staff.role` 表示八种基础职业身份之一，不表示某个项目内的监督、脚本主责或作画主责岗位。项目岗位属于项目内分工，同一员工可在不同项目承担不同岗位；具体岗位数据归项目分配/制作模型管理。
+- 六维 `abilities` 是专业能力，与职业身份分离；职业决定工作项主责/协力适配资格，能力决定对应工作的实际硬实力。工作项通过自身 `ability` 字段引用对应专业能力。
+- `experience` 按能力独立累计；只有周结算中对工作项产生有效产出（`delta_work > 0`）的核心员工获得对应能力经验。监督岗位另按实际履职累计 `direction` 与 `management` 经验。临时员工不进入长期成长体系。
+- `potential` 表示各能力独立的潜力上限，`revealed` 表示对应上限的揭示状态；综合潜力档位只用于招聘展示，不替代单项上限。
+- 核心员工与临时项目员工均有正数周薪；临时员工另有一次性签约费，项目合同成本归属其绑定项目。
 - `assignment_work_id` 为 null 或指向 `works` 中处于 `producing` 的项目；临时人员的归属恒等于其合同项目。
 - 不存在 `support` / 支援份额 / 工时拆分字段：同周一人只出现一次（[已确认] DEC-STAFF-001）。
 - `last_participation.week` 只能是 `week-1`：每次结算覆盖，不累积历史。
@@ -879,8 +883,8 @@ crisis --(预检通过)--> normal
 crisis --(deadline 用尽仍失败)--> 由应用层置 Company.closing/bankrupt
 ```
 
-- `crisis` 是**资金状态**，不是公司状态：公司仍在 `running`，仍可招聘、签外包、调计划、融资、关停项目。
-- 危机不自动解约：已签外包与临时合同继续存在，但可以主动终止（首版允许解约但费用不退，避免"危机时无损砍单"）。
+- `crisis` 是**资金状态**，不是公司状态：公司仍在 `running`，可以调计划、调整人员归属、融资、解雇核心员工、终止项目和交付已达标作品；禁止新增招聘、外包及其他新增经营承诺。
+- 已签外包与临时员工合同继续存在。临时员工不开放通用提前解约；只有特定危机/裁减事件明确提供选项时才可提前解除，已发生费用不退，解除后停止后续周薪。
 - 危机期间若玩家完全不操作，结果只能是破产；不存在"什么都不做就自己好起来"。
 
 ### 7.6 Event 与 Archive
@@ -952,7 +956,7 @@ WorkRecord { id, name, ip_id, source, genre, scale, mode, investment_percent,
 | 命令 | 归属 | 守卫 | 主要效果 |
 | --- | --- | --- | --- |
 | `initialize_game(seed)` | Application | — | 建立公司、初始名册、供应商、合作方、市场首轮、空项目集 |
-| `start_work(offer_id, mode, percent, committee_partner_ids)` | Application | 公司 running；企划存在；声望与成绩条件；模式合法；现金足够支付投资 | Project 建立、委员会成立、Market 消费企划、Finance 记投资与合同预算、员工可归属 |
+| `start_work(offer_id, mode, percent, committee_partner_ids)` | Application | 公司 running；企划存在且有效；模式合法；正式开工时现金足够支付全部所需投资本金；其他合规条件满足 | Project 建立、委员会成立、Market 消费企划、Finance 记投资与合同预算、员工可归属。原创声望资格在创建草稿时检查，不因有效期内轻微波动重复卡开工 |
 | `set_work_plan(work_id, plan)` | Project | 公司 running；项目 producing；`plan.target` 须引用本项目单集/阶段，至多一个 | 更新计划（含定向目标），下个结算生效 |
 | `assign_staff(staff_id, work_id \| null)` | Staff | 项目存在且 producing；核心员工每周仅能归属一个项目；传 null 为撤出 | 更新唯一项目归属，下一次结算生效 |
 | `hire_core(staff_id)` / `scout(...)` / `dismiss_staff(staff_id)` | Staff + Finance | 公司 running；无待处理事件；非资金危机；现金；名册上限（若有）。不要求全公司空闲（DEC-PLAY-003） | `hire_core` 签约即入职、立即进入核心名册并可当周分配；签约费入账，首周周薪计入本周下一次结算 |
@@ -960,7 +964,7 @@ WorkRecord { id, name, ip_id, source, genre, scale, mode, investment_percent,
 | `sign_outsourcing(work_id, item_id, supplier_id, work_total, mode)` | Vendor + Finance | 工作项已解锁；专业匹配；供应商产能余量；现金 | 合同建立、费用入账、占用产能 |
 | `deliver_work(work_id)` | Project + Application | 全部门槛项已交付；未过截止 | 转 delivering 并当次结清（§7.3.6） |
 | `abort_work(work_id)` | Project + Finance | 项目 producing | 项目终止、违约扣罚入账、释放人员与外包占用 |
-| `create_custom_offer(name, source, scale, style)` | Market + Finance | 公司 running；无待处理事件；非资金危机；现金；企划能力员工。不要求全公司空闲 | 自定企划入槽、开发费入账 |
+| `create_custom_offer(name, source, scale, style)` | Market + Finance | 公司 running；无待处理事件；非资金危机；创建时检查基础声望资格。不要求具备企划职业员工作为硬性准入门槛 | 创建自主原创草稿并记录资格通过状态；草稿有效期与筹备消耗按 Market 规则处理 |
 | `adopt_proposal()` / `reject_proposal()` | Market | 公司 running；无待处理事件；非资金危机；存在提案。不要求全公司空闲 | 提案转自定槽或清空 |
 | `buy_tv_service(work_id)` | Project + Finance | 委员会模式；未购买；现金 | 渠道开放、发行费入账 |
 | `request_extension(work_id)` | Project + Finance | 委员会模式；未用过；未过截止；现金 | 延期生效、压力与费用 |
