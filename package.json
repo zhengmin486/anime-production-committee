@@ -28,8 +28,10 @@
     "validate:events": "node scripts/validate-event-catalog.mjs && node scripts/validate-event-fixtures.mjs",
     "validate:blueprint": "node scripts/validate-blueprint.mjs docs/blueprints/tv_standard.blueprint.json",
     "validate:handover": "node scripts/check-handover-cases.mjs docs/fixtures/handover_cases.json",
-    "build:v4": "node scripts/build-v4.mjs",
-    "test:v4": "node scripts/build-v4.mjs && node --test scripts/v4.test.mjs"
+    "build:v4": "node scripts/build-event-catalog.mjs && node scripts/build-v4.mjs",
+    "test:v4": "node scripts/build-event-catalog.mjs && node scripts/build-v4.mjs && node --test scripts/v4.test.mjs",
+    "build:events": "node scripts/build-event-catalog.mjs",
+    "validate:content": "node scripts/validate-event-content.mjs"
   },
   "devDependencies": {
     "playwright-core": "1.65.1"

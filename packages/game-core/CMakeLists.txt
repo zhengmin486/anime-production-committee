@@ -31,6 +31,8 @@ add_library(game_core_v4 STATIC
     src/v4/model.cpp
     src/v4/kernel.cpp
     src/v4/runtime.cpp
+    src/v4/event.cpp
+    src/v4/event_catalog_generated.cpp
 )
 target_include_directories(game_core_v4 PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
 target_link_libraries(game_core_v4 PUBLIC nlohmann_json::nlohmann_json)

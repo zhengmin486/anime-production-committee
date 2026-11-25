@@ -1,0 +1,56 @@
+{
+  "schema_version": 1,
+  "id": "animator_exhaustion",
+  "name": "原画师体力透支",
+  "category": "personnel",
+  "polarity": "negative",
+  "tier": "normal",
+  "tag": "fatigue",
+  "stages": [
+    "animation",
+    "photography_editing"
+  ],
+  "priority": 15,
+  "cooldown_weeks": 8,
+  "once_per_project": false,
+  "trigger": {
+    "metric": "max_fatigue",
+    "op": ">=",
+    "threshold": 78
+  },
+  "random_weight": 0,
+  "expires_weeks": 0,
+  "description": "原画师的疲劳已经逼近极限，继续硬撑会拖垮整段作画。",
+  "foreshadow": "最近两周的加班记录持续攀升。",
+  "options": [
+    {
+      "id": "accept",
+      "kind": "abandon",
+      "label": "再撑一阵",
+      "cost": 0,
+      "risk_hint": "士气下滑",
+      "effects": [
+        {
+          "scope": "instant",
+          "target": "morale",
+          "value": -6
+        }
+      ]
+    },
+    {
+      "id": "replace",
+      "kind": "overtime",
+      "label": "临时换人顶班",
+      "cost": 320000,
+      "risk_hint": "交接损耗",
+      "effects": [
+        {
+          "scope": "stage",
+          "target": "quality",
+          "stage": "animation",
+          "value": -2
+        }
+      ]
+    }
+  ]
+}

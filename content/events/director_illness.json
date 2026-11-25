@@ -1,0 +1,67 @@
+{
+  "schema_version": 1,
+  "id": "director_illness",
+  "name": "作画监督病倒",
+  "category": "personnel",
+  "polarity": "negative",
+  "tier": "major",
+  "tag": "director_illness",
+  "stages": [
+    "storyboard_key_animation",
+    "animation"
+  ],
+  "priority": 5,
+  "cooldown_weeks": 0,
+  "once_per_project": true,
+  "trigger": {
+    "metric": "max_fatigue",
+    "op": ">=",
+    "threshold": 65
+  },
+  "random_weight": 0,
+  "expires_weeks": 0,
+  "description": "作画监督连续通宵后病倒，检查进度和后续镜头都要重新安排。",
+  "foreshadow": "连续两周通宵，检查进度已经堆积。",
+  "options": [
+    {
+      "id": "accept",
+      "kind": "abandon",
+      "label": "让副手接手",
+      "cost": 0,
+      "risk_hint": "质量与进度双降",
+      "effects": [
+        {
+          "scope": "stage",
+          "target": "quality",
+          "stage": "animation",
+          "value": -5
+        },
+        {
+          "scope": "project",
+          "target": "quality",
+          "value": -2
+        }
+      ]
+    },
+    {
+      "id": "overtime",
+      "kind": "overtime",
+      "label": "请外部监督救场",
+      "cost": 300000,
+      "risk_hint": "疲劳继续累积",
+      "effects": [
+        {
+          "scope": "instant",
+          "target": "fatigue",
+          "value": 8
+        },
+        {
+          "scope": "stage",
+          "target": "quality",
+          "stage": "animation",
+          "value": 2
+        }
+      ]
+    }
+  ]
+}

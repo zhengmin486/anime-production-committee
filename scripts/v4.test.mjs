@@ -546,3 +546,189 @@ test('契约名适配：initialize_game / set_work_plan 与内部入口等价', 
   const viaContract = ok('set_work_plan', { state: base, work_id: 'work_01', plan }).state
   assert.equal(ok('hash_state', { state: viaInternal }).hash, ok('hash_state', { state: viaContract }).hash)
 })
+
+// ---- 事件 M2（#50）：内容加载、多项目仲裁、效果与不变式 ----
+
+function pendingOf(state) {
+  return state.events.pending
+}
+
+function setAnimationQuality(state, workId, value) {
+  const work = state.works.find((entry) => entry.id === workId)
+  for (const episode of work.episodes) {
+    for (const stage of episode.stages) {
+      if (stage.key !== 'animation') continue
+      for (const item of stage.items) {
+        for (const dim of Object.keys(item.quality)) item.quality[dim] = value
+      }
+    }
+  }
+  return state
+}
+
+test('事件内容：运行时不硬编码，内嵌目录 7 张卡且校验通过', () => {
+  const info = ok('event_catalog_info', {})
+  assert.equal(info.ok, true)
+  assert.equal(info.count, 7)
+  assert.deepEqual(info.issues, [])
+  assert.deepEqual(info.ids, [
+    'animator_exhaustion',
+    'director_illness',
+    'key_cut_rework',
+    'schedule_slip',
+    'station_visit',
+    'storyboard_spark',
+    'supplier_dunning'
+  ])
+})
+
+test('事件内容：非法卡被拒绝并定位到卡片与字段', () => {
+  const card = {
+    schema_version: 1,
+    id: 'fixture_card',
+    name: '夹具卡',
+    category: 'quality',
+    polarity: 'negative',
+    tier: 'normal',
+    tag: 'fixture',
+    stages: ['animation'],
+    priority: 10,
+    cooldown_weeks: 4,
+    once_per_project: false,
+    trigger: { metric: 'max_fatigue', op: '>=', threshold: 50 },
+    random_weight: 0,
+    expires_weeks: 0,
+    description: '夹具',
+    options: [
+      { id: 'accept', kind: 'abandon', label: '接受', cost: 0, effects: [{ scope: 'instant', target: 'morale', value: -1 }] }
+    ]
+  }
+  const validate = (cards, source = 'fixture.json') =>
+    ok('validate_event_catalog', { source, catalog: { schema_version: 1, cards } })
+
+  const valid = validate([card])
+  assert.equal(valid.ok, true)
+  assert.equal(valid.count, 1)
+
+  const duplicate = validate([card, { ...card, name: '重复' }])
+  assert.equal(duplicate.ok, false)
+  assert.ok(duplicate.issues.some((issue) => issue.field === 'id' && issue.message.includes('重复')))
+
+  const unknownTarget = validate([{ ...card, options: [{ ...card.options[0], effects: [{ scope: 'instant', target: 'luck', value: 1 }] }] }])
+  assert.ok(unknownTarget.issues.some((issue) => issue.field === 'options[0].effects[0].target'))
+
+  const fundsGain = validate([{ ...card, options: [{ ...card.options[0], effects: [{ scope: 'instant', target: 'funds', value: 100 }] }] }])
+  assert.ok(fundsGain.issues.some((issue) => issue.field === 'options[0].effects[0].value'))
+
+  const missingLabel = validate([{ ...card, options: [{ ...card.options[0], label: '' }] }])
+  assert.ok(missingLabel.issues.some((issue) => issue.field === 'options[0].label'))
+
+  const badVersion = validate([{ ...card, schema_version: 2 }])
+  assert.ok(badVersion.issues.some((issue) => issue.field === 'schema_version'))
+
+  const empty = ok('validate_event_catalog', { source: 'empty', catalog: { schema_version: 1, cards: [] } })
+  assert.equal(empty.ok, false)
+  assert.equal(empty.issues[0].field, 'cards')
+})
+
+function twoProjectsNearDeadline() {
+  let state = ok('initialize', { seed: 5 }).state
+  state = ok('instantiate_work', { state, blueprint: tiny, work_id: 'work_a', duration_weeks: 26 }).state
+  state = ok('instantiate_work', { state, blueprint: tiny, work_id: 'work_b', duration_weeks: 26 }).state
+  for (const work of state.works) work.deadline_week = 2
+  state = assign(state, 'staff_dir', 'work_a')
+  state = assign(state, 'staff_ka', 'work_b')
+  return setAnimationQuality(setAnimationQuality(state, 'work_a', 50), 'work_b', 50)
+}
+
+test('事件仲裁：两个项目同周各自触发，互不覆盖，处理前阻塞推进', () => {
+  let state = twoProjectsNearDeadline()
+  const advanced = ok('advance_week', { state })
+  state = advanced.state
+  assert.equal(advanced.report.events.drawn, true)
+  assert.equal(advanced.report.events.count, 2)
+  assert.equal(pendingOf(state).length, 2)
+  assert.deepEqual(pendingOf(state).map((event) => event.work_id).sort(), ['work_a', 'work_b'])
+  assert.ok(pendingOf(state).every((event) => event.event_id === 'schedule_slip'))
+
+  const blocked = call('advance_week', { state })
+  assert.equal(blocked.error.code, 'INVALID_PHASE')
+  assert.ok(blocked.error.message.includes('2'))
+
+  // 同名事件跨项目时必须指定 work_id
+  const ambiguous = call('resolve_event', { state, event_id: 'schedule_slip', option_id: 'accept' })
+  assert.equal(ambiguous.error.code, 'INVALID_INPUT')
+
+  const resolvedA = ok('resolve_event', { state, event_id: 'schedule_slip', option_id: 'accept', work_id: 'work_a' }).state
+  assert.equal(pendingOf(resolvedA).length, 1)
+  assert.equal(pendingOf(resolvedA)[0].work_id, 'work_b')
+  assert.equal(resolvedA.events.per_work.work_a.cooldowns.schedule_slip, resolvedA.company.week + 4)
+  assert.ok(call('advance_week', { state: resolvedA }).error)
+
+  // 效果只作用于归属项目：A 的动画阶段质量 -3，B 保持 50
+  const aQuality = findItem(resolvedA, 'work_a', 'ep01.inbetween').quality
+  const bQuality = findItem(resolvedA, 'work_b', 'ep01.inbetween').quality
+  assert.equal(aQuality.story, 47)
+  assert.equal(bQuality.story, 50)
+
+  const resolvedB = ok('resolve_event', { state: resolvedA, event_id: 'schedule_slip', option_id: 'accept', work_id: 'work_b' }).state
+  assert.equal(pendingOf(resolvedB).length, 0)
+  const next = ok('advance_week', { state: resolvedB })
+  assert.equal(next.state.company.week, resolvedB.company.week + 1)
+})
+
+test('事件仲裁：重大事件同项目只触发一次，之后让位给普通事件', () => {
+  let state = ok('initialize', { seed: 9 }).state
+  state = ok('instantiate_work', { state, blueprint: tiny, work_id: 'work_01', duration_weeks: 26 }).state
+  for (const member of state.staff) member.fatigue = 70
+  state = assign(state, 'staff_dir')
+  const first = ok('advance_week', { state }).state
+  assert.equal(pendingOf(first).length, 1)
+  assert.equal(pendingOf(first)[0].event_id, 'director_illness')
+
+  const resolved = ok('resolve_event', {
+    state: first,
+    event_id: 'director_illness',
+    option_id: 'accept',
+    work_id: 'work_01'
+  }).state
+  assert.deepEqual(resolved.events.per_work.work_01.major_seen, ['director_illness'])
+  assert.equal(pendingOf(resolved).length, 0)
+
+  const second = ok('advance_week', { state: resolved }).state
+  assert.equal(pendingOf(second).length, 1)
+  assert.equal(pendingOf(second)[0].event_id, 'animator_exhaustion')
+})
+
+test('事件不变式：同一项目多条待处理、归属无效都被拒绝', () => {
+  let state = twoProjectsNearDeadline()
+  state = ok('advance_week', { state }).state
+  assert.equal(pendingOf(state).length, 2)
+
+  const duplicate = JSON.parse(JSON.stringify(state))
+  duplicate.events.pending.push({
+    ...duplicate.events.pending[0],
+    event_id: 'key_cut_rework',
+    options: [{ id: 'accept', label: '接受', kind: 'abandon', risk_hint: '', cost: 0 }]
+  })
+  const duplicateResult = call('assign_staff', { state: duplicate, staff_id: 'staff_dir', work_id: 'work_a' })
+  assert.equal(duplicateResult.error?.code, 'INVALID_STATE')
+  assert.ok(duplicateResult.error.message.includes('INV-23'))
+
+  const orphan = JSON.parse(JSON.stringify(state))
+  orphan.events.pending[0].work_id = 'work_missing'
+  const orphanResult = call('assign_staff', { state: orphan, staff_id: 'staff_dir', work_id: 'work_a' })
+  assert.equal(orphanResult.error?.code, 'INVALID_STATE')
+})
+
+test('事件确定性：同 seed 同操作，待处理事件与哈希一致', () => {
+  const run = () => {
+    let state = twoProjectsNearDeadline()
+    const advanced = ok('advance_week', { state })
+    return {
+      pending: advanced.state.events.pending,
+      hash: ok('hash_state', { state: advanced.state }).hash
+    }
+  }
+  assert.deepEqual(run(), run())
+})

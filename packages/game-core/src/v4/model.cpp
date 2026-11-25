@@ -331,6 +331,83 @@ void from_json(const Json& j, Finance& value) {
     else value.solvency.deadline_week.reset();
 }
 
+// ---------------- EventState ----------------
+void to_json(Json& j, const EventState& value) {
+    Json pending = Json::array();
+    for (const auto& event : value.pending) {
+        Json options = Json::array();
+        for (const auto& option : event.options) {
+            options.push_back(Json{{"id", option.id},
+                                   {"label", option.label},
+                                   {"kind", option.kind},
+                                   {"risk_hint", option.risk_hint},
+                                   {"cost", option.cost}});
+        }
+        pending.push_back(Json{{"event_id", event.event_id},
+                               {"work_id", event.work_id},
+                               {"triggered_week", event.triggered_week},
+                               {"expires_week", event.expires_week ? Json(*event.expires_week) : Json(nullptr)},
+                               {"options", options}});
+    }
+    Json per_work = Json::object();
+    for (const auto& [work_id, entry] : value.per_work) {
+        Json cooldowns = Json::object();
+        for (const auto& [event_id, until] : entry.cooldowns) cooldowns[event_id] = until;
+        per_work[work_id] = Json{{"cooldowns", cooldowns}, {"major_seen", entry.major_seen}};
+    }
+    j = Json{{"pending", pending},
+             {"last_event_week", value.last_event_week ? Json(*value.last_event_week) : Json(nullptr)},
+             {"per_work", per_work}};
+}
+
+void from_json(const Json& j, EventState& value) {
+    value = EventState{};
+    if (j.contains("pending") && j.at("pending").is_array()) {
+        for (const auto& raw : j.at("pending")) {
+            if (!raw.is_object()) continue;
+            PendingEvent event;
+            event.event_id = raw.value("event_id", std::string{});
+            event.work_id = raw.value("work_id", std::string{});
+            event.triggered_week = raw.value("triggered_week", 0);
+            if (raw.contains("expires_week") && raw.at("expires_week").is_number_integer()) {
+                event.expires_week = raw.at("expires_week").get<int>();
+            }
+            if (raw.contains("options") && raw.at("options").is_array()) {
+                for (const auto& option : raw.at("options")) {
+                    if (!option.is_object()) continue;
+                    event.options.push_back(EventOptionView{
+                        option.value("id", std::string{}),
+                        option.value("label", std::string{}),
+                        option.value("kind", std::string{}),
+                        option.value("risk_hint", std::string{}),
+                        option.value("cost", 0)});
+                }
+            }
+            value.pending.push_back(std::move(event));
+        }
+    }
+    if (j.contains("last_event_week") && j.at("last_event_week").is_number_integer()) {
+        value.last_event_week = j.at("last_event_week").get<int>();
+    }
+    if (j.contains("per_work") && j.at("per_work").is_object()) {
+        for (const auto& [work_id, raw] : j.at("per_work").items()) {
+            if (!raw.is_object()) continue;
+            WorkEventState entry;
+            if (raw.contains("cooldowns") && raw.at("cooldowns").is_object()) {
+                for (const auto& [event_id, until] : raw.at("cooldowns").items()) {
+                    if (until.is_number_integer()) entry.cooldowns[event_id] = until.get<int>();
+                }
+            }
+            if (raw.contains("major_seen") && raw.at("major_seen").is_array()) {
+                for (const auto& id : raw.at("major_seen")) {
+                    if (id.is_string()) entry.major_seen.push_back(id.get<std::string>());
+                }
+            }
+            value.per_work[work_id] = std::move(entry);
+        }
+    }
+}
+
 // ---------------- GameState ----------------
 void to_json(Json& j, const GameState& value) {
     Json staff = Json::array();
@@ -365,7 +442,9 @@ void from_json(const Json& j, GameState& value) {
     value.partners = j.value("partners", Json::array());
     value.committees = j.value("committees", Json::array());
     value.market = j.value("market", Json::object());
-    value.events = j.value("events", Json::object());
+    // M1 存档没有 events 字段时按"无待处理、无冷却"处理；M0 §14.1 的必填由
+    // decode_state 在命令入口检查，避免坏存档靠默认值混过去。
+    value.events = j.contains("events") ? j.at("events").get<EventState>() : EventState{};
     value.finance = j.at("finance").get<Finance>();
     value.archive = j.value("archive", Json::object());
 }
