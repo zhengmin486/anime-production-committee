@@ -525,13 +525,27 @@ test('输入边界：assign_staff 的 work_id 类型错误不被当成取消分�
 
 test('输入边界：缺必填字段返回 INVALID_INPUT，不用默认值掩盖', () => {
   const state = setupTiny()
-  const missingWeek = JSON.parse(JSON.stringify(state))
-  delete missingWeek.company.week
-  assert.equal(call('assign_staff', { state: missingWeek, staff_id: 'staff_dir', work_id: null }).error?.code, 'INVALID_INPUT')
+  const before = ok('hash_state', { state }).hash
+  const rejectUnchanged = (mutate, label) => {
+    const bad = JSON.parse(JSON.stringify(state))
+    mutate(bad)
+    for (const name of ['assign_staff', 'advance_week', 'hash_state']) {
+      const result = call(name, { state: bad, staff_id: 'staff_dir', work_id: null })
+      assert.equal(result.error?.code, 'INVALID_INPUT', `${label} / ${name} 应被拒绝`)
+    }
+    assert.equal(ok('hash_state', { state }).hash, before, `${label}：失败不得改动状态`)
+  }
 
-  const missingTotal = JSON.parse(JSON.stringify(state))
-  delete missingTotal.works[0].common.items[0].work_total
-  assert.equal(call('assign_staff', { state: missingTotal, staff_id: 'staff_dir', work_id: null }).error?.code, 'INVALID_INPUT')
+  rejectUnchanged((s) => { delete s.company.week }, '缺 company.week')
+  rejectUnchanged((s) => { delete s.works[0].common.items[0].work_total }, '缺 item.work_total')
+  // 这几个字段在 from_json 里都有默认值，过去缺了会被静默补成 0 / normal，
+  // 让"周结算与手算一致"在坏输入上失真。现在必须在入口拒绝。
+  rejectUnchanged((s) => { delete s.staff[0].weekly_salary }, '缺 staff.weekly_salary（工资会静默归零）')
+  rejectUnchanged((s) => { delete s.staff[0].project_fee }, '缺 staff.project_fee')
+  rejectUnchanged((s) => { delete s.staff[0].fatigue }, '缺 staff.fatigue（产能会静默归零）')
+  rejectUnchanged((s) => { delete s.staff[0].morale }, '缺 staff.morale')
+  rejectUnchanged((s) => { delete s.finance.solvency }, '缺 finance.solvency（危机状态被洗白）')
+  rejectUnchanged((s) => { delete s.finance.solvency.state }, '缺 finance.solvency.state')
 })
 
 test('契约名适配：initialize_game / set_work_plan 与内部入口等价', () => {
@@ -545,4 +559,131 @@ test('契约名适配：initialize_game / set_work_plan 与内部入口等价', 
   const viaInternal = ok('set_plan', { state: base, work_id: 'work_01', plan }).state
   const viaContract = ok('set_work_plan', { state: base, work_id: 'work_01', plan }).state
   assert.equal(ok('hash_state', { state: viaInternal }).hash, ok('hash_state', { state: viaContract }).hash)
+})
+
+// ================= M2 单项目纵切：立项 → 生产 → 交付 → Archive =================
+
+function setupStarted(seed = 11, opts = {}) {
+  const base = ok('initialize_game', { seed }).state
+  return ok('start_work', {
+    state: base,
+    work_id: opts.work_id || 'work_m2',
+    blueprint: opts.blueprint || tiny,
+    contract_budget: opts.contract_budget || 5000000,
+    duration_weeks: opts.duration_weeks || 3,
+    name: 'M2 测试作品',
+    scale: 'short',
+  }).state
+}
+
+function markAllGatesDelivered(state, workId) {
+  const work = state.works.find((entry) => entry.id === workId)
+  for (const episode of work.episodes) {
+    for (const stage of episode.stages) {
+      for (const item of stage.items) {
+        if (!item.is_gate) continue
+        item.work_done = item.deliver_at * item.work_total / 1000
+        if (!item.contributors.includes('staff_dir')) item.contributors.push('staff_dir')
+      }
+    }
+  }
+  return state
+}
+
+test('M2 start_work：制作费立项一次入账，账目恒等式成立', () => {
+  const base = ok('initialize_game', { seed: 11 }).state
+  const started = ok('start_work', {
+    state: base, work_id: 'work_m2', blueprint: tiny, contract_budget: 5000000,
+    duration_weeks: 3,
+  }).state
+  assert.equal(started.finance.balance, base.finance.balance + 5000000)
+  assert.equal(started.works.length, 1)
+  assert.equal(started.works[0].offer.contract_budget, 5000000)
+  assert.equal(started.works[0].status, 'producing')
+  const sum = started.finance.entries.reduce((acc, e) => acc + e.amount, 0)
+  assert.equal(started.finance.opening_funds + sum, started.finance.balance)
+  assert.ok(started.finance.entries.some((e) => e.category === 'contract' && e.work_id === 'work_m2'))
+})
+
+test('M2 start_work 守卫：模式/重复 id/非正预算被拒且状态不变', () => {
+  const base = ok('initialize_game', { seed: 11 }).state
+  const before = ok('hash_state', { state: base }).hash
+  assert.equal(call('start_work', { state: base, work_id: 'w', blueprint: tiny, contract_budget: 100, mode: 'committee' }).error?.code, 'MODE_NOT_ALLOWED')
+  assert.equal(call('start_work', { state: base, work_id: 'w', blueprint: tiny, contract_budget: 0 }).error?.code, 'INVALID_INPUT')
+  const started = ok('start_work', { state: base, work_id: 'w', blueprint: tiny, contract_budget: 100 }).state
+  assert.equal(call('start_work', { state: started, work_id: 'w', blueprint: tiny, contract_budget: 100 }).error?.code, 'INVALID_INPUT')
+  assert.equal(ok('hash_state', { state: base }).hash, before)
+})
+
+test('M2 deliver_work：门槛达标后当次交付，周数不变、Archive 只追加、员工解绑', () => {
+  let state = setupStarted()
+  state = ok('assign_staff', { state, staff_id: 'staff_dir', work_id: 'work_m2' }).state
+  const weekBefore = state.company.week
+  state = markAllGatesDelivered(state, 'work_m2')
+  const delivered = ok('deliver_work', { state, work_id: 'work_m2' })
+  assert.equal(delivered.state.company.week, weekBefore)
+  assert.equal(delivered.state.works[0].status, 'settled')
+  assert.equal(delivered.state.archive.works.length, 1)
+  const record = delivered.state.archive.works[0]
+  assert.equal(record.work_id, 'work_m2')
+  assert.equal(record.episode_count, 1)
+  assert.equal(record.gate_completion_permille, 1000)
+  assert.equal(record.end_reason, 'delivered')
+  assert.equal(record.finance_summary.contract_received, 5000000)
+  assert.equal(delivered.delivery.rating, record.rating)
+  assert.ok(delivered.state.staff.every((s) => !s.assignment_work_id))
+  // 重复交付被拒、状态不变
+  const afterHash = ok('hash_state', { state: delivered.state }).hash
+  assert.equal(call('deliver_work', { state: delivered.state, work_id: 'work_m2' }).error?.code, 'INVALID_PHASE')
+  assert.equal(ok('hash_state', { state: delivered.state }).hash, afterHash)
+})
+
+test('M2 deliver_work 门槛未达标被拒且状态不变', () => {
+  const state = setupStarted()
+  const before = ok('hash_state', { state }).hash
+  assert.equal(call('deliver_work', { state, work_id: 'work_m2' }).error?.code, 'GATE_UNMET')
+  assert.equal(ok('hash_state', { state }).hash, before)
+})
+
+test('M2 强制交付：到截止周自动结算，按完成度折算质量并记原因', () => {
+  let state = setupStarted(12, { duration_weeks: 1 })
+  state = ok('assign_staff', { state, staff_id: 'staff_dir', work_id: 'work_m2' }).state
+  const advanced = ok('advance_week', { state })
+  assert.equal(advanced.state.company.week, 1)
+  assert.equal(advanced.state.works[0].status, 'settled')
+  assert.equal(advanced.report.deliveries.length, 1)
+  assert.equal(advanced.report.deliveries[0].end_reason, 'forced_delivery')
+  assert.equal(advanced.state.archive.works[0].end_reason, 'forced_delivery')
+  assert.ok(advanced.state.archive.works[0].occurrence_issues.includes('forced_delivery'))
+  assert.ok(advanced.state.archive.works[0].gate_completion_permille < 1000)
+})
+
+test('M2 abort_work：中止归档并解绑，不重复入账', () => {
+  let state = setupStarted(13)
+  state = ok('assign_staff', { state, staff_id: 'staff_dir', work_id: 'work_m2' }).state
+  const entriesBefore = state.finance.entries.length
+  const aborted = ok('abort_work', { state, work_id: 'work_m2' })
+  assert.equal(aborted.state.works[0].status, 'settled')
+  assert.equal(aborted.state.archive.works[0].end_reason, 'aborted')
+  assert.equal(aborted.state.finance.entries.length, entriesBefore)
+  assert.ok(aborted.state.staff.every((s) => !s.assignment_work_id))
+  assert.equal(call('abort_work', { state: aborted.state, work_id: 'work_m2' }).error?.code, 'INVALID_PHASE')
+})
+
+test('M2 12 集蓝图：start_work 实例化 174 工作项并可归档', () => {
+  const tv = JSON.parse(readFileSync(new URL('../docs/blueprints/tv_standard.blueprint.json', import.meta.url), 'utf8'))
+  const started = ok('start_work', {
+    state: ok('initialize_game', { seed: 14 }).state,
+    work_id: 'work_tv', blueprint: tv, contract_budget: 200000000, duration_weeks: 30,
+  }).state
+  assert.equal(started.works[0].episodes.length, 12)
+  const work = started.works[0]
+  let itemCount = work.common.items.length
+  for (const ep of work.episodes) for (const st of ep.stages) itemCount += st.items.length
+  assert.equal(itemCount, 174)
+  const state = markAllGatesDelivered(started, 'work_tv')
+  const delivered = ok('deliver_work', { state, work_id: 'work_tv' })
+  assert.equal(delivered.state.archive.works[0].episode_count, 12)
+  assert.equal(delivered.state.archive.works[0].episode_summary.length, 12)
+  assert.equal(delivered.state.archive.works[0].gate_completion_permille, 1000)
 })
