@@ -51,7 +51,7 @@
 | 不同作品规模的集数 | TV、短篇、OVA、剧场版等集数范围 | **临时参考**：TV 12–13、短篇 1–3、OVA/剧场版 1 | [蓝图规范](BLUEPRINT_SPEC.md)、[TV 蓝图样例](blueprints/tv_standard.blueprint.json)、[#63 工期](https://github.com/zhengmin486/anime-production-committee/issues/63) |
 | 公共制作工作项数量 | 不同蓝图的公共制作项数量和拆分粒度 | **待细化 / 临时样例** | [蓝图规范](BLUEPRINT_SPEC.md)、[TV 蓝图样例](blueprints/tv_standard.blueprint.json)、[DOMAIN_ARCHITECTURE](DOMAIN_ARCHITECTURE.md) |
 | 单集工作项数量 | 六阶段下各工作项数量及拆分粒度 | **待细化 / 临时样例** | [蓝图规范](BLUEPRINT_SPEC.md)、[TV 蓝图样例](blueprints/tv_standard.blueprint.json) |
-| 核心员工编制上限 | 不同公司发展阶段允许的核心员工人数 | **待标定**；作画设施不再垄断扩编资格 | [DECISION_LOG](DECISION_LOG.md)、[DOMAIN_ARCHITECTURE](DOMAIN_ARCHITECTURE.md)、[#61 公司](https://github.com/zhengmin486/anime-production-committee/issues/61) |
+| 核心员工编制上限 | 不同公司成长里程碑允许的核心员工人数 | **待标定**；由公司成长独立开放，不绑定设施等级/槽位/作画工作室，开放编制不收扩容费 | [DECISION_LOG](DECISION_LOG.md)、[DOMAIN_ARCHITECTURE](DOMAIN_ARCHITECTURE.md)、[#61 公司](https://github.com/zhengmin486/anime-production-committee/issues/61) |
 | 同时经营项目数 | 是否存在项目槽位硬上限 | **已确认**：不设置固定项目数上限 | [DECISION_LOG](DECISION_LOG.md)、[M0 契约](M0_CONTRACT_FREEZE.md) |
 | 市场企划槽位 | 初始槽位和最大槽位 | **已确认**：初始 4、上限 10 | [DECISION_LOG](DECISION_LOG.md)、[#59 市场](https://github.com/zhengmin486/anime-production-committee/issues/59) |
 | 市场每周刷新数量 | 每周补充数量、旧企划保留和替换数量 | **待标定** | [DECISION_LOG](DECISION_LOG.md)、[DESIGN_BACKLOG](DESIGN_BACKLOG_2026-11-25.md)、[#59 市场](https://github.com/zhengmin486/anime-production-committee/issues/59) |
@@ -87,7 +87,8 @@
 - 协力职业对产能的适配系数。**已确认锚点：60%**。
 - 不具备职业资格时的参与限制。**规则边界已确认，具体映射待细化**。
 - 六项专业能力分别对工作量、质量和监督统筹的贡献函数。**待标定**。
-- 监督岗位所需的 direction、management 等能力资格阈值。**待细化 / 待标定**。
+- 监督岗位所需的 direction、management 资格阈值（适用于演出/作画/脚本职业；监督职业天然具备资格）。**待标定**。
+- 主责与协力的质量贡献基准、协力质量上限及按实际完成工作量加权的参数。**待标定**。
 - 一名监督对项目团队产能、质量或协调的具体贡献。**待标定**，不得把管理负荷作为隐性惩罚重新引入。
 
 **参考文件：** [DECISION_LOG.md](DECISION_LOG.md)、[DOMAIN_ARCHITECTURE.md](DOMAIN_ARCHITECTURE.md)、[M0_CONTRACT_FREEZE.md](M0_CONTRACT_FREEZE.md)、[#55 职业](https://github.com/zhengmin486/anime-production-committee/issues/55)。
@@ -294,6 +295,7 @@
 - 初始核心员工人数及总周薪。
 - 公司固定运营成本。
 - 办公场地租金。
+- 办公场地扩容的一次性搬迁费（声望 190：2→4 槽；声望 350：4→6 槽）及扩容后的每周基础房租增量。
 - 行政、人事及其他固定支出。
 - 不同公司规模下的固定成本增长。
 - 闲置员工工资。
