@@ -198,6 +198,14 @@ GameState decode_state(const Json& request) {
     if (!state.at("events").at("pending").is_array()) {
         throw Json::type_error::create(302, "events.pending 必须是数组", nullptr);
     }
+    for (const auto& event : state.at("events").at("pending")) {
+        require(event, "work_id", "events.pending[]");
+        require(event, "event_id", "events.pending[]");
+        require(event, "viewed", "events.pending[]");
+        if (!event.at("viewed").is_boolean()) {
+            throw Json::type_error::create(302, "events.pending[].viewed 必须是布尔值", nullptr);
+        }
+    }
     require(state.at("company"), "id", "company");
     require(state.at("company"), "week", "company");
     require(state.at("company"), "status", "company");
@@ -692,9 +700,13 @@ std::string advance_week(const std::string& input) {
 
         if (state.company.status != "running") return encode(error_body("COMPANY_ENDED", "公司已结束"));
         if (state.company.week >= kMaxWeek) return encode(error_body("INVALID_PHASE", "已达经营上限"));
-        if (!state.events.pending.empty()) {
-            return encode(error_body("INVALID_PHASE",
-                                     "存在 " + std::to_string(state.events.pending.size()) + " 条待处理事件"));
+        // INV-23：只有未查看事件阻塞推进；已查看未处理事件允许推进并继续计时。
+        int unviewed = 0;
+        for (const auto& event : state.events.pending) {
+            if (!event.viewed) ++unviewed;
+        }
+        if (unviewed > 0) {
+            return encode(error_body("INVALID_PHASE", "存在 " + std::to_string(unviewed) + " 条未查看事件"));
         }
         const auto pre_errors = validate(state);
         if (!pre_errors.empty()) return encode(error_body("INVALID_STATE", pre_errors.front()));
@@ -985,6 +997,41 @@ void apply_event_effects(GameState& state, Project& work, const std::vector<Effe
 }
 
 }  // namespace
+
+// M0 §14.1：查看是独立原子动作。只把目标事件标记为 viewed=true，
+// 不应用选项、不扣款、不移除 pending；已查看再调用按幂等成功处理。
+std::string view_event(const std::string& input) {
+    try {
+        const Json request = Json::parse(input);
+        GameState state = decode_state(request);
+        if (state.company.status != "running") return encode(error_body("COMPANY_ENDED", "公司已结束"));
+        if (!request.contains("work_id") || !request.at("work_id").is_string() ||
+            !request.contains("event_id") || !request.at("event_id").is_string()) {
+            return encode(error_body("INVALID_INPUT", "work_id 与 event_id 必须是字符串"));
+        }
+        const std::string work_id = request.at("work_id").get<std::string>();
+        const std::string event_id = request.at("event_id").get<std::string>();
+        PendingEvent* target = nullptr;
+        for (auto& pending : state.events.pending) {
+            if (pending.work_id == work_id && pending.event_id == event_id) {
+                target = &pending;
+                break;
+            }
+        }
+        if (target == nullptr) return encode(error_body("NOT_FOUND", "待处理事件不存在"));
+        if (target->viewed) {
+            return encode(Json{{"state", state}, {"viewed", true}, {"already_viewed", true}});
+        }
+        target->viewed = true;
+        const auto errors = validate(state);
+        if (!errors.empty()) return encode(error_body("INTERNAL_ERROR", "查看后状态非法: " + errors.front()));
+        return encode(Json{{"state", state}, {"viewed", true}, {"already_viewed", false}});
+    } catch (const Json::exception&) {
+        return encode(error_body("INVALID_INPUT", "JSON 或字段类型无效"));
+    } catch (...) {
+        return encode(error_body("INTERNAL_ERROR", "内部错误"));
+    }
+}
 
 std::string resolve_event(const std::string& input) {
     try {

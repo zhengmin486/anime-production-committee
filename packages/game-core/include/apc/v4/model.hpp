@@ -211,6 +211,7 @@ struct PendingEvent {
     std::optional<int> expires_week;
     int cooldown_weeks = 0;
     bool once_per_project = false;
+    bool viewed = false;      // INV-23：未查看阻塞周推进，查看不等于处理
     std::vector<EventOptionView> options;
 };
 

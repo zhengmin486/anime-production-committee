@@ -726,6 +726,31 @@ test('事件不变式：同一项目多条待处理、归属无效都被拒绝',
   assert.equal(orphanResult.error?.code, 'INVALID_STATE')
 })
 
+test('INV-23：查看只标记目标事件，不结算不移除；全部查看后允许推进', () => {
+  let state = twoProjectsNearDeadline()
+  state = ok('advance_week', { state }).state
+  assert.equal(state.events.pending.length, 2)
+  assert.ok(state.events.pending.every((event) => event.viewed === false))
+  assert.equal(call('advance_week', { state }).error.code, 'INVALID_PHASE')
+
+  const viewedA = ok('view_event', { state, work_id: 'work_a', event_id: 'schedule_slip' })
+  assert.equal(viewedA.already_viewed, false)
+  state = viewedA.state
+  assert.equal(state.events.pending.length, 2)
+  assert.equal(state.events.pending.find((e) => e.work_id === 'work_a').viewed, true)
+  assert.equal(state.events.pending.find((e) => e.work_id === 'work_b').viewed, false)
+  // 已查看未处理仍保留，但推进被另一条未查看事件挡住
+  assert.equal(call('advance_week', { state }).error.code, 'INVALID_PHASE')
+
+  const again = ok('view_event', { state, work_id: 'work_a', event_id: 'schedule_slip' })
+  assert.equal(again.already_viewed, true)
+
+  state = ok('view_event', { state, work_id: 'work_b', event_id: 'schedule_slip' }).state
+  const advanced = ok('advance_week', { state })
+  assert.equal(advanced.state.company.week, state.company.week + 1)
+  assert.equal(advanced.state.events.pending.length, 2)   // 查看不等于处理
+})
+
 test('事件确定性：同 seed 同操作，待处理事件与哈希一致', () => {
   const run = () => {
     let state = twoProjectsNearDeadline()

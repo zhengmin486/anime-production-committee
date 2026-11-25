@@ -30,7 +30,9 @@ std::string hash_state(const std::string& input);        // {state}
 std::string initialize_game(const std::string& input);   // M0 命令 1：{seed}
 std::string set_work_plan(const std::string& input);     // M0 命令 3：{state, work_id, plan}
 
-// M0 命令 19：{state, event_id, option_id}；work_id 可选，用于同名事件跨项目消歧。
+// M0 §14.1：查看事件（独立原子动作，不结算）；命令表尚未登记，待 #53 补录。
+std::string view_event(const std::string& input);        // {state, work_id, event_id}
+// M0 命令 19：{state, work_id, event_id, option_id}。
 std::string resolve_event(const std::string& input);
 
 // 内部/构建诊断：校验一份事件卡目录，返回 {ok,count,ids,issues}。不是玩家命令。

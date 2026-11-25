@@ -17,6 +17,7 @@ EMSCRIPTEN_BINDINGS(apc_v4) {
     emscripten::function("assign_staff", &apc::v4::assign_staff);
     emscripten::function("advance_week", &apc::v4::advance_week);
     emscripten::function("resolve_event", &apc::v4::resolve_event);
+    emscripten::function("view_event", &apc::v4::view_event);
     emscripten::function("hash_state", &apc::v4::hash_state);
     // 内部/测试入口：校验内容卡目录，不参与玩家命令契约。
     emscripten::function("validate_event_catalog", &apc::v4::validate_event_catalog);

@@ -358,6 +358,7 @@ void to_json(Json& j, const EventState& value) {
                                {"expires_week", event.expires_week ? Json(*event.expires_week) : Json(nullptr)},
                                {"cooldown_weeks", event.cooldown_weeks},
                                {"once_per_project", event.once_per_project},
+                               {"viewed", event.viewed},
                                {"options", options}});
     }
     Json per_work = Json::object();
@@ -383,6 +384,7 @@ void from_json(const Json& j, EventState& value) {
             event.triggered_week = raw.value("triggered_week", 0);
             event.cooldown_weeks = raw.value("cooldown_weeks", 0);
             event.once_per_project = raw.value("once_per_project", false);
+            event.viewed = raw.value("viewed", false);
             if (raw.contains("expires_week") && raw.at("expires_week").is_number_integer()) {
                 event.expires_week = raw.at("expires_week").get<int>();
             }
