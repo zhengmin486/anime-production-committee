@@ -381,12 +381,12 @@ v1.0 只给了骨架，并把"公共制作 + 单集 + 工作项"和"资金危机
 
 | 拥有 | 不拥有 |
 | --- | --- |
-| 全局唯一的待处理事件槽 | 项目质量与进度（Project） |
+| 多项目待处理事件队列 `events.pending[]` | 项目质量与进度（Project） |
 | 每项目的冷却表、已触发重大事件、延后事件 | 员工状态（Staff） |
-| 事件的触发条件评估与优先级选择 | 事件造成的资金变化（Finance 入账） |
+| 每项目每周最多一个事件的触发约束、候选评估与冷却 | 事件造成的资金变化（Finance 入账） |
 | 事件内容目录的引用 | 风险值（Project 派生） |
 
-**边界**：Event 只**选择**事件并持有待处理实例；效果由应用层翻译成各领域的公开命令执行。事件永不直接写 Project/Staff/Finance 的字段。
+**边界**：Event 按项目独立触发，每个项目每周最多一个；多个项目可在同一周分别触发。待处理实例全部保存在 `events.pending[]`，不覆盖、不丢弃，玩家可自由选择处理顺序；队列非空时阻塞全局周推进。Event 只选择并持有事件实例，效果由应用层翻译成各领域公开命令执行，不直接写 Project/Staff/Finance 字段。危机期间不抽取新事件；不设置放弃本周处理后继续推进的延期槽。
 
 ### 5.9 Archive（作品履历与系列）
 
@@ -514,7 +514,7 @@ Staff {
   experience{...}: >=0               // 累计，能力增长由内核换算
   potential{...}, revealed{...}      // 潜力不低于当前能力
   talent_type, traits[]
-  weekly_salary (core>0, temp=0) | project_fee (temp>0, core=0)
+  weekly_salary (core>0, temporary>0) | signing_fee (one-time; temporary cost belongs to its work)
   fatigue: 0..100 ; morale: 0..100 ; departure_warning: bool
   assignment_work_id: null | work_id      // 本周唯一归属；null = 未参与任何项目
   last_participation: null | { work_id, unit_id, week }   // 上次实际参与的单元，磨合判定用
@@ -524,7 +524,8 @@ Staff {
 ```
 
 **不变式**
-- `employment=core ⇒ weekly_salary>0 ∧ project_fee=0`；反之亦然（沿用 V3）。
+- `weekly_salary>0` 适用于核心员工与临时项目员工；临时员工另有一次性 `signing_fee`，不得用 `weekly_salary=0` 表示临时员工。
+- 核心员工不绑定项目合同；临时员工必须有 `temporary_contract.work_id`，且 `assignment_work_id` 恒等于合同项目。临时员工签约费即时扣除，周薪从招聘后的下一次周结算起计提，并归属该项目。
 - `assignment_work_id` 为 null 或指向 `works` 中处于 `producing` 的项目；临时人员的归属恒等于其合同项目。
 - 不存在 `support` / 支援份额 / 工时拆分字段：同周一人只出现一次（[已确认] DEC-STAFF-001）。
 - `last_participation.week` 只能是 `week-1`：每次结算覆盖，不累积历史。
@@ -879,19 +880,24 @@ crisis --(预检通过)--> normal
 crisis --(deadline 用尽仍失败)--> 由应用层置 Company.closing/bankrupt
 ```
 
-- `crisis` 是**资金状态**，不是公司状态：公司仍在 `running`，仍可招聘、签外包、调计划、融资、关停项目。
-- 危机不自动解约：已签外包与临时合同继续存在，但可以主动终止（首版允许解约但费用不退，避免"危机时无损砍单"）。
+- `crisis` 是**资金状态**，不是公司状态：公司仍在 `running`，可以调计划、调整人员归属、融资、解雇核心员工、终止项目和交付已达标作品。
+- 危机期间禁止招聘、签订新外包及其他新增经营承诺。已签外包与临时员工合同继续存在；临时员工不得因进入危机而被通用提前解约，只有特定事件明确提供选项时才可提前解除。项目中止时按既定规则自动释放绑定的临时员工。
 - 危机期间若玩家完全不操作，结果只能是破产；不存在"什么都不做就自己好起来"。
 
 ### 7.6 Event 与 Archive
 
 ```text
 EventState {
-  pending: null | { event_id, work_id, episode_id: null|episode_id, stage: null|stage_key,
-                    item_id: null|item_id, triggered_week,
-                    options[{id,label,cost,risk_hint}], expires_week, escalation }
+  pending: EventInstance[]  // 多项目可同时待处理；每项目每周最多一条
   last_event_week
-  per_work: { work_id: { cooldowns{event_id: week}, major_seen[], deferred: null|instance } }
+  per_work: { work_id: { cooldowns{event_id: week}, major_seen[] } }
+}
+
+EventInstance { event_id, work_id, episode_id: null|episode_id, stage: null|stage_key,
+                item_id: null|item_id, triggered_week,
+                options[{id,label,cost,risk_hint}], expires_week, escalation }
+
+// 不设 deferred/abandon 槽；处理一个事件只移除对应 event_id，其他待处理事件保留。
 }
 
 Archive {
@@ -955,8 +961,10 @@ WorkRecord { id, name, ip_id, source, genre, scale, mode, investment_percent,
 | `start_work(offer_id, mode, percent, committee_partner_ids)` | Application | 公司 running；企划存在；声望与成绩条件；模式合法；现金足够支付投资 | Project 建立、委员会成立、Market 消费企划、Finance 记投资与合同预算、员工可归属 |
 | `set_work_plan(work_id, plan)` | Project | 公司 running；项目 producing；`plan.target` 须引用本项目单集/阶段，至多一个 | 更新计划（含定向目标），下个结算生效 |
 | `assign_staff(staff_id, work_id \| null)` | Staff | 项目存在且 producing；核心员工每周仅能归属一个项目；传 null 为撤出 | 更新唯一项目归属，下一次结算生效 |
-| `hire_core(staff_id)` / `scout(...)` / `dismiss_staff(staff_id)` | Staff + Finance | 公司 running；无待处理事件；非资金危机；现金；名册上限（若有）。不要求全公司空闲（DEC-PLAY-003） | 名册变化、签约费/遣散费入账 |
-| `hire_temporary(work_id, candidate_id)` | Staff + Finance | 项目 producing；现金 | 临时合同建立、项目费入账 |
+| `hire_core(staff_id)` / `scout(...)` | Staff + Finance | 公司 running；非资金危机；候选人有效；现金足够支付一次性招聘/签约费用；名册上限（若有）。不要求全公司空闲（DEC-PLAY-003） | 名册变化、一次性费用即时入账；新员工从下一次周结算起可分配并计薪 |
+| `dismiss_staff(staff_id)` | Staff + Finance | 核心员工存在；公司至少保留 1 名核心员工 | 移出名册、清空归属；不产生遣散费 |
+| `hire_temporary(work_id, candidate_id)` | Staff + Finance | 项目 producing；非资金危机；候选人有效；现金足够支付签约费 | 建立项目绑定合同、签约费即时入账；周薪从下一次周结算起计提并归属项目 |
+| 临时员工提前解除 | Event → Staff + Finance | 仅当特定事件选项明确授权；普通命令不开放通用提前解约 | 保留已发生费用；解除后停止后续周薪；项目中止/交付仍按合同规则自动解绑 |
 | `sign_outsourcing(work_id, item_id, supplier_id, work_total, mode)` | Vendor + Finance | 工作项已解锁；专业匹配；供应商产能余量；现金 | 合同建立、费用入账、占用产能 |
 | `deliver_work(work_id)` | Project + Application | 全部门槛项已交付；未过截止 | 转 delivering 并当次结清（§7.3.6） |
 | `abort_work(work_id)` | Project + Finance | 项目 producing | 项目终止、违约扣罚入账、释放人员与外包占用 |
@@ -966,7 +974,7 @@ WorkRecord { id, name, ip_id, source, genre, scale, mode, investment_percent,
 | `request_extension(work_id)` | Project + Finance | 委员会模式；未用过；未过截止；现金 | 延期生效、压力与费用 |
 | `arrange_financing(provider, amount)` | Finance | 偿付危机或资金压力周；额度未超限 | 现金入账、生成贷款与周还款计划（§7.5.1） |
 | `advance_week()` | Application | 公司 running；无待处理事件；周 < 520 | 执行完整周结算（§9） |
-| `resolve_event(event_id, option_id)` | Event → Application | 存在该待处理事件；选项合法；现金足够（若需付款） | 效果分派到各领域、清空事件 |
+| `resolve_event(event_id, option_id)` | Event → Application | `events.pending[]` 中存在指定事件；选项合法；现金足够（若需付款） | 效果分派到各领域；仅移除指定 `event_id`，其他待处理事件保留 |
 | `end_company()` | Company + Application | 公司 running | 锁 closing，未交付项目转 delivering |
 | `finalize_delivery(work_id)` | Application | 项目 delivering | 交付结算、写 Archive、关闭委员会 |
 | `finalize_company()` | Application | 公司 ended 且全部项目已结算 | 生成公司结局评价 |
@@ -1403,7 +1411,7 @@ SaveRecord { version: 4, savedAt: ISO8601, rules_version, state: GameState }
 | `project.outsourcing` | Vendor.OutsourceContract | 迁移并补交付状态 |
 | `project.committee` | Partnership.Committee | 迁移并对齐 `{id,name,channel}` |
 | `offers/custom_offer/pending_proposal` | Market | 保留槽位语义；`workloads[5]` 换为 `blueprint_id + episode_count + scale` |
-| `pending_event`（全局单槽） | Event.pending（全局单槽，带 work_id） | 保留单槽，补归属与冷却 |
+| `pending_event`（V3 全局单槽） | `Event.pending[]` | V3 存档不迁移；v1/v2/v3 按存档兼容规则明确拒绝。新状态允许多个项目事件并存 |
 | `history[]` | Archive.works | 迁移并补渠道对账/名次/团队快照/单集摘要；旧记录的 `stages[]` 作为历史形状原样保留、不再参与计算 |
 | `preview` | 读模型 | **不进存档** |
 | `phase` | 派生 | **删除**；由（公司状态 + 待处理事件 + 项目集合）派生 |
