@@ -1,0 +1,54 @@
+{
+  "schema_version": 1,
+  "id": "station_visit",
+  "name": "电视台探班",
+  "category": "personnel",
+  "polarity": "positive",
+  "tier": "normal",
+  "tag": "station_visit",
+  "stages": [
+    "animation"
+  ],
+  "priority": 40,
+  "cooldown_weeks": 12,
+  "once_per_project": false,
+  "trigger": {
+    "metric": "weeks_in_project",
+    "op": ">=",
+    "threshold": 6
+  },
+  "random_weight": 25,
+  "expires_weeks": 0,
+  "description": "电视台的制片人来探班，看完素材后对团队的状态很满意。",
+  "foreshadow": "发行方最近频繁询问制作进度。",
+  "options": [
+    {
+      "id": "host",
+      "kind": "accept",
+      "label": "接待并展示素材",
+      "cost": 60000,
+      "risk_hint": "占用半天工期",
+      "effects": [
+        {
+          "scope": "instant",
+          "target": "morale",
+          "value": 6
+        },
+        {
+          "scope": "stage",
+          "target": "quality",
+          "stage": "animation",
+          "value": 1
+        }
+      ]
+    },
+    {
+      "id": "decline",
+      "kind": "decline",
+      "label": "婉拒，专注制作",
+      "cost": 0,
+      "risk_hint": "错过关系维护",
+      "effects": []
+    }
+  ]
+}

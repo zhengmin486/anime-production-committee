@@ -30,4 +30,11 @@ std::string hash_state(const std::string& input);        // {state}
 std::string initialize_game(const std::string& input);   // M0 命令 1：{seed}
 std::string set_work_plan(const std::string& input);     // M0 命令 3：{state, work_id, plan}
 
+// M0 命令 19：{state, event_id, option_id}；work_id 可选，用于同名事件跨项目消歧。
+std::string resolve_event(const std::string& input);
+
+// 内部/构建诊断：校验一份事件卡目录，返回 {ok,count,ids,issues}。不是玩家命令。
+std::string validate_event_catalog(const std::string& input);  // {catalog, source?}
+std::string event_catalog_info(const std::string& input);      // 内嵌目录自检，忽略入参
+
 }  // namespace apc::v4

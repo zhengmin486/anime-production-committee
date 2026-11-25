@@ -9,6 +9,7 @@
 #include <string>
 #include <vector>
 
+#include "apc/v4/event.hpp"
 #include "apc/v4/kernel.hpp"
 
 namespace apc::v4 {
@@ -192,6 +193,11 @@ GameState decode_state(const Json& request) {
     require(state, "staff", "state");
     require(state, "works", "state");
     require(state, "finance", "state");
+    require(state, "events", "state");
+    require(state.at("events"), "pending", "events");
+    if (!state.at("events").at("pending").is_array()) {
+        throw Json::type_error::create(302, "events.pending 必须是数组", nullptr);
+    }
     require(state.at("company"), "id", "company");
     require(state.at("company"), "week", "company");
     require(state.at("company"), "status", "company");
@@ -379,6 +385,36 @@ std::vector<std::string> validate(const GameState& state) {
         }
     }
 
+    // INV-23：待处理事件按项目保留；同一项目最多一条；事件必须归属有效项目。
+    if (state.events.last_event_week && (*state.events.last_event_week < 0 ||
+                                         *state.events.last_event_week > state.company.week)) {
+        error("INV-23 last_event_week 越界");
+    }
+    std::set<std::string> pending_works;
+    for (const auto& event : state.events.pending) {
+        if (event.event_id.empty()) error("INV-23 待处理事件缺少 event_id");
+        if (event.work_id.empty()) error("INV-23 待处理事件缺少 work_id");
+        if (!pending_works.insert(event.work_id).second) {
+            error("INV-23 同一项目存在多条待处理事件: " + event.work_id);
+        }
+        const Project* owner = find_work(state, event.work_id);
+        if (owner == nullptr) error("INV-23 事件归属项目不存在: " + event.work_id);
+        else if (owner->status != "producing") error("INV-23 事件归属项目不在 producing: " + event.work_id);
+        if (event.triggered_week < 0 || event.triggered_week > state.company.week) {
+            error("INV-23 triggered_week 越界: " + event.event_id);
+        }
+        if (event.expires_week && *event.expires_week < event.triggered_week) {
+            error("INV-23 expires_week 早于触发周: " + event.event_id);
+        }
+        if (event.options.empty()) error("INV-23 待处理事件缺少选项快照: " + event.event_id);
+    }
+    for (const auto& [work_id, entry] : state.events.per_work) {
+        std::set<std::string> seen;
+        for (const auto& id : entry.major_seen) {
+            if (!seen.insert(id).second) error("INV-23 major_seen 重复: " + work_id + "/" + id);
+        }
+    }
+
     // 财务恒等式
     std::int64_t sum = 0;
     for (const auto& entry : state.finance.entries) {
@@ -417,6 +453,15 @@ std::string state_hash(const GameState& state) {
             }
         }
     }
+    // 事件集合语义：pending 按 (work_id,event_id) 排序，major_seen 去顺序影响。
+    std::sort(copy.events.pending.begin(), copy.events.pending.end(),
+              [](const PendingEvent& a, const PendingEvent& b) {
+                  if (a.work_id != b.work_id) return a.work_id < b.work_id;
+                  return a.event_id < b.event_id;
+              });
+    for (auto& [work_id, entry] : copy.events.per_work) {
+        std::sort(entry.major_seen.begin(), entry.major_seen.end());
+    }
     std::sort(copy.finance.entries.begin(), copy.finance.entries.end(),
               [](const LedgerEntry& a, const LedgerEntry& b) {
                   if (a.week != b.week) return a.week < b.week;
@@ -432,6 +477,15 @@ std::string initialize(const std::string& input) {
         const Json request = Json::parse(input);
         const auto seed = request.value("seed", static_cast<std::uint32_t>(0));
         const std::string name = request.value("company_name", std::string("新动画工作室"));
+
+        // 事件卡是内容，不是代码：目录校验失败时拒绝开局，避免运行时静默少事件。
+        const auto& cards = event::catalog();
+        if (!cards.ok()) {
+            const std::string detail = cards.issues.empty()
+                ? std::string("没有可用卡片")
+                : cards.issues.front().card_id + "." + cards.issues.front().field + ": " + cards.issues.front().message;
+            return encode(error_body("INVALID_STATE", "事件内容目录无效: " + detail));
+        }
 
         GameState state;
         state.version = kContractVersion;
@@ -465,7 +519,7 @@ std::string initialize(const std::string& input) {
         state.finance.opening_funds = 2000000;
         state.finance.balance = 2000000;
         state.market = Json::object();
-        state.events = Json{{"pending", nullptr}, {"last_event_week", nullptr}, {"per_work", Json::object()}};
+        state.events = EventState{};
         state.archive = Json{{"works", Json::array()}, {"series", Json::array()}, {"company_result", nullptr}};
 
         const auto errors = validate(state);
@@ -637,8 +691,9 @@ std::string advance_week(const std::string& input) {
 
         if (state.company.status != "running") return encode(error_body("COMPANY_ENDED", "公司已结束"));
         if (state.company.week >= kMaxWeek) return encode(error_body("INVALID_PHASE", "已达经营上限"));
-        if (state.events.contains("pending") && !state.events.at("pending").is_null()) {
-            return encode(error_body("INVALID_PHASE", "存在待处理事件"));
+        if (!state.events.pending.empty()) {
+            return encode(error_body("INVALID_PHASE",
+                                     "存在 " + std::to_string(state.events.pending.size()) + " 条待处理事件"));
         }
         const auto pre_errors = validate(state);
         if (!pre_errors.empty()) return encode(error_body("INVALID_STATE", pre_errors.front()));
@@ -799,6 +854,10 @@ std::string advance_week(const std::string& input) {
                                         {"fatigue", member.fatigue}, {"morale", member.morale}});
         }
 
+        // ---- 阶段 11：事件抽取（读本周已提交的结果，不碰账）----
+        // 每个 producing 项目各自至多一条；已有待处理事件的项目不再追加。
+        const Json events_report = event::draw(state, week);
+
         state.company.week = week + 1;
 
         const auto post_errors = validate(state);
@@ -807,6 +866,7 @@ std::string advance_week(const std::string& input) {
         Json report = Json{{"week", week},
                            {"works", works_report},
                            {"staff", staff_report},
+                           {"events", events_report},
                            {"funds", Json{{"delta", -total_cost},
                                           {"balance", state.finance.balance},
                                           {"costs", Json{{"salary", salary_total},
@@ -837,6 +897,180 @@ std::string initialize_game(const std::string& input) {
 }
 
 std::string set_work_plan(const std::string& input) { return set_plan(input); }
+
+namespace {
+
+// 事件效果的应用层：Event 只给出意图，Project/Staff/Finance 的写入在这里完成。
+void adjust_quality(Project& work, const std::string& stage_key, int delta) {
+    auto adjust_item = [delta](WorkItem& item) {
+        for (auto& value : item.quality.dims) value = std::clamp(value + delta, 0, 100);
+    };
+    if (stage_key.empty()) {
+        for (auto& item : work.common.items) adjust_item(item);
+    }
+    for (auto& episode : work.episodes) {
+        for (auto& stage : episode.stages) {
+            if (!stage_key.empty() && stage.key != stage_key) continue;
+            for (auto& item : stage.items) adjust_item(item);
+        }
+    }
+}
+
+int apply_points(Project& work, const std::string& stage_key, int points) {
+    if (points <= 0) return 0;
+    std::vector<WorkItem*> items;
+    for (auto& episode : work.episodes) {
+        for (auto& stage : episode.stages) {
+            if (!stage_key.empty() && stage.key != stage_key) continue;
+            for (auto& item : stage.items) {
+                if (item.is_gate || item.work_done >= item.work_total) continue;
+                items.push_back(&item);
+            }
+        }
+    }
+    std::sort(items.begin(), items.end(), [](const WorkItem* a, const WorkItem* b) { return a->id < b->id; });
+    int left = points;
+    int applied = 0;
+    for (WorkItem* item : items) {
+        if (left <= 0) break;
+        const int take = std::min(left, item->work_total - item->work_done);
+        item->work_done += take;
+        left -= take;
+        applied += take;
+    }
+    return applied;
+}
+
+void apply_event_effects(GameState& state, Project& work, const event::OptionSpec& option, int week,
+                         const std::string& event_id) {
+    std::vector<Staff*> targets;
+    for (auto& member : state.staff) {
+        if (member.assignment_work_id && *member.assignment_work_id == work.id) targets.push_back(&member);
+    }
+    if (targets.empty()) {
+        for (auto& member : state.staff) {
+            if (member.employment == "core") targets.push_back(&member);
+        }
+    }
+    for (const auto& effect : option.effects) {
+        if (effect.target == "quality") {
+            adjust_quality(work, effect.scope == "stage" ? effect.stage : std::string{}, effect.value);
+            continue;
+        }
+        if (effect.target == "work_done") {
+            apply_points(work, effect.scope == "stage" ? effect.stage : std::string{}, effect.value);
+            continue;
+        }
+        if (effect.target == "fatigue") {
+            for (Staff* member : targets) member->fatigue = std::clamp(member->fatigue + effect.value, 0, 100);
+            continue;
+        }
+        if (effect.target == "morale") {
+            for (Staff* member : targets) member->morale = std::clamp(member->morale + effect.value, 0, 100);
+            continue;
+        }
+        if (effect.target == "funds" && effect.value < 0) {
+            // 强制支出不得超过现有现金：事件不能绕过破产判定。
+            const std::int64_t funds = state.finance.balance;
+            const std::int64_t amount = std::min<std::int64_t>(funds, -effect.value);
+            if (amount > 0) {
+                state.finance.entries.push_back(LedgerEntry{
+                    "w" + std::to_string(week) + ".event." + event_id + "." + work.id, week, work.id, "events",
+                    -amount, std::nullopt, event_id});
+                state.finance.balance -= amount;
+            }
+        }
+    }
+}
+
+}  // namespace
+
+std::string resolve_event(const std::string& input) {
+    try {
+        const Json request = Json::parse(input);
+        GameState state = decode_state(request);
+        if (state.company.status != "running") return encode(error_body("COMPANY_ENDED", "公司已结束"));
+        if (!request.contains("event_id") || !request.at("event_id").is_string() ||
+            !request.contains("option_id") || !request.at("option_id").is_string()) {
+            return encode(error_body("INVALID_INPUT", "event_id 与 option_id 必须是字符串"));
+        }
+        std::string work_id;
+        if (request.contains("work_id") && !request.at("work_id").is_null()) {
+            if (!request.at("work_id").is_string()) {
+                return encode(error_body("INVALID_INPUT", "work_id 必须是字符串或 null"));
+            }
+            work_id = request.at("work_id").get<std::string>();
+        }
+        const std::string event_id = request.at("event_id").get<std::string>();
+        const std::string option_id = request.at("option_id").get<std::string>();
+
+        const auto pre_errors = validate(state);
+        if (!pre_errors.empty()) return encode(error_body("INVALID_STATE", pre_errors.front()));
+
+        const auto resolution = event::inspect(state, event_id, work_id, option_id);
+        if (resolution.spec == nullptr || resolution.option == nullptr) {
+            return encode(error_body(resolution.code.c_str(), resolution.message));
+        }
+
+        // 定位到具体的那一条 pending（work_id 为空时 inspect 已保证唯一）。
+        std::size_t index = state.events.pending.size();
+        for (std::size_t i = 0; i < state.events.pending.size(); ++i) {
+            const auto& pending = state.events.pending[i];
+            if (pending.event_id == event_id && (work_id.empty() || pending.work_id == work_id)) {
+                index = i;
+                break;
+            }
+        }
+        if (index >= state.events.pending.size()) return encode(error_body("NOT_FOUND", "待处理事件不存在"));
+        const std::string owner_id = state.events.pending[index].work_id;
+        Project* work = find_work(state, owner_id);
+        if (work == nullptr) return encode(error_body("NOT_FOUND", "事件归属项目不存在"));
+
+        const int week = state.company.week;
+        if (resolution.option->cost > 0) {
+            state.finance.entries.push_back(LedgerEntry{
+                "w" + std::to_string(week) + ".event." + event_id + "." + owner_id, week, owner_id, "events",
+                -resolution.option->cost, std::nullopt, event_id});
+            state.finance.balance -= resolution.option->cost;
+        }
+        apply_event_effects(state, *work, *resolution.option, week, event_id);
+
+        auto& entry = state.events.per_work[owner_id];
+        if (resolution.spec->cooldown_weeks > 0) {
+            entry.cooldowns[resolution.spec->id] = week + resolution.spec->cooldown_weeks;
+        }
+        if (resolution.spec->once_per_project &&
+            std::find(entry.major_seen.begin(), entry.major_seen.end(), resolution.spec->id) == entry.major_seen.end()) {
+            entry.major_seen.push_back(resolution.spec->id);
+        }
+        state.events.pending.erase(state.events.pending.begin() + static_cast<std::ptrdiff_t>(index));
+
+        const auto post_errors = validate(state);
+        if (!post_errors.empty()) return encode(error_body("INTERNAL_ERROR", "处理后状态非法: " + post_errors.front()));
+        return encode(Json{{"state", state}, {"message", "已处理「" + resolution.spec->name + "」"}});
+    } catch (const Json::exception&) {
+        return encode(error_body("INVALID_INPUT", "JSON 或字段类型无效"));
+    } catch (...) {
+        return encode(error_body("INTERNAL_ERROR", "内部错误"));
+    }
+}
+
+std::string event_catalog_info(const std::string&) {
+    return encode(event::builtin_catalog_report());
+}
+
+std::string validate_event_catalog(const std::string& input) {
+    try {
+        const Json request = Json::parse(input);
+        const std::string source = request.value("source", std::string("inline"));
+        if (!request.contains("catalog")) return encode(error_body("INVALID_INPUT", "缺少 catalog"));
+        return encode(event::catalog_report(request.at("catalog").dump(), source));
+    } catch (const Json::exception&) {
+        return encode(error_body("INVALID_INPUT", "JSON 或字段类型无效"));
+    } catch (...) {
+        return encode(error_body("INTERNAL_ERROR", "内部错误"));
+    }
+}
 
 std::string hash_state(const std::string& input) {
     try {

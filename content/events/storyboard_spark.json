@@ -1,0 +1,54 @@
+{
+  "schema_version": 1,
+  "id": "storyboard_spark",
+  "name": "分镜灵光",
+  "category": "quality",
+  "polarity": "positive",
+  "tier": "normal",
+  "tag": "creative_spark",
+  "stages": [
+    "storyboard_key_animation"
+  ],
+  "priority": 35,
+  "cooldown_weeks": 10,
+  "once_per_project": false,
+  "trigger": {
+    "metric": "stage_quality",
+    "op": ">=",
+    "threshold": 70
+  },
+  "random_weight": 15,
+  "expires_weeks": 0,
+  "description": "分镜阶段的状态很好，监督提出了一个能明显提升演出效果的改法。",
+  "foreshadow": "最近几次分镜讨论都推进得很顺。",
+  "options": [
+    {
+      "id": "take",
+      "kind": "accept",
+      "label": "采纳方案",
+      "cost": 100000,
+      "risk_hint": "疲劳累积",
+      "effects": [
+        {
+          "scope": "instant",
+          "target": "fatigue",
+          "value": 4
+        },
+        {
+          "scope": "stage",
+          "target": "quality",
+          "stage": "storyboard_key_animation",
+          "value": 3
+        }
+      ]
+    },
+    {
+      "id": "skip",
+      "kind": "decline",
+      "label": "按原方案走",
+      "cost": 0,
+      "risk_hint": "错过质量跃升",
+      "effects": []
+    }
+  ]
+}

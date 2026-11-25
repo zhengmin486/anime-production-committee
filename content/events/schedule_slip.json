@@ -1,0 +1,62 @@
+{
+  "schema_version": 1,
+  "id": "schedule_slip",
+  "name": "作画进度落后",
+  "category": "schedule",
+  "polarity": "negative",
+  "tier": "normal",
+  "tag": "schedule_slip",
+  "stages": [
+    "storyboard_key_animation",
+    "animation"
+  ],
+  "priority": 10,
+  "cooldown_weeks": 4,
+  "once_per_project": false,
+  "trigger": {
+    "metric": "weeks_to_deadline",
+    "op": "<=",
+    "threshold": 3
+  },
+  "random_weight": 0,
+  "expires_weeks": 0,
+  "description": "离交付只剩三周，作画进度明显落后于计划。",
+  "foreshadow": "上周的完成量只达到计划的一半。",
+  "options": [
+    {
+      "id": "accept",
+      "kind": "abandon",
+      "label": "维持原计划",
+      "cost": 0,
+      "risk_hint": "违约交付风险",
+      "effects": [
+        {
+          "scope": "stage",
+          "target": "quality",
+          "stage": "animation",
+          "value": -3
+        }
+      ]
+    },
+    {
+      "id": "crunch",
+      "kind": "overtime",
+      "label": "全员赶工",
+      "cost": 120000,
+      "risk_hint": "疲劳飙升",
+      "effects": [
+        {
+          "scope": "instant",
+          "target": "fatigue",
+          "value": 8
+        },
+        {
+          "scope": "stage",
+          "target": "work_done",
+          "stage": "animation",
+          "value": 120
+        }
+      ]
+    }
+  ]
+}
