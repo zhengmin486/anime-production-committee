@@ -1,5 +1,7 @@
 # 存档与状态恢复交付说明
 
+> 历史实现说明：本文记录 V3 单项目、单槽运行时与 2026-11-23 验收结果，不作为 v4 目标契约。v4 当前要求见 `docs/M0_CONTRACT_FREEZE.md` §8、§15.1 与 `docs/DOMAIN_ARCHITECTURE.md` §12：同一版本合法存档必须完整恢复整个 `events.pending[]`、项目级事件归属与选项、核心/临时员工及 `temporary_contract`、财务流水和随机数状态；不得只恢复单个待处理事件或靠前端补齐业务字段。V3 存档在 v4 中整体拒绝，不静默升级。
+
 - 模块负责人：@zm
 - 跟踪议题：[#1 里程碑总览](../../issues/1)；本文覆盖 #5 前端 v3 接入与主流程 中的存档与状态恢复部分，与「公司声望」「财务记录」两个核心任务并行。
 - 依据：`docs/API.md`、`docs/DATA_MODEL.md`、`docs/TEAM_PLAN.md`、`docs/PROGRESS.md`。

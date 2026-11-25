@@ -58,11 +58,11 @@ v1.0 只给了骨架，并把"公共制作 + 单集 + 工作项"和"资金危机
 | 危机期间的时间与成本 | 推进周数、继续计提固定成本、允许现金暂时为负；只允许融资，禁止其他新增承诺与新增项目支出 | DEC-FIN-003 |
 | 项目内定向 | 每项目至多一个目标（单集/阶段/无），只调排序优先级，不额外花钱 | DEC-PLAY-004 |
 
-**当前没有待产品裁决的事项**。剩余只有参数标定：危机周数、融资额度与利率、还款周期；单集数与每集工作项数量；磨合损失比例；质量聚合权重。由模拟/平衡给值。
+**待产品裁决的边界**：自主原创的声望/资金阈值，企划能力员工作为执行资源的必要性与消耗方式，核心招聘是否另收公司级费用，以及 pending 期间是否封锁其他经营操作，均不得由工程实现自行补规则。其余剩余项主要为参数标定：危机周数、融资额度与利率、还款周期；单集数与每集工作项数量；磨合损失比例；质量聚合权重。由模拟/平衡给值。
 
 制作蓝图已从"待设计"变为"有可检查样例"：[蓝图规范](BLUEPRINT_SPEC.md) + [`tv_standard` 样例](blueprints/tv_standard.blueprint.json) + `npm run validate:blueprint`。
 
-**M0 契约已冻结**：[M0 契约冻结（v4.0）](M0_CONTRACT_FREEZE.md) 把状态形状、26 条不变式、22 个命令、16 个错误码、危机白名单与存档拒绝策略固化为可检查条目，并附两类校验器的运行记录。冻结后改契约需走变更说明。
+**M0 契约已冻结**：[M0 契约冻结（v4.0）](M0_CONTRACT_FREEZE.md) 把状态形状、27 条不变式、22 个命令、16 个错误码、危机白名单与存档拒绝策略固化为可检查条目，并附两类校验器的运行记录。冻结后改契约需走变更说明。
 
 ---
 
@@ -296,7 +296,7 @@ v1.0 只给了骨架，并把"公共制作 + 单集 + 工作项"和"资金危机
 | 拥有 | 不拥有 |
 | --- | --- |
 | 员工档案：岗位、六项能力、经验、潜力与已揭示潜力、特质、雇佣形态 | 某项目的制作进度（Project） |
-| 周薪、临时人员项目费、合同起止 | 项目的人员编制与计划（Project.plan 只表达需求取向） |
+| 周薪、临时人员项目签约费与周薪、合同起止 | 项目的人员编制与计划（Project.plan 只表达需求取向） |
 | 疲劳、士气、离职预警 | 本周实际分配结果（结算期临时对象） |
 | **唯一项目归属**（玩家决策的持久化落点；每周仅一个项目） | 项目是否值得开工（应用层与玩家） |
 | 招聘池、抽卡保底计数 | 独立管理负荷数值（首版不设；组织协调因素不得形成独立负荷表） |
@@ -381,8 +381,8 @@ v1.0 只给了骨架，并把"公共制作 + 单集 + 工作项"和"资金危机
 
 | 拥有 | 不拥有 |
 | --- | --- |
-| 全局唯一的待处理事件槽 | 项目质量与进度（Project） |
-| 每项目的冷却表、已触发重大事件、延后事件 | 员工状态（Staff） |
+| 按项目独立的 `pending[]` 待处理事件实例 | 项目质量与进度（Project） |
+| 每项目的冷却表、已触发重大事件 | 员工状态（Staff） |
 | 事件的触发条件评估与优先级选择 | 事件造成的资金变化（Finance 入账） |
 | 事件内容目录的引用 | 风险值（Project 派生） |
 
@@ -433,7 +433,7 @@ v1.0 只给了骨架，并把"公共制作 + 单集 + 工作项"和"资金危机
 | 竞争公司集合 | Market（由 seed 派生） | Market（初始化） | 竞争模拟 | 全局，不修改 |
 | 现金与流水 | Finance | Finance（唯一入口） | 全部（只读） | 全公司，永久 |
 | 贷款、还款计划与偿付状态 | Finance | Finance（融资/结算） | 预检、UI | 签约→还清/违约 |
-| 待处理事件 | Event | Event | UI | 单实例，处理后清空 |
+| 待处理事件 | Event.pending[] | Event | UI、resolve_event | 按项目保存；每项目至多一个，处理后只移除目标实例 |
 | 事件冷却/已见重大事件 | Event | Event | 触发评估 | 随项目，结算后归档 |
 | 作品档案 | Archive | Archive（只追加） | 商业/系列/结局/UI | 永久 |
 | 系列关系 | Archive | Archive（追加） | 企划生成、商业 | 永久 |
@@ -514,7 +514,8 @@ Staff {
   experience{...}: >=0               // 累计，能力增长由内核换算
   potential{...}, revealed{...}      // 潜力不低于当前能力
   talent_type, traits[]
-  weekly_salary (core>0, temp=0) | project_fee (temp>0, core=0)
+  weekly_salary: number                    // core>0，temporary>0；两者都按周支付
+  project_fee: number                       // core=0；temporary=招聘时即时支付的项目签约费
   fatigue: 0..100 ; morale: 0..100 ; departure_warning: bool
   assignment_work_id: null | work_id      // 本周唯一归属；null = 未参与任何项目
   last_participation: null | { work_id, unit_id, week }   // 上次实际参与的单元，磨合判定用
@@ -524,7 +525,10 @@ Staff {
 ```
 
 **不变式**
-- `employment=core ⇒ weekly_salary>0 ∧ project_fee=0`；反之亦然（沿用 V3）。
+- `employment=core ⇒ weekly_salary>0 ∧ project_fee=0 ∧ temporary_contract=null`；`employment=temporary ⇒ weekly_salary>0 ∧ project_fee>0 ∧ temporary_contract≠null`，不再使用“temp 周薪为 0”的 V3 约束。
+- 公司至少保留 1 名核心员工；`dismiss_staff` 不得使核心员工数降至 0。核心员工可在 `running` 期间随时解雇，包括 pending 或危机期间，不收取预付遣散费。
+- 临时员工归属恒等于其合同项目；签约费即时支付，周薪自下一次周结算起计提，两项均归项目成本。交付或中止后自动退出解绑；正常 `dismiss_staff` 不提供临时提前解约，只有明确授权的危机/裁减事件可通过 `resolve_event` 原子解约，已发生费用不追溯、后续周薪停止，不另建欠款或递延解约费。
+- 临时员工不参与长期成长；共享 `Staff` 形状中的经验/潜力字段不因此获得核心员工成长语义。
 - `assignment_work_id` 为 null 或指向 `works` 中处于 `producing` 的项目；临时人员的归属恒等于其合同项目。
 - 不存在 `support` / 支援份额 / 工时拆分字段：同周一人只出现一次（[已确认] DEC-STAFF-001）。
 - `last_participation.week` 只能是 `week-1`：每次结算覆盖，不累积历史。
@@ -853,6 +857,8 @@ Solvency {
 
 **符号约定**：`amount` 带符号，`category` 只表示业务性质。由此"项目利润 = 该项目全部 entry 之和"，与 GAME_RULES V3.3 的四条恒等式一致，不需要另写一套利润公式。字段名沿用现有契约（`*_received` / `*_paid`），不因合并进统一流水而改名。
 
+**人员费用归因**：`salary` 记录核心员工与临时员工的周薪，每笔现金只记一次；有项目归属的核心周薪和临时合同周薪均写 `work_id=项目`，闲置核心周薪写 `work_id=null`，属公司级成本。`temporary` 只记录临时员工招聘时即时支付的项目签约费，同样写合同项目 `work_id`。临时签约费与周薪都进入项目直接制作成本；不存在项目钱包或第二本项目账。核心 `project_fee=0`，不得产生项目签约费；核心招聘/抽卡是否另收公司级招聘费用及账目分类仍待确认，不得借用 `project_fee` 或写入项目成本。
+
 **不变式（可断言，且必须断言）**
 1. `balance == opening_funds + Σ entries.amount`
 2. 每笔 entry 只属于一个 category；同一笔现金不得产生两条 entry。
@@ -879,20 +885,21 @@ crisis --(预检通过)--> normal
 crisis --(deadline 用尽仍失败)--> 由应用层置 Company.closing/bankrupt
 ```
 
-- `crisis` 是**资金状态**，不是公司状态：公司仍在 `running`，仍可招聘、签外包、调计划、融资、关停项目。
-- 危机不自动解约：已签外包与临时合同继续存在，但可以主动终止（首版允许解约但费用不退，避免"危机时无损砍单"）。
+- `crisis` 是**资金状态**，不是公司状态：公司仍在 `running`，可以融资、解雇核心员工、关停项目、调计划或调整归属，但禁止招聘、抽卡、签外包、购买电视服务、自定企划等新增承诺。
+- 危机不自动解约：已签外包与临时合同继续存在，工资与既有合同义务按各自规则结算。临时员工没有通用提前解约权；只有特定危机/裁减事件明确授权时才能通过该事件解约，不追溯已发生签约费与周薪，解约后停止后续周薪，不设统一买断费、欠款或递延付款。
 - 危机期间若玩家完全不操作，结果只能是破产；不存在"什么都不做就自己好起来"。
 
 ### 7.6 Event 与 Archive
 
 ```text
 EventState {
-  pending: null | { event_id, work_id, episode_id: null|episode_id, stage: null|stage_key,
-                    item_id: null|item_id, triggered_week,
-                    options[{id,label,cost,risk_hint}], expires_week, escalation }
-  last_event_week
-  per_work: { work_id: { cooldowns{event_id: week}, major_seen[], deferred: null|instance } }
+  pending: PendingEvent[]             // 按项目独立保存；每项目至多一个未处理事件
+  last_event_week: null | week        // 仅记录最近抽取周，不得作为全局限流器
+  per_work: { work_id: { cooldowns{event_id: week}, major_seen[] } }
 }
+PendingEvent { event_id, work_id, episode_id: null|episode_id, stage: null|stage_key,
+               item_id: null|item_id, triggered_week,
+               options[{id,label,cost,risk_hint}], expires_week, escalation }
 
 Archive {
   works: WorkRecord[]              // 只追加
@@ -910,6 +917,8 @@ WorkRecord { id, name, ip_id, source, genre, scale, mode, investment_percent,
              team[], episode_summary[{index, quality, completed_week}],
              committee_snapshot[], major_events[] }
 ```
+
+**事件不变量**：事件只归属于具体项目，不设公司级事件槽或公司级事件系统；`pending[]` 中每个 `work_id` 至多一个实例，且项目仍有效。同周多个项目各有一个事件合法，同项目同周第二个事件非法。数组顺序不构成 FIFO，`resolve_event(work_id, event_id, option_id)` 只移除目标实例，不得清空其他项目事件。`pending[]` 非空时 `advance_week` 返回 `INVALID_PHASE`；不提供 `abandon`/`deferred` 绕过该阻塞。危机结算不抽取新事件，既有事件选项也不得绕过危机承诺白名单。
 
 **为什么履历只存"单集摘要"而不存全部工作项**：作品结束后没人会查看 230 个工作项的历史；保留 `episode_summary` + 六维质量 + 团队快照，足以支撑"复盘哪一集拖了后腿"，同时避免存档随作品数线性膨胀。
 
@@ -955,21 +964,25 @@ WorkRecord { id, name, ip_id, source, genre, scale, mode, investment_percent,
 | `start_work(offer_id, mode, percent, committee_partner_ids)` | Application | 公司 running；企划存在；声望与成绩条件；模式合法；现金足够支付投资 | Project 建立、委员会成立、Market 消费企划、Finance 记投资与合同预算、员工可归属 |
 | `set_work_plan(work_id, plan)` | Project | 公司 running；项目 producing；`plan.target` 须引用本项目单集/阶段，至多一个 | 更新计划（含定向目标），下个结算生效 |
 | `assign_staff(staff_id, work_id \| null)` | Staff | 项目存在且 producing；核心员工每周仅能归属一个项目；传 null 为撤出 | 更新唯一项目归属，下一次结算生效 |
-| `hire_core(staff_id)` / `scout(...)` / `dismiss_staff(staff_id)` | Staff + Finance | 公司 running；无待处理事件；非资金危机；现金；名册上限（若有）。不要求全公司空闲（DEC-PLAY-003） | 名册变化、签约费/遣散费入账 |
-| `hire_temporary(work_id, candidate_id)` | Staff + Finance | 项目 producing；现金 | 临时合同建立、项目费入账 |
+| `hire_core(staff_id)` | Staff + Finance | 公司 running；非资金危机；候选人有效；满足已配置招聘费用 | 新增核心名册（project_fee=0）；如收招聘费，仅记公司级且规则待确认 |
+| `scout(...)` | Staff + Finance | 公司 running；非资金危机；招聘池非空；现金 | 招聘池、保底计数与公司级招聘费用；不要求全公司空闲 |
+| `dismiss_staff(staff_id)` | Staff | 公司 running；core 解雇后至少保留 1 名 core；temporary 拒绝普通提前解约 | core 立即移出名册并清空归属，无预付遣散费，历史贡献保留；temporary 只能由授权事件解约 |
+| `hire_temporary(work_id, candidate_id)` | Staff + Finance | 项目 producing（含开工后的初始制作窗口或制作中）；非资金危机；现金 ≥ 即时签约费 | 建立绑定项目的临时合同与归属；签约费即时入账，下一周结算起计周薪 |
 | `sign_outsourcing(work_id, item_id, supplier_id, work_total, mode)` | Vendor + Finance | 工作项已解锁；专业匹配；供应商产能余量；现金 | 合同建立、费用入账、占用产能 |
-| `deliver_work(work_id)` | Project + Application | 全部门槛项已交付；未过截止 | 转 delivering 并当次结清（§7.3.6） |
-| `abort_work(work_id)` | Project + Finance | 项目 producing | 项目终止、违约扣罚入账、释放人员与外包占用 |
-| `create_custom_offer(name, source, scale, style)` | Market + Finance | 公司 running；无待处理事件；非资金危机；现金；企划能力员工。不要求全公司空闲 | 自定企划入槽、开发费入账 |
-| `adopt_proposal()` / `reject_proposal()` | Market | 公司 running；无待处理事件；非资金危机；存在提案。不要求全公司空闲 | 提案转自定槽或清空 |
+| `deliver_work(work_id)` | Project + Application | 全部门槛项已交付；未过截止 | 转 delivering 并当次结清；临时员工自动退出解绑 |
+| `abort_work(work_id)` | Project + Finance | 项目 producing | 项目终止、违约扣罚入账、释放核心归属与外包占用、临时员工自动退出解绑 |
+| `create_custom_offer(name, source, scale, style)` | Market + Finance | 公司 running；非资金危机；自主原创声望门槛（阈值待标定）；现金 ≥ 开发费；自定槽可用。企划会议室与企划能力员工不是资格门槛 | 自定企划入槽、开发费入账 |
+| `adopt_proposal()` / `reject_proposal()` | Market | 公司 running；非资金危机；存在提案。不要求全公司空闲 | 提案转自定槽或清空 |
 | `buy_tv_service(work_id)` | Project + Finance | 委员会模式；未购买；现金 | 渠道开放、发行费入账 |
 | `request_extension(work_id)` | Project + Finance | 委员会模式；未用过；未过截止；现金 | 延期生效、压力与费用 |
 | `arrange_financing(provider, amount)` | Finance | 偿付危机或资金压力周；额度未超限 | 现金入账、生成贷款与周还款计划（§7.5.1） |
 | `advance_week()` | Application | 公司 running；无待处理事件；周 < 520 | 执行完整周结算（§9） |
-| `resolve_event(event_id, option_id)` | Event → Application | 存在该待处理事件；选项合法；现金足够（若需付款） | 效果分派到各领域、清空事件 |
+| `resolve_event(work_id, event_id, option_id)` | Event → Application | 存在该工作项目的待处理事件；选项合法；现金足够（若需付款）；危机中仍受承诺白名单约束 | 效果原子分派到各领域，只清空目标项目事件 |
 | `end_company()` | Company + Application | 公司 running | 锁 closing，未交付项目转 delivering |
 | `finalize_delivery(work_id)` | Application | 项目 delivering | 交付结算、写 Archive、关闭委员会 |
 | `finalize_company()` | Application | 公司 ended 且全部项目已结算 | 生成公司结局评价 |
+
+**自主原创的两级准入**：`create_custom_offer` 只判断已确认的独立公司声望与资金/开发费条件，企划会议室不垄断资格，企划能力员工不是额外资格守卫。创建企划不等于正式立项；`start_work` 仍须校验企划存在、原创仅委员会模式、投资与资金、委员会/渠道等既有立项条件。企划能力员工是否作为执行资源、是否占用产能或需要指定人员，正式决策尚不足以唯一确定，标为待确认；在确认前既不能把它当作隐性资格门槛，也不能自行新增资源消耗规则。
 
 **为什么不是 `apply_decision(type, ...)`**：当前实现的单一 decision 联合类型把所有守卫挤进一个长 if 链，错误码与前置条件互相纠缠，新增玩法必须改同一个函数。用例级命令把守卫放在各自入口，也让 UI 与测试的意图更清楚。
 
@@ -1028,22 +1041,25 @@ UI 不计算规则。核心在每次命令后输出读模型；读模型**不持
 | --- | --- | --- |
 | 经营中（`running`，任意时刻） | `start_work`、`set_work_plan`、`assign_staff`、各类招聘/解雇、`sign_outsourcing`、`deliver_work`、`abort_work`、`create_custom_offer`、`adopt_proposal`/`reject_proposal`、`buy_tv_service`、`request_extension` | 不再要求"全公司空闲"。旧规则把招聘限制在 idle，是单项目时代的产物 |
 | 经营中，无待处理事件 | `advance_week` | 事件未处理时禁止推进（[已确认] 事件暂停推进） |
-| 有事件待处理 | `resolve_event`、`set_work_plan`（允许为应对事件调整计划） | 购买/签约类操作暂不开放，避免用一周之外的操作绕开事件成本 |
-| 资金危机中 | `arrange_financing`、`dismiss_staff`、`abort_work`、`set_work_plan`、`assign_staff`、`deliver_work`、`advance_week` | **融资是唯一允许的新增资金动作**；禁止一切其他新增承诺与新增项目支出：`start_work`、`sign_outsourcing`、招聘/抽卡、`buy_tv_service`、`create_custom_offer`（[已确认] DEC-FIN-003） |
+| 经营中，有待处理事件 | `resolve_event`、`set_work_plan`、`dismiss_staff`（仅 core） | `pending[]` 非空的已确认硬限制是禁止 `advance_week`；核心解雇仍可在任意时间执行；临时提前解约只通过授权事件效果。其他经营操作是否额外封锁仍待确认，不从旧单事件窗口自动继承 |
+| 资金危机中 | `arrange_financing`、`dismiss_staff`（仅 core）、`abort_work`、`set_work_plan`、`assign_staff`、`deliver_work`、`advance_week`；既有 pending 可 `resolve_event` | **融资是唯一允许的新增资金动作**；禁止其他新增承诺与新增项目支出；事件选项不得绕过白名单 |
 | 关闭中（`closing`） | `finalize_delivery`、`finalize_company` | 不可逆；`advance_week` 被拒绝 |
 
 **生效时点**
 
 | 操作 | 现金 | 数值效果 |
 | --- | --- | --- |
-| 招聘核心员工 | 签约费立即入账 | 下一周结算起计薪、可被分配 |
-| 雇佣临时人员 | 项目费立即入账 | 下一周结算起可参与，绑定该项目 |
+| 招聘核心员工 | 如收公司级招聘费用则立即入账；`project_fee=0`，无项目签约费（是否收费及分类待确认） | 下一周结算起计薪、可被分配 |
+| 雇佣临时人员 | 项目签约费立即入账并归合同项目；后续周薪归同一项目 | 下一周结算起可参与并计周薪，合同期绑定该项目 |
 | 外包签约 | 费用立即入账 | 最近一次结算起按周产能交付 |
 | 买电视服务 | 发行费立即入账 | 立即开放渠道，交付时参与分账 |
 | 延期申请 | 费用立即入账 | 立即延长 `deadline_week` |
 | 改计划 / 改归属 | 无 | **下一次结算生效**，当周已发生的结算不追溯 |
 | 立项 | 投资与合同预算立即入账 | 项目立即出现（工作项已实例化），首次结算即参与 |
-| 人员/供应商解约 | 费用不退 | 立即释放占用，下周不再计费 |
+| 解雇核心员工 | 不记预付遣散费 | 立即移出名册并解绑，历史贡献保留 |
+| 临时员工交付/中止自动退出 | 已发生签约费与周薪不追溯 | 立即停止后续周薪并解绑 |
+| 临时员工事件授权提前解约 | 仅事件明示的一次性现金代价（如有）立即入账；无通用买断费或递延付款 | 作为 `resolve_event` 的原子效果停止后续周薪并解绑；普通 `dismiss_staff` 拒绝 |
+| 外包/供应商终止 | 按既有合同费用规则处理，不套用临时员工规则 | 立即释放占用，按既有规则停止后续费用 |
 | 交付 | 收入与扣罚立即入账 | 项目立即结算并归档 |
 | 融资 | 本金立即入账 | 下周起产生还款与利息（计入强制费用） |
 
@@ -1078,7 +1094,7 @@ UI 不计算规则。核心在每次命令后输出读模型；读模型**不持
 | 8 | 人员结算 | Staff + Kernel | 实际参与 | 疲劳、士气、经验、预警、临时到期、`last_participation`、工作项 `contributors` 追加 | 失败 → 回滚 |
 | 9 | 生命周期推进 | Project + Application | 门槛达成 + 截止 | 可交付标记 / 到期强制交付 / `delivering` | 失败 → 回滚 |
 | 10 | 交付结算 | Application + Kernel/commerce/evaluation | delivering 项目 | 收入分账、Archive 记录、委员会关闭、关系、声望、系列 | 失败 → 回滚 |
-| 11 | 事件抽取 | Event | 快照 + 冷却（仅 `producing` 项目） | 至多一个待处理事件 | 失败 → 回滚（事件不得导致半结算） |
+| 11 | 事件抽取 | Event | 快照 + 冷却（仅正常结算中的 `producing` 项目） | 每个项目至多一个待处理事件；多个项目可同周分别触发，不设全局限额 | 失败 → 回滚（事件不得导致半结算） |
 | 12 | 时间与市场 | Company + Market | — | week+1、企划刷新、热度周期、提案、竞争轮次 | 失败 → 回滚 |
 | 13 | 终局与回执 | Application | — | time_limit、危机期限判定、公司结局、周回执 | 失败 → 回滚 |
 
@@ -1104,14 +1120,14 @@ UI 不计算规则。核心在每次命令后输出读模型；读模型**不持
 | # | 步骤 | 说明 |
 | --- | --- | --- |
 | 1 | 守卫 | 公司 `running`、`solvency=crisis`、无待处理事件 |
-| 2 | 固定成本记账 | 工资、运营、贷款还款与利息；**不计制作费**（因为不生产） |
+| 2 | 固定成本记账 | 工资、运营、贷款还款与利息；工资包括核心员工周薪与合同仍在的临时员工周薪，后者继续归项目；**不计制作费**（因为不生产） |
 | 3 | 人员结算 | 按"本周未参与任何项目"执行：疲劳恢复、无经验；**不写 `last_participation`**——否则停工数周后恢复生产会被误判成"全员换人"，凭空吃满磨合损失 |
 | 4 | 允许负余额 | 余额可为负，负数即欠付；不自动借款 |
 | 5 | 周数 +1 | 时间推进，危机期限按周倒计时 |
 | 6 | 期限判定与市场轻刷新 | 到达 `deadline_week` 且下周强制费用仍无法覆盖 → 破产；市场只刷新企划槽与热度，不抽事件 |
 | 7 | 危机回执 | 缺口、期限、受影响项目、可用自救动作与代价 |
 
-**危机期间允许的动作**（[已确认] DEC-FIN-003）：`arrange_financing`、`dismiss_staff`、`abort_work`、`set_work_plan`、`assign_staff`、`deliver_work`（若已达标）、`advance_week`。
+**危机期间允许的动作**（[已确认] DEC-FIN-003）：`arrange_financing`、`dismiss_staff`（仅 core）、`abort_work`、`set_work_plan`、`assign_staff`、`deliver_work`（若已达标）、`advance_week`；如有既有 pending，可 `resolve_event`，但选项仍受同一白名单约束。
 **危机期间禁止的动作**：`start_work`、`sign_outsourcing`、`hire_*`/`scout`、`buy_tv_service`、`create_custom_offer`。理由：危机中新增承诺等于用不存在的钱下注，且会让"自救"退化为"继续加杠杆"。**融资是唯一例外**——它是把未来现金流提前，不是扩大经营。
 
 **恢复条件**：下一次预检通过（余额足以覆盖下周强制费用）即回到 `normal`；危机历史写入 `solvency.history` 供复盘。
@@ -1140,7 +1156,7 @@ crisis 期限用尽 且 预检仍失败
 
 **交付由结算自动完成，不需要玩家确认**：正常交付（玩家主动 `deliver_work` 或到期强制）在本周结算的阶段 9–10 一次完成。`finalize_delivery` 命令只用于**公司已关闭**的场景——关闭发生在结算之外，未交付项目需逐个结清。
 
-**事件暂停**：事件在结算完成后才抽取（阶段 11），因此"事件阻塞后续推进"天然安全——本周已经合法结算完，暂停的是下一次 `advance_week`。这从结构上消除了旧实现中"事件可跳过周成本"的漏洞。
+**事件暂停**：正常结算在阶段 11 按项目抽取，多个项目可同周各生成一个实例并全部进入 `pending[]`。本周已经合法结算完，数组非空时暂停的是下一次 `advance_week`；玩家可按任意顺序逐条 `resolve_event(work_id, event_id, option_id)`，全部处理完后才恢复推进。任何新事件都不得覆盖旧实例，也不提供 `abandon`/`deferred` 绕过阻塞。
 
 **公司关闭（closing）**：只允许 `finalize_delivery` 与 `finalize_company`；`advance_week` 被拒绝。关闭不可逆。
 
@@ -1335,6 +1351,7 @@ SaveRecord { version: 4, savedAt: ISO8601, rules_version, state: GameState }
 | 玩家决策（计划、归属、投资比例、委员会成员） | 本周分配结果（可重算） |
 | 已发生事实（进度、质量、流水、履历） | 风险快照、组织协调派生因素、预览、读模型 |
 | `seed`、`week`、版本号 | 周回执、结算面板、UI 草稿 |
+| 完整 `events.pending[]`（含项目归属、触发周、选项与效果快照）、员工临时合同、已发生财务流水 | 派生事件列表、排序后的处理队列、项目钱包 |
 | 由 seed 派生且**从不被修改**的目录（竞争公司） | 由 seed 派生但**会被消费**的内容（企划槽、招聘池）——必须持久化 |
 
 判据：**若某值可由（权威状态 + seed）纯函数重算且从未被玩家消费，则不入存档。** 这样既控制体积，又不会出现"存档里存了过期派生值"。
@@ -1403,7 +1420,7 @@ SaveRecord { version: 4, savedAt: ISO8601, rules_version, state: GameState }
 | `project.outsourcing` | Vendor.OutsourceContract | 迁移并补交付状态 |
 | `project.committee` | Partnership.Committee | 迁移并对齐 `{id,name,channel}` |
 | `offers/custom_offer/pending_proposal` | Market | 保留槽位语义；`workloads[5]` 换为 `blueprint_id + episode_count + scale` |
-| `pending_event`（全局单槽） | Event.pending（全局单槽，带 work_id） | 保留单槽，补归属与冷却 |
+| `pending_event`（全局单槽） | Event.pending[] | v3 存档整体拒绝，不把旧单槽迁移成数组；v4 新建多项目数组并完整恢复 |
 | `history[]` | Archive.works | 迁移并补渠道对账/名次/团队快照/单集摘要；旧记录的 `stages[]` 作为历史形状原样保留、不再参与计算 |
 | `preview` | 读模型 | **不进存档** |
 | `phase` | 派生 | **删除**；由（公司状态 + 待处理事件 + 项目集合）派生 |
@@ -1470,7 +1487,6 @@ SaveRecord { version: 4, savedAt: ISO8601, rules_version, state: GameState }
 | retake（返工回路） | `WorkItem.retake_count` + 门槛达成判定 | 内核 production 增加检查门、周回执增加原因、返工消耗工作量 | 工作项模型、结算顺序；不需要新增阶段 |
 | 整集外包（グロス） | `OutsourceContract.mode` 增加 `gross` + `episode_id` 级合同 | Vendor 校验与交付粒度、质量归属 | 合同模型、产能占用规则 |
 | 设施/组织能力 | `Company.facilities[]` | 内核读取修正系数（不得变成管理负荷） | 所有领域边界 |
-| 公司级事件 | `EventState.pending.scope = work \| company` | 触发池与效果分派 | 单槽限流、暂停语义 |
 | 单集日程（错峰开工） | `EpisodeProduction.status` 增加 `not_started` | 允许只实例化前几集、其余延后开工 | 工作项模型、分配算法、结算顺序 |
 
 **判定标准**：若某方向需要修改"结算 13 阶段的顺序"或"Finance 的唯一货币权威"，说明它不是接入缝而是架构变更，必须重新评审。

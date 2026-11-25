@@ -1,5 +1,7 @@
 # 事件内容填写指南（给内容协作者）
 
+> **历史 V3 内容格式说明（2026-11-25）**：本文 JSON 字段、五阶段和 `abandon` 必填规则属于早期 V3 内容方案，不是 v4 事件队列契约。v4 以 [M0 契约冻结](M0_CONTRACT_FREEZE.md) §15.1 与 [DECISION_LOG.md](DECISION_LOG.md) 的 DEC-EVENT-001 为准；不得把 `abandon`/`deferred` 实现为跳过 pending 阻塞的路径。v4 选项/效果字段须由事件工程契约另行确认，现有示例与校验脚本不能证明 v4 已接入。
+
 - 系统实现与机制口径：@pyxz0，见 [事件模块设计](EVENT_MODULE_DESIGN.md)
 - 内容与文案：@Muchbv，统一跟踪在 [#13](https://github.com/zhengmin486/anime-production-committee/issues/13)
 - 目的：让内容可以先于核心实现落地，且不需要改 C++ 就能评审

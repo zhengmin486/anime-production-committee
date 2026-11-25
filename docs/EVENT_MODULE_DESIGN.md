@@ -1,5 +1,7 @@
 # 制作事件模块设计（M2 实现方案）
 
+> **历史 V3 方案说明（2026-11-25）**：本文保留早期单事件实现设计与内容协作参考，不作为 v4 多项目事件契约。v4 以 [DECISION_LOG.md](DECISION_LOG.md) 的 DEC-EVENT-001、DEC-FIN-003、DEC-SAVE-001 和 [M0 契约冻结](M0_CONTRACT_FREEZE.md) §15.1 为准：使用按项目 `events.pending[]`，pending 非空硬阻塞周推进，不采用本文的 `pending_event` 单槽或 `abandon`/`deferred_event` 跳过阻塞路径。
+
 - 模块负责人：@pyxz0；内容协作者：@Muchbv（见 [#13](https://github.com/zhengmin486/anime-production-committee/issues/13)）
 - 跟踪议题：[#11](https://github.com/zhengmin486/anime-production-committee/issues/11)
 - 依据：`docs/TEAM_DELIVERABLES/EVENT_MODULE.md` 的 15 条已确认规则、`docs/GAME_RULES.md` V3.2 第 7 步与第 8 节

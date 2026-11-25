@@ -158,9 +158,9 @@ npm run test:v4      # 构建 v4 模块 + 跑 25 条契约测试
 
 | 接入点 | 位置 | 约定 |
 | --- | --- | --- |
-| 抽取时机 | `runtime.cpp::advance_week`，人员结算之后、`state.company.week = week + 1` 之前 | 读本周已提交的结果，不碰账；本周结算已完整，抽取失败只丢弃事件，不影响已结算部分 |
-| 周回执 | `report` 增加 `events: {drawn, event_id?, dropped_*}` | 与 `funds`/`works`/`staff` 平级；空周为 `{drawn:false}` |
-| 命令 | `resolve_event(event_id, option_id)` 单独文件 `event.hpp/.cpp`，`runtime.cpp` 只加一行分发 | 与"事件在结算完成后抽取"配合：事件阻塞的是下一次 `advance_week` |
+| 抽取时机 | `runtime.cpp::advance_week`，人员结算之后、`state.company.week = week + 1` 之前 | 正常结算按项目抽取，每项目至多一个，多项目可同周分别触发；抽取失败按统一周契约回滚，不得形成半结算 |
+| 周回执 | `report` 增加 `events: {drawn: [{work_id, event_id}], pending_count}` | 与 `funds`/`works`/`staff` 平级；本周未抽取时为 `{drawn:[], pending_count}`，pending_count 保存整个数组的未处理数量 |
+| 命令 | `resolve_event(work_id, event_id, option_id)` 单独文件 `event.hpp/.cpp`，`runtime.cpp` 只加一行分发 | 与“事件在结算完成后抽取”配合：多项目 pending 中任一实例未处理时，阻塞下一次 `advance_week` |
 
 两条确定性要求（写在这里，防止 M2 踩坑）：
 

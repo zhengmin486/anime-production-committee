@@ -1,5 +1,7 @@
 # M2 跨模块集成审查清单
 
+> **历史审查说明（2026-11-25）**：本文基线为旧 V3 单项目运行时；其中单事件槽、`pending_event`、旧资金危机与招聘窗口描述不作为 v4 当前契约。当前以 [DECISION_LOG.md](DECISION_LOG.md)、[M0 契约冻结](M0_CONTRACT_FREEZE.md) 与 [DOMAIN_ARCHITECTURE.md](DOMAIN_ARCHITECTURE.md) 为准。
+
 > 审查日期：2026-11-23  
 > 基线：`main` @ `4044a7085afcfb62a875c079bb426044149f1b5c`  
 > 范围：依据当前 `GAME_RULES.md`、`DATA_MODEL.md`、`API.md`、`PROGRESS.md` 进行的规则与契约交界审查。本文是集成设计审查，不是对全部 C++/WASM 行为的源码审计，也不代表下列功能已经实现或测试通过。
