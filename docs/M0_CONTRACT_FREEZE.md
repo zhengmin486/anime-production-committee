@@ -15,7 +15,7 @@
 | 类别 | 内容 | 变更成本 |
 | --- | --- | --- |
 | 状态形状 | `GameState v4` 的聚合、字段、可空规则 | 高：影响校验器、存档、全部读模型 |
-| 不变式 | INV-01 – INV-26 | 高：每条都要有对应断言 |
+| 不变式 | INV-01 – INV-27 | 高：每条都要有对应断言 |
 | 命令面 | 22 个命令的输入、守卫、错误码 | 中：影响 UI 与测试 |
 | 错误码 | 16 个稳定码 | 中：UI 按码分支 |
 | 危机白名单 | 危机期允许/禁止的动作 | 中：影响玩家自救路径 |
@@ -121,6 +121,7 @@ SaveRecord { version: 4, savedAt: ISO8601, rules_version: string, state: GameSta
 | INV-24 | `market.slots ≤ 4`；自定/提案槽与市场槽、历史 id 互斥 | INVALID_STATE |
 | INV-25 | 负余额只允许出现在 `company.status=closing(bankrupt)`；正常经营状态不得出现负余额 | INVALID_STATE |
 | INV-26 | 存档中不含派生值（§2 列表）；加载时重算 | SAVE_CORRUPT |
+| INV-27 | 每个 producing 项目恰有一名具备任职资格且已分配到该项目的监督；人员调整后仍须满足，不得出现监督空缺或重复 | INVALID_STATE |
 
 ---
 
@@ -135,10 +136,10 @@ SaveRecord { version: 4, savedAt: ISO8601, rules_version: string, state: GameSta
 | 1 | `initialize_game(seed)` | 无（唯一不带 state 的命令） | INVALID_INPUT | 建立公司/名册/供应商/合作方/市场首轮 |
 | 2 | `start_work(offer_id, mode, percent, committee_partner_ids)` | running ∧ 企划存在且有效 ∧ 模式合法 ∧（普通企划满足 `min_reputation/required_works` ∨ 有效原创草稿存在）∧ 现金 ≥ 全部应付款 | NOT_FOUND / MODE_NOT_ALLOWED / INSUFFICIENT_FUNDS | 项目+委员会+两笔账+消费企划，一次提交；原创在此正式开工 |
 | 3 | `set_work_plan(work_id, plan)` | 项目 producing ∧ target 引用本项目单集/阶段且至多一个 | NOT_FOUND / INVALID_INPUT | 仅更新计划 |
-| 4 | `assign_staff(staff_id, work_id \| null)` | 项目 producing ∧ 员工存在 ∧ 不违反单项目 | NOT_FOUND / INVALID_PHASE | 仅更新归属 |
+| 4 | `assign_staff(staff_id, work_id \| null)` | 项目 producing ∧ 员工存在 ∧ 不违反单项目 ∧ 调整后所有 producing 项目仍恰有一名监督 | NOT_FOUND / INVALID_PHASE | 仅更新归属；监督更换不得留下空缺或重复 |
 | 5 | `hire_core(staff_id)` | running ∧ 候选人存在 ∧ 现金 ≥ signing_fee ∧ 名册上限（若有） | NOT_FOUND / INSUFFICIENT_FUNDS | 签约即入职并加入核心名册，当周可分配；signing_fee 立即入账，首周周薪计入本周下一次周结算 |
 | 6 | `scout(role?, focus_ability?)` | running ∧ 现金 ≥ 本次费用 ∧ 招聘池非空 | INSUFFICIENT_FUNDS | 池+保底计数+费用 |
-| 7 | `dismiss_staff(staff_id)` | running ∧ core 员工存在 ∧ 解雇后 core 数 ≥1 | NOT_FOUND / INVALID_INPUT | 移出名册+清空归属；不预付遣散费 |
+| 7 | `dismiss_staff(staff_id)` | running ∧ core 员工存在 ∧ 解雇后 core 数 ≥1 ∧ 不使任何 producing 项目失去唯一监督 | NOT_FOUND / INVALID_INPUT / INVALID_PHASE | 移出名册+清空归属；不预付遣散费 |
 | 8 | `hire_temporary(work_id, candidate_id)` | running ∧ 项目 producing ∧ 现金 ≥ signing_fee | NOT_FOUND / INSUFFICIENT_FUNDS | 临时合同+signing_fee 即时入账；weekly_salary 从后续周结算计提；归属合同项目 |
 | 9 | `sign_outsourcing(work_id, item_id, supplier_id, work_total, mode)` | 工作项已解锁 ∧ 专业匹配 ∧ 产能余量 ∧ 现金 | DEPENDENCY_UNMET / CAPACITY_EXCEEDED / INSUFFICIENT_FUNDS | 合同+费用+占用 |
 | 10 | `deliver_work(work_id)` | 全部门槛项 delivered ∧ 未过截止 ∧ 项目 producing | GATE_UNMET / INVALID_PHASE | 当次完成交付结算（周数不变） |
@@ -340,7 +341,7 @@ npm run validate:handover
 | 蓝图样例（12 集 / 174 项） | ✅ | `docs/blueprints/tv_standard.blueprint.json` |
 | 蓝图校验器 + 运行记录 | ✅ | `scripts/validate-blueprint.mjs`、§10 |
 | 工作项级磨合用例 + 运行记录 | ✅ | `docs/fixtures/handover_cases.json`、§9 |
-| 状态契约与不变式（26 条） | ✅ | §3、§4 |
+| 状态契约与不变式（27 条） | ✅ | §3、§4 |
 | 命令表（22 个） | ✅ | §5 |
 | 错误码（16 个，1 个废弃） | ✅ | §6 |
 | 危机期白名单 | ✅ | §7 |
@@ -474,3 +475,12 @@ v3 的单项目、五阶段、全局 phase、单事件槽、双份财务汇总�
 - 延迟状态统一按“第 W 周触发即占当周计数，每周末阶段 7 减 1，归零后下一周开局生效”。设施建设期不计维护费，启用周阶段 2 起计费；红灯触发周照常工作和计薪，下一周开始休养，满期后再下一周恢复；企划定金/机会有效 M 周覆盖 W 至 W+M-1，最后有效周末未确认则失效且定金不退。
 - 周内计划态允许反复覆盖、撤销，推进时使用最后确认快照；即时签约/扣款类命令失败必须原子回滚。
 - 只读预演接口至少返回刚性周支出、岗位硬资格、预计疲劳变化区间、预计完工周数；不得剧透随机波动实际结果或未触发事件。
+
+### 14.8 监督统筹兼任与工作项多人协作（DEC-STAFF-008）
+
+- 每个 producing 项目必须恰有一名监督；监督任职资格只在任职/分配时校验，任职后不因员工状态或属性波动被动撤销。
+- assign_staff、dismiss_staff 等人员调整必须保证所有 producing 项目始终恰有一名监督；不得提交造成监督空缺或重复的状态。监督离任时的具体替补交互/API 尚待明确，不能以此放宽状态不变量。
+- 监督统筹占用固定比例的本周精力；剩余精力可参与本项目中职业适配的普通工作项。监督岗位不改变 Staff.role，也不改变普通工作项资格。
+- 工作项允许多名主责共同承担，不设人数上限；具备主责硬资格者均计为主责。协力是具备协力资格但不具备主责资格的参与者，贡献进度并按工作项基准线拉近/稳定质量下限，但不得突破主责团队决定的质量上限。
+- 不适配员工不计入该工作项正常产能与质量贡献。
+- 监督统筹占比与剩余精力产能折算、多主责质量聚合、协力质量下限贡献及主责质量上限公式均为待标定参数。本节冻结资格和结果边界，不冻结公式。
