@@ -1,9 +1,9 @@
 # M1 运行时切片：能跑一周
 
-> 状态：M1 实现中（内核 + 状态骨架 + 单周结算 + 财务最小切片 + 质量评级与聚合已可运行；交付、事件、危机未实现）。2026-11-25 按 PR #42 复审修正质量模型、不变式、维度权重与公共制作传递，见 §11
+> 状态：M1 运行时基础切片已合入 main（PR #66）。内核 + 状态骨架 + 单周结算 + 财务最小切片 + 质量评级与聚合已可运行；交付、事件、危机未实现（属 M2/M2.5）。2026-11-25 按 PR #42 复审修正质量模型、不变式、维度权重与公共制作传递，见 §11；合入后的契约审计修复见 §13。
 > 契约依据：[M0_CONTRACT_FREEZE.md](M0_CONTRACT_FREEZE.md)、[DOMAIN_ARCHITECTURE.md](DOMAIN_ARCHITECTURE.md)
 > 路线依据：[DEVELOPMENT_ROADMAP.md](DEVELOPMENT_ROADMAP.md) 的 M1 条
-> 分支：`feat/v4-m1-runtime`
+> 主线位置：`packages/game-core/src/v4/`（PR #66 合入）；旧分支 `feat/v4-m1-runtime` 已关闭，后续修复一律从最新 main 新建分支。
 
 ## 1. 这一版能做什么
 
@@ -231,3 +231,29 @@ npm run test:v4      # 构建 v4 模块 + 跑 25 条契约测试
 3. 用新分支开正式 PR（base = `main`），#42 关闭或标记 superseded。
 4. #45 以新 head 为 base 重放；它只加 `event.hpp/.cpp` 与三处钩子，差异范围保持纯事件域。
 5. 集成前在有 emsdk 的环境跑 `npm run test:v4`，把输出贴到 PR；本轮的 MSVC 结果只作为本机可复现证据。
+
+## 13. 合入后契约审计收尾（2026-11-25）
+
+PR #66 把 M1 切片合入 main 后，按契约审计结果做了一处真实缺陷修复，并同步过期表述。不改任何 DEC-* 规则，不扩大 M1 范围。
+
+### 13.1 缺陷修复：坏输入缺字段不再静默归零
+
+`decode_state` 是 5 个带 state 命令的统一入口（`instantiate_work` / `set_plan` / `assign_staff` / `advance_week` / `hash_state`）。此前必填检查只覆盖结构字段，`from_json` 对下列字段提供了默认值，导致坏输入被读成"合法但错误的状态"：
+
+| 字段 | 旧默认值 | 静默后果 |
+|---|---|---|
+| `staff[].weekly_salary` | 0 | 工资按 0 计，周结算与手算不一致 |
+| `staff[].project_fee` | 0 | 临时员工费用丢失 |
+| `staff[].fatigue` / `staff[].morale` | 0 | 产能按满值/零士气算 |
+| `finance.solvency.state` | `"normal"` | 危机中的存档被洗白成正常经营 |
+
+现在这些字段在入口显式要求，缺失返回 `INVALID_INPUT`、状态逐字段不变。回归用例扩展了 §"输入边界：缺必填字段返回 INVALID_INPUT"，覆盖 6 个新字段 × 3 个命令入口，并断言失败前后 `state_hash` 一致。
+
+### 13.2 未做的两项（说明理由，非遗漏）
+
+- **`assign_staff` 缺 `company.status` 守卫**：当前主线没有 `end_company` 命令，公司状态恒为 `running`，该分支不可达。`advance_week` 已有 `COMPANY_ENDED` 守卫。等到 M2 接入生命周期、状态机可以真正进入 `closing`/`ended` 时再补，避免提前写不可达防御代码。
+- **`experience` 累加但不进产能公式**：2026-11-25 DEC-STAFF-004 已确认"成长由实际工作参与驱动、受潜力上限约束"，但成长系统实现属于 M5。M1 只记录经验、不改变能力，与已确认规则一致，保留现状。
+
+### 13.3 验证状态
+
+本机无 Emscripten、cmake 与 C++ 编译器，`npm run test:v4` 与 MSVC 本地壳均无法复跑。本轮执行的是静态校验：测试脚本括号配对、新增字段覆盖、5 个命令入口均经 `decode_state`、失败用例的 hash 断言逻辑。**正式测试证据仍待在有 emsdk 的环境执行 `npm run test:v4`**，本轮不宣称 25/25 通过。
