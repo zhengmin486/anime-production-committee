@@ -95,6 +95,9 @@
 - 协力质量贡献如何按工作项基准线拉近/稳定质量下限。**待标定**。
 - 主责团队决定的工作项质量上限计算公式。**待标定**；协力不得突破该上限。
 - 监督对项目团队统筹、协调的其他数值贡献。**待标定**，不得把管理负荷作为隐性惩罚重新引入。
+- 被动离岗时临时代理监督的交接损失/代理效率修正。**待标定**。
+- 代理能力并列时的候选排序属于确定性工程规则，按稳定员工 ID 顺序，不做随机抽取。
+- 监督缺位停工时该项目本周制作进度为零，属于规则边界，不是可调平衡参数。
 
 **参考文件：** [DECISION_LOG.md](DECISION_LOG.md)、[DOMAIN_ARCHITECTURE.md](DOMAIN_ARCHITECTURE.md)、[M0_CONTRACT_FREEZE.md](M0_CONTRACT_FREEZE.md)、[#55 职业](https://github.com/zhengmin486/anime-production-committee/issues/55)。
 
@@ -137,6 +140,10 @@
 | 黄灯阈值 | 疲劳或士气何时进入轻提醒 | **待标定** | [DECISION_LOG](DECISION_LOG.md)、[事件/提醒规则](DECISION_LOG.md) |
 | 红灯阈值 | 进入强制休养状态的条件 | **待标定** | [DECISION_LOG](DECISION_LOG.md)、[#57 加班](https://github.com/zhengmin486/anime-production-committee/issues/57) |
 | 红灯休养期 | 强制休养持续几周 | **临时参考**：1–2 周；须核对现行规则 | [DESIGN_BACKLOG](DESIGN_BACKLOG_2026-11-25.md)、[DECISION_LOG](DECISION_LOG.md)、[#57 加班](https://github.com/zhengmin486/anime-production-committee/issues/57) |
+| 限时事件有效期 | 事件从触发周起可响应的周数 | **待标定**；触发当周计入，阶段 7 末到期 | [DECISION_LOG](DECISION_LOG.md)、事件模块设计 |
+| 关键事件升级门槛 | 哪些事件可配置一次超时升级 | **待标定/内容配置**；最多一次 | [DECISION_LOG](DECISION_LOG.md)、事件内容指南 |
+| 超时默认分支效果 | 普通事件首次超时自动执行的保守/消极分支效果 | **逐事件配置**；不得统一假设同一惩罚 | [DECISION_LOG](DECISION_LOG.md)、事件内容指南 |
+| 升级事件违约惩罚 | 升级后再次超时触发的硬性违约效果 | **逐事件配置/待标定** | [DECISION_LOG](DECISION_LOG.md)、事件内容指南 |
 | 普通员工磨合损失 | 接手他人已开工工作项时，一次性扣除的产出比例 | **待标定** | [DOMAIN_ARCHITECTURE](DOMAIN_ARCHITECTURE.md)、[M1 临时公式](M1_RUNTIME_SLICE.md)、[#55 职业](https://github.com/zhengmin486/anime-production-committee/issues/55)、[#56 标签](https://github.com/zhengmin486/anime-production-committee/issues/56) |
 | 监督换项目损失 | 监督人员切换项目时的团队级产能损失 | **待标定** | [DOMAIN_ARCHITECTURE](DOMAIN_ARCHITECTURE.md)、[M1 临时公式](M1_RUNTIME_SLICE.md)、[#55 职业](https://github.com/zhengmin486/anime-production-committee/issues/55) |
 | management 磨合减免 | management 能力如何缩放普通人员磨合损失 | **待标定** | [DOMAIN_ARCHITECTURE](DOMAIN_ARCHITECTURE.md)、[#55 职业](https://github.com/zhengmin486/anime-production-committee/issues/55) |
