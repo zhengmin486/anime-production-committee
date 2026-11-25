@@ -131,7 +131,7 @@ SaveRecord { version: 4, savedAt: ISO8601, rules_version: string, state: GameSta
 | # | 命令 | 关键守卫 | 主要失败码 | 原子范围 |
 | --- | --- | --- | --- | --- |
 | 1 | `initialize_game(seed)` | 无（唯一不带 state 的命令） | INVALID_INPUT | 建立公司/名册/供应商/合作方/市场首轮 |
-| 2 | `start_work(offer_id, mode, percent, committee_partner_ids)` | running ∧ 非危机 ∧ 企划存在 ∧ 模式合法 ∧（普通企划满足 `min_reputation/required_works` ∨ 原创草稿存在）∧ 现金 ≥ 全部应付款 | NOT_FOUND / MODE_NOT_ALLOWED / INSUFFICIENT_FUNDS / CRISIS_COMMITMENT_BLOCKED | 项目+委员会+两笔账+消费企划，一次提交；原创在此正式开工 |
+| 2 | `start_work(offer_id, mode, percent, committee_partner_ids)` | running ∧ 非危机 ∧ 企划存在且有效 ∧ 模式合法 ∧（普通企划满足 `min_reputation/required_works` ∨ 有效原创草稿存在）∧ 现金 ≥ 全部应付款 | NOT_FOUND / MODE_NOT_ALLOWED / INSUFFICIENT_FUNDS / CRISIS_COMMITMENT_BLOCKED | 项目+委员会+两笔账+消费企划，一次提交；原创在此正式开工 |
 | 3 | `set_work_plan(work_id, plan)` | 项目 producing ∧ target 引用本项目单集/阶段且至多一个 | NOT_FOUND / INVALID_INPUT | 仅更新计划 |
 | 4 | `assign_staff(staff_id, work_id \| null)` | 项目 producing ∧ 员工存在 ∧ 不违反单项目 | NOT_FOUND / INVALID_PHASE | 仅更新归属 |
 | 5 | `hire_core(staff_id)` | running ∧ 非危机 ∧ 候选人存在 ∧ 现金 ≥ signing_fee ∧ 名册上限（若有） | NOT_FOUND / INSUFFICIENT_FUNDS / CRISIS_COMMITMENT_BLOCKED | 签约即入职并加入核心名册，当周可分配；signing_fee 立即入账，首周周薪计入本周下一次周结算 |
