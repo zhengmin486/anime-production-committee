@@ -574,6 +574,19 @@ Staff {
 - 普通人员磨合的原始损失比例及 `management` 的具体缩放公式属于待标定参数。
 - `management` 能力减免与团队润滑特性减免合计最多 50%，至少保留一半原始磨合损失；监督本人切换项目产生的团队层面损失独立计算，不享受这项减免。
 
+#### 7.2.2 职业资格、工作项适配与监督任职
+
+**规则依据：DEC-STAFF-006。** 本节冻结跨模块边界，不替员工模块负责人填写职业映射与系数。
+
+- 员工的八种基础职业身份（Staff.role）决定其对每个工作项的资格档位：主责、协力或不适配。职业资格是硬门槛；不适配员工不得进入该工作项的普通产能分派。
+- 六维 abilities 只表示专业实力。通过职业资格后，工作项引用的专业能力才参与产能与质量计算；禁止使用单一 ability 同时推断职业资格和专业能力。
+- 项目岗位与基础职业身份分离。监督是项目级统筹岗位，不是把员工 role 改成监督职业。
+- 主责/协力采用独立适配效率档位，且与疲劳、磨合分开计算。质量贡献分别计算：主责按员工自身能力及其上限；协力按工作项基准线计入且不突破该项质量上限；最终按实际完成工作量占比加权。
+- 分配读模型必须向前端提供目标工作项下的主责/协力标签；不适配者不得作为普通可分配产能展示。
+- 基础职业为监督者天然具备监督任职资格；演出、作画、脚本职业者须同时达到 direction 与 management 阈值。每项目最多一名监督，监督当周须归属本项目（INV-09）。
+- 担任监督不改变 Staff.role，也不改变普通工作项职业映射。例如作画员工担任监督后，仍按作画职业适配普通工作项，不会因此获得分镜、脚本或剪辑资格。
+- 监督切换不享受自身磨合减免。映射表、阈值、效率档位与质量基准参数由员工模块负责人补齐。
+
 ### 7.3 Project（作品项目）
 
 #### 7.3.1 结构
@@ -963,8 +976,8 @@ WorkRecord { id, name, ip_id, source, genre, scale, mode, investment_percent,
 | --- | --- | --- | --- |
 | `initialize_game(seed)` | Application | — | 建立公司、初始名册、供应商、合作方、市场首轮、空项目集 |
 | `start_work(offer_id, mode, percent, committee_partner_ids)` | Application | 公司 running；非危机；企划存在且有效；模式合法；普通企划满足 `min_reputation/required_works` 或原创草稿存在且有效；现金覆盖全部应付款 | Project 建立、委员会成立、Market 消费企划、Finance 记投资与合同预算、员工可归属。原创声望资格在创建草稿时检查，不因有效期内轻微波动重复卡开工 |
-| `set_work_plan(work_id, plan)` | Project | 公司 running；项目 producing；`plan.target` 须引用本项目单集/阶段，至多一个 | 更新计划（含定向目标），下个结算生效 |
-| `assign_staff(staff_id, work_id \| null)` | Staff | 项目存在且 producing；核心员工每周仅能归属一个项目；传 null 为撤出 | 更新唯一项目归属，下一次结算生效 |
+| `set_work_plan(work_id, plan)` | Project | 公司 running；项目 producing；`plan.target` 须引用本项目单集/阶段，至多一个 | 更新周内计划态并刷新只读预览；实际制作效果在周结算发生 |
+| `assign_staff(staff_id, work_id \| null)` | Staff | 项目存在且 producing；核心员工每周仅能归属一个项目；同时校验职业与目标工作项资格；项目/本周外派/主动待命三选一互斥 | 更新周内计划态并刷新只读预览；实际归属与产能效果在周结算快照中生效 |
 | `hire_core(staff_id)` | Staff + Finance | 公司 running；非资金危机；候选人存在；现金 ≥ signing_fee；名册上限（若有）。不要求全公司空闲（DEC-PLAY-003） | 签约即入职、立即进入核心名册并可当周分配；signing_fee 入账，首周周薪计入本周下一次结算 |
 | `scout(...)` | Staff + Finance | 公司 running；非资金危机；现金 ≥ 本次费用；招聘池非空。不要求全公司空闲 | 更新招聘池、保底计数并记费用 |
 | `dismiss_staff(staff_id)` | Staff | 公司 running；core 员工存在；解雇后 core 数 ≥1。不要求全公司空闲，危机中也允许 | 移出名册、清空归属；不预付遣散费 |
@@ -977,6 +990,7 @@ WorkRecord { id, name, ip_id, source, genre, scale, mode, investment_percent,
 | `buy_tv_service(work_id)` | Project + Finance | 委员会模式；未购买；现金 | 渠道开放、发行费入账 |
 | `request_extension(work_id)` | Project + Finance | 委员会模式；未用过；未过截止；现金 | 延期生效、压力与费用 |
 | `arrange_financing(provider, amount)` | Finance | 偿付危机或资金压力周；额度未超限 | 现金入账、生成贷款与周还款计划（§7.5.1） |
+| `expand_office()` | Company + Finance | 达到声望 190/350 对应扩容资格；非资金危机；现金覆盖一次性扩建搬迁费 | 即时扣费并立即扩至 4/6 个设施槽位，同时提高每周基础房租；不改变核心员工编制 |
 | `advance_week()` | Application | 公司 running；无待处理事件；周 < 520 | 执行完整周结算（§9） |
 | `resolve_event(work_id, event_id, option_id)` | Event → Application | 该 work 存在对应 pending 事件；选项合法；现金足够（若需付款）；效果不绕过危机白名单 | 效果分派到各领域；只移除目标事件 |
 | `end_company()` | Company + Application | 公司 running | 锁 closing，未交付项目转 delivering |
@@ -1062,6 +1076,23 @@ UI 不计算规则。核心在每次命令后输出读模型；读模型**不持
 | 融资 | 本金立即入账 | 下周起产生还款与利息（计入强制费用） |
 
 **纪律**：任何"立即生效"的操作都不消耗随机坐标、不推进周数；任何"下周生效"的配置在结算快照中被冻结，结算中途不得再读取可变状态（D9）。
+
+#### 8.5.1 四类操作时序
+
+规则依据：DEC-TIME-001/002。不得把所有周内操作都归入“下一周执行”。
+
+| 分类 | 生效语义 | 操作 |
+| --- | --- | --- |
+| 即时操作 | 命令成功后立即改状态 | start_work（扣立项本金）、定金锁单、create_custom_offer、buy_tv_service、特殊商业机会签约（扣前置费）、arrange_financing、sign_outsourcing（占供应商产能/扣费）、scout（扣寻访费）、hire_core / hire_temporary（签约占名额）、dismiss_staff、设施建造/升级、办公场地扩容、deliver_work、abort_work、resolve_event |
+| 计划态操作 | 周内实时预览；推进周结算后才产生实际效果 | assign_staff（社内项目/本周外派/主动待命三选一互斥）、set_work_plan（方针与定向目标）、项目加班开关 |
+| 周结算操作 | advance_week 指定阶段统一执行，统一预检与原子提交 | 常规制作推进、一次性磨合判定、适配/疲劳/经验结算、外包按周交付、外派结算、固定成本与周薪预检扣款、市场与常规招聘池刷新 |
+| 延迟生效操作 | 显式记录生效周数与状态标识，到期自动转换或结算 | 企划 2 周定金锁定倒计时、设施 2 周建设期（第 3 周起启用并计提维护费）、红灯员工 1–2 周强制休养、特殊商业机会约定收益（deliver_work 时入账）、资金危机倒计时 |
+
+**hire_core 特例：** 只属于即时操作。签约即入职并占用名册，当周即可通过 assign_staff 分配；周薪从签约后的下一次 advance_week 周结算开始计提，不存在“下周才可用”的延迟状态。
+
+**办公场地扩容：** 声望 190 解锁 2→4 槽，声望 350 解锁 4→6 槽；玩家主动确认并支付一次性搬迁费后立即完成，同时每周基础房租小幅上调。危机期间禁止扩容。费用与租金增量待标定。
+
+**容量隔离：** 核心员工名册上限随公司成长里程碑独立开放，不依赖设施等级、设施槽位或作画工作室；开放编制不收扩容费，实际招聘受现金流与人才供给约束。编制成长曲线待标定。
 
 ---
 
