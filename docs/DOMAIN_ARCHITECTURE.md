@@ -1234,7 +1234,7 @@ WeekReceipt {
 ### 10.1 立项（start_work）
 
 ```text
-守卫：running ∧ 非危机 ∧ 企划存在且有效 ∧ 模式合法 ∧
+守卫：running ∧ 企划存在且有效 ∧ 模式合法 ∧
       （普通企划满足 min_reputation/required_works ∨ 有效原创草稿存在）∧
       现金（拨款前）≥ 全部应付款/投资额
 1. 冻结 OfferSnapshot；计算 total_investment（仅委员会 = budget×2）
