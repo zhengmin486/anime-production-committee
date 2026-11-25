@@ -1,8 +1,36 @@
 # 开发初期游戏美术素材
 
-更新日期：2026-11-24（本文保留 2026-11-20 与 2026-11-22 两批历史记录，仅修正与仓库实际不符的条目）。
+更新日期：2026-11-25（本文保留 2026-11-20 与 2026-11-22 两批历史记录，仅修正与仓库实际不符的条目）。
 
 > 2026-11-24 已对全仓库图片、图标、背景、字体与空素材目录做过一次逐项实测盘点，结论、哈希、引用行号与差异登记见 [ASSET_INVENTORY_2026-11-24.md](ASSET_INVENTORY_2026-11-24.md)。本文与盘点冲突处以盘点为准。
+
+## 2026-11-25 第三方像素素材库
+
+按用户给出的 8 个素材页核对许可后，将 **6 套可随仓库分发的素材库**放入 [`apps/web/public/assets/vendor/`](../apps/web/public/assets/vendor/)，共 1 871 个文件、1 417 张 PNG、2 185 225 字节（2.08 MiB）。原文件均未修改；许可文件、源站、镜像提交和逐文件 SHA-256 见 [`vendor/MANIFEST.json`](../apps/web/public/assets/vendor/MANIFEST.json)。
+
+| 素材库 | 目录 | 作者 | 许可 | 获取方式 |
+| --- | --- | --- | --- | --- |
+| Pixel Office | `vendor/pixel-office/` | 2dPig | CC0-1.0 | 固定提交 `5af997159f4e` 的 GitHub 镜像；保留包内许可与地板/墙面来源说明 |
+| Pixel Adventure | `vendor/pixel-adventure/` | Pixel Frog | CC0-1.0 | 固定提交 `fb168c3a1efc` 的 Godot 素材镜像；仅取 PNG，许可声明见 `SOURCE_README.md` |
+| Pixel Pack 1.0 | `vendor/kenney-pixel-pack/` | Kenney | CC0-1.0 | Kenney 官网签名下载，保留 `License.txt` |
+| Tiny Town 1.1 | `vendor/kenney-tiny-town/` | Kenney | CC0-1.0 | Kenney 官网签名下载，保留 `License.txt` |
+| UI Pack 2.0 | `vendor/kenney-ui-pack/` | Kenney | CC0-1.0 | Kenney 官网签名下载，保留 PNG、SVG、字体、音效和许可 |
+| Pixel Art Top Down - Basic | `vendor/cainos-top-down-basic/` | Kwangsik Song / Cainos | MIT | 固定提交 `61c9b4eb1ca9` 的 GitHub 镜像；仅取 9 张纹理 PNG 和许可 |
+
+已接入四场景原型：
+
+- `pixel-office/LARGE_PLANT.png`：办公室与工作室绿植，按地板基点定位。
+- `pixel-office/COFFEE.png`：办公室四张桌面的咖啡杯，保持桌面承载关系。
+- `pixel-adventure/Items/Boxes/Box1/Idle.png`：工作室后墙资料箱，按地板基点定位并保留遮挡排序。
+
+接入位置为 [`apps/web/src/prototype/PixelScenes.tsx`](../apps/web/src/prototype/PixelScenes.tsx)。没有把正面办公桌、俯视地板或平台跳跃人物强行放进等距房间；完整素材库仍可通过 `/assets/vendor/` 直接引用。
+
+**未入库的 2 套：**
+
+- Modern Office Tileset 16x16 免费样张：随样张提供的许可允许在商业/非商业项目中使用和修改，但明确禁止作为素材转售或再分发，因此不把源 PNG 放进公开仓库。
+- flojiq Office Assets：未取得可验证的再分发许可或购买授权，不从未授权镜像复制原文件。
+
+这两套的源站、限制和已核对镜像提交同样记录在 `vendor/MANIFEST.json` 的 `excluded` 中。素材库下载不等于全部接入游戏，也不等于商业发行授权审查已经完成。
 
 ## 当前范围与结果
 

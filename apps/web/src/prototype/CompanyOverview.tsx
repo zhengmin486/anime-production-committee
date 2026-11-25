@@ -16,6 +16,7 @@ export function CompanyOverview({ data, onOpen }: { data: PrototypeData; onOpen:
   })
 
   return <div className="proto-screen">
+    <div id="company-ledger" className="scene-anchor">
     <Panel eyebrow="COMPANY LEDGER / 公司账" title="公司现金与承诺" marks={['confirmed']}
       aside={<p className="proto-week">第 <strong>{company.week}</strong> / {company.totalWeeks} 周</p>}
       note={company.headline}>
@@ -27,6 +28,7 @@ export function CompanyOverview({ data, onOpen }: { data: PrototypeData; onOpen:
       </dl>
       <p className="proto-footnote">现金按周统一结算，同一笔钱只扣一次；项目账只用于分析单部作品表现，不代表公司还能花多少钱。 <a href="#finance-archive">查看财务与历史</a></p>
     </Panel>
+    </div>
 
     <Panel eyebrow="PORTFOLIO / 项目组合" title="同时在制的作品" marks={['confirmed', 'sample']}
       note="三部作品处于不同的双层进度：公共制作 + 每集各自六阶段。普通周不需要逐个打开。">
@@ -55,7 +57,7 @@ export function CompanyOverview({ data, onOpen }: { data: PrototypeData; onOpen:
       })}</div>
     </Panel>
 
-    <div className="proto-two-col">
+    <div id="people-board" className="proto-two-col scene-anchor">
       <Panel eyebrow="PEOPLE / 人员归属" title="谁在哪个项目上" marks={['confirmed']}
         note="核心员工每周严格归属一个项目：没有同周支援、借调或拆分工时。周结算后可重新分配，切换要承担一次性磨合损失。">
         <div className="staff-load">{staff.map((person) => {

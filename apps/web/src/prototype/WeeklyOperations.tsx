@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { FileText, Flag } from 'lucide-react'
 import { decisionKindNames, episodeStageShortNames, ledgerNames, riskNames, weekStateNames } from './model'
 import type { PrototypeData, WorkItem } from './model'
@@ -6,15 +6,15 @@ import { Panel, RiskTag, signedPoint, signedYuan, Stat, yuan } from './bits'
 
 const stateTones = { normal: 'state-normal', event_pending: 'state-event', cash_crisis: 'state-crisis', closing: 'state-closing' } as const
 
-export function WeeklyOperations({ data, onOpenProject }: { data: PrototypeData; onOpenProject: (projectId: string) => void }) {
-  const [week, setWeek] = useState(data.receipts[0].week)
+export function WeeklyOperations({ data, onOpenProject, week, onWeekChange, onEventResolved }: { data: PrototypeData; onOpenProject: (projectId: string) => void; week: number; onWeekChange: (week: number) => void; onEventResolved: (eventId: string) => void }) {
   const [selectedOptions, setSelectedOptions] = useState<Record<number, string>>({})
   const [resolvedEvents, setResolvedEvents] = useState<Record<string, { optionId: string; outcome: string }>>({})
   const [closingView, setClosingView] = useState<'delivery' | 'summary' | null>(null)
   const receipt = data.receipts.find((item) => item.week === week) ?? data.receipts[0]
+  useEffect(() => setClosingView(null), [week])
   const resolution = receipt.event ? resolvedEvents[receipt.event.id] : undefined
   const selectedOption = receipt.event ? selectedOptions[receipt.week] : undefined
-  const selectWeek = (next: number) => { setWeek(next); setClosingView(null) }
+  const selectWeek = (next: number) => { setClosingView(null); onWeekChange(next) }
   const staffName = (staffId: string) => data.staff.find((person) => person.id === staffId)?.name ?? staffId
   const itemOf = (projectId: string, key: string | null): WorkItem | undefined => {
     const project = data.projects.find((item) => item.id === projectId)
@@ -171,6 +171,7 @@ export function WeeklyOperations({ data, onOpenProject }: { data: PrototypeData;
         <button className="button primary" disabled={selectedOption === undefined} onClick={() => {
           if (selectedOption === undefined) return
           setResolvedEvents((current) => ({ ...current, [receipt.event!.id]: { optionId: selectedOption, outcome: receipt.event!.outcomes[selectedOption] } }))
+          onEventResolved(receipt.event!.id)
         }}>确认处理（原型）</button>
       </div>}
       <p className="proto-footnote">事件归属具体项目，多数周只显示回执；同时满足触发条件时按优先级与种子选择，不允许一周大量弹窗。</p>

@@ -1,5 +1,7 @@
 # 素材盘点（2026-11-24）
 
+> **2026-11-25 增量说明：** 以下第 0–7 节保留 `main@4d62bb3` 的历史盘点快照，不代表当前 WP10 工作分支。当前新增 6 套许可明确的第三方素材库，共 1 871 个文件、1 417 张 PNG、2 185 225 字节（2.08 MiB）；来源、许可、固定镜像提交、排除项及逐文件 SHA-256 见 [`apps/web/public/assets/vendor/MANIFEST.json`](../apps/web/public/assets/vendor/MANIFEST.json)，接入说明见 [`ASSET_CATALOG.md`](ASSET_CATALOG.md) 的 2026-11-25 小节。因此下文“只有 3 张 PNG”“其余素材类目全空”等结论仅适用于该历史基线。
+
 - 盘点日期：2026-11-24 · 基线 `main@4d62bb3`
 - 盘点范围：`main` 全部 git 追踪文件 + 全部远端分支 + `.gitignore` + `apps/web/src/**` 的全部引用点 + `docs/**` 的全部图片链接
 - 方法：文件枚举与 `sha256sum` 核对、逐张目视检查成品、`grep` 定位真实引用行号、脚本遍历文档图片链接判断可达性

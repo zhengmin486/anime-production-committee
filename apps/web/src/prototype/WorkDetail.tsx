@@ -136,6 +136,7 @@ export function WorkDetail({ project, data, onBack }: { project: Project; data: 
         <p className="proto-footnote">计划不凭空创造员工或产能；多项目争夺同一员工时由玩家明确归属，系统不静默复制员工。投入强度、参数与随机波动区间属于框架第 11 节待细化内容，本页只验证信息能否被读懂。</p>
       </Panel>
 
+      <div id="production-resources" className="scene-anchor">
       <Panel eyebrow="RESOURCES / 资源占用" title="这个项目本周占了谁" marks={['confirmed', 'sample']}
         note="核心员工每周严格归属一个项目：不存在同周支援、借调或拆分工时；周结算后可重新分配，不受制作阶段边界限制。">
         <ul className="people-list">{people.map((person) => {
@@ -165,6 +166,7 @@ export function WorkDetail({ project, data, onBack }: { project: Project; data: 
         </table>
         <p className="proto-footnote">切换项目的人员要承担一次性磨合损失，只影响工作量产出效率、不直接影响质量；监督人员切换产生团队层面损失。临时员工与供应商的跨项目调度属于另一套规则。</p>
       </Panel>
+      </div>
     </div>
 
     <Panel eyebrow="RISK / 风险与预兆" title="风险从哪来" marks={['proposal']}>
