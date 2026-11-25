@@ -224,6 +224,7 @@ Sites 官方插件本地打包约束：单文件不超过 50 MiB，整体发布 
 - [本轮分工（V1.0 迁移）](docs/TEAM_PLAN.md)
 - [制作事件模块设计（M2 提案）](docs/EVENT_MODULE_DESIGN.md)
 - [事件内容填写指南](docs/EVENT_CONTENT_GUIDE.md)
+- [事件卡片库（WP7 内容样例）](docs/EVENT_CARDS_WP7.md)
 - [当前进度与方向](docs/PROGRESS.md)
 - [素材盘点：图片、图标、背景、字体与缺口（2026-11-24）](docs/ASSET_INVENTORY_2026-11-24.md)
 
