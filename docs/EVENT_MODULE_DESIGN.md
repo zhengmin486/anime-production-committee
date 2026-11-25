@@ -1,4 +1,6 @@
-# 制作事件模块设计（M2 实现方案）
+# 制作事件模块设计（历史 M2 方案，已被新架构取代）
+
+> **过期文档警告（2026-11-25）：本文档不是当前事件规则或实现契约，不得据此继续实现。** 本文档仍包含 V3 全局单事件槽、`phase=event_pending`、`pending_event`、`deferred_event`、`abandon` 放弃本周后继续推进等旧设计，均已被多项目事件规则取代。当前权威依据为 `docs/DECISION_LOG.md` 中 `DEC-EVENT-001`、`docs/M0_CONTRACT_FREEZE.md` 的 `EventState.pending[]` 与事件命令契约，以及 `docs/DOMAIN_ARCHITECTURE.md` 的 Event 领域定义。每项目每周最多一个事件；多个项目可同周触发；所有待处理事件保留在 `events.pending[]`，玩家自由选择处理顺序；队列非空阻塞周推进；不允许通过 abandon/延期槽绕过阻塞。本文档其余章节仅作为旧实现背景与历史审计材料。
 
 - 模块负责人：@pyxz0；内容协作者：@Muchbv（见 [#13](https://github.com/zhengmin486/anime-production-committee/issues/13)）
 - 跟踪议题：[#11](https://github.com/zhengmin486/anime-production-committee/issues/11)
