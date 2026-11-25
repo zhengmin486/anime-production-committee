@@ -1014,7 +1014,9 @@ UI 不计算规则。核心在每次命令后输出读模型；读模型**不持
 | `crisis_board` | 缺口、剩余期限、受影响项目、可采取的自救动作与代价 |
 | `market_board` | 企划槽、热度、锁定原因、可获得的最佳机会 |
 | `event_card` | 事件文本、选项、确定成本、风险提示 |
-| `week_receipt` | 本周各项目变化、原因、人员变化、现金变化、事件、下周关注 |
+| `week_receipt` | 本周现金变化、高光、项目快照、普通可行动线索与完整阻塞待决区；硬阻塞与普通线索严格分区 |
+| `navigation_hints` | Q7 未读且可行动的页签徽标；查看熄灭、实质状态跃迁重亮、解决/失效清除 |
+| `action_preview` | 周内计划态操作的后果预览；不提交费用、进度、磨合或合同承诺 |
 
 `week_receipt` 是易失的会话反馈，不写存档（沿用现有政策）：重载后不重建上一周回执。
 
@@ -1078,7 +1080,7 @@ UI 不计算规则。核心在每次命令后输出读模型；读模型**不持
 | 8 | 人员结算 | Staff + Kernel | 实际参与 | 疲劳、士气、经验、预警、临时到期、`last_participation`、工作项 `contributors` 追加 | 失败 → 回滚 |
 | 9 | 生命周期推进 | Project + Application | 门槛达成 + 截止 | 可交付标记 / 到期强制交付 / `delivering` | 失败 → 回滚 |
 | 10 | 交付结算 | Application + Kernel/commerce/evaluation | delivering 项目 | 收入分账、Archive 记录、委员会关闭、关系、声望、系列 | 失败 → 回滚 |
-| 11 | 事件抽取 | Event | 快照 + 冷却（仅 `producing` 项目） | 至多一个待处理事件 | 失败 → 回滚（事件不得导致半结算） |
+| 11 | 事件抽取 | Event | 快照 + 冷却（仅 `producing` 项目） | 每项目每周最多一个；跨项目事件分别追加至 `events.pending[]` | 失败 → 回滚（事件不得导致半结算） |
 | 12 | 时间与市场 | Company + Market | — | week+1、企划刷新、热度周期、提案、竞争轮次 | 失败 → 回滚 |
 | 13 | 终局与回执 | Application | — | time_limit、危机期限判定、公司结局、周回执 | 失败 → 回滚 |
 
@@ -1151,19 +1153,20 @@ crisis 期限用尽 且 预检仍失败
 ```text
 WeekReceipt {
   week, mode: normal | crisis
-  funds_delta, balance, solvency
-  works[{ work_id,
-          active_items[{ episode_index, stage_key, item_key, work_delta }],   // 只列有推进的项
-          items_delivered[], gates_met, episodes_delivered,
-          work_delta, quality_delta{六维}, progress_permille,
-          handover[{ staff_id, episode_index, loss_permille }],               // 磨合损失逐条可查
+  cash{ net_delta, balance, solvency }             // 实际现金流；应收不等于到账
+  highlights[{ code, text, destination? }]          // 无高光时为空
+  works[{ work_id, title, mode, progress_permille, progress_delta,
+          delivery_range, deadline_slack, risk_level,
+          bottleneck?, committee_signal?,
+          active_items[], items_delivered[], gates_met, episodes_delivered,
+          work_delta, quality_delta{六维},
+          handover[{ staff_id, episode_index, loss_permille }],
           causes[{code, detail}], warnings[], can_deliver }]
   staff_delta[{ staff_id, experience, fatigue_delta, morale_delta, assignment_work_id }]
   deliveries[{ work_id, quality_score, rating, revenue, company_received, rank }]
-  crisis{ gap, deadline_week, actions[{code, label, cost_hint}] } | null
-  events[{ event_id, work_id, title }]
-  notices[{ code, text, severity }]
-  next_week_focus[]
+  blocking_items[{ kind: event | forced_action | crisis, item_id, work_id?, title, destination }]
+  actionable_clues[{ kind, title, current_state, unattended_consequence, destination }]
+  neutral_updates[{ code, text }]                  // 常规刷新等轻量中性动态
 }
 ```
 
@@ -1171,6 +1174,11 @@ WeekReceipt {
 - `causes` 必须能回答"为什么这周只推进了这么多"，且必须能解释**没有推进**（例如"分镜与原画未达门槛，动画制作不可开工"）。
 - 工作项推进只列**有变化**的项，不把 174 项全部铺给玩家；默认折叠。
 - 磨合损失必须逐条出现在回执里，否则玩家会认为"换人无缘无故变慢"。
+- `blocking_items[]` 与 `actionable_clues[]` 是互斥信息分区：所有待处理事件/强制事项完整进入前者，普通机会与预警进入后者；普通线索默认突出 2–3 条但不得因此丢弃其他重要信息。
+- 无硬阻塞时回执不得阻断操作或推进；存在硬阻塞时必须完整展示并处理全部阻塞项后才允许推进。
+- 现金净变化只统计实际到账与支出；应收款不得计入 `cash.net_delta` 或 `cash.balance`。
+- 回执只呈现变化与异常；无变化条目隐藏。先展示正向成果，再展示风险与预警；可行动线索提供直达目标的 `destination`。
+- 主界面导航徽标遵循 Q7 生命周期；项目概览展示死线安全余量和瓶颈；操作预览基于最终计划态计算且不提交业务状态。
 
 ---
 
@@ -1520,9 +1528,10 @@ SaveRecord { version: 4, savedAt: ISO8601, rules_version, state: GameState }
 
 | 决策编号 | 已确认结论 | 对架构的约束 |
 | --- | --- | --- |
-| DEC-PLAY-003 招募窗口 | 招聘/抽卡/解雇不要求全公司空闲；成本立即入账、下周生效 | 命令守卫删除"idle/project_settled"前置；生效时点表按 §8.5 执行 |
+| DEC-PLAY-003 招募窗口 | 招聘/抽卡/解雇不要求全公司空闲；核心员工签约即入职、当周可分配；签约费即时入账，首周周薪从签约后当前经营周的下一次周结算起计提 | 命令守卫删除"idle/project_settled"前置；`hire_core` 同次命令完成签约入职并允许当周分配 |
 | DEC-PROD-004 交付时机 | 门槛达标后玩家可主动交付；交付即停止生产 | `deliver_work` 在当次提交内完成结算，周数不变；交付后项目不再产出 |
 | DEC-FIN-003 危机语义 | 推进周数、继续计提固定成本、允许现金暂时为负；只允许融资，禁止其他新增承诺与新增项目支出 | 危机结算 7 步固定；危机期命令白名单见 §8.5；数值与期限仍待模拟 |
+| DEC-UI-001 周回执与经营信息呈现 | 周回执硬阻塞/普通线索严格分区；普通线索默认突出 2–3 条但不限制事项数量；主界面持续提示并在操作旁展示后果预览 | `WeekReceipt` 分区、导航提示、项目概览和计划态预览按 §8.4/§9.4 提供；不得截断 `events.pending[]` |
 
 以下内容属于已确认方向下的局部设计，不构成重新打开上述产品决策：危机期间周数与固定成本语义、融资条件和危机期限、临时员工/供应商跨项目调度细节、具体工作项和依赖图、质量聚合参数。
 
