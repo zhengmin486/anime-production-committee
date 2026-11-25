@@ -17,4 +17,8 @@ EMSCRIPTEN_BINDINGS(apc_v4) {
     emscripten::function("assign_staff", &apc::v4::assign_staff);
     emscripten::function("advance_week", &apc::v4::advance_week);
     emscripten::function("hash_state", &apc::v4::hash_state);
+    // M2 单项目纵切：立项 / 交付 / 中止
+    emscripten::function("start_work", &apc::v4::start_work);
+    emscripten::function("deliver_work", &apc::v4::deliver_work);
+    emscripten::function("abort_work", &apc::v4::abort_work);
 }

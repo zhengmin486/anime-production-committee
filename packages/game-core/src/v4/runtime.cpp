@@ -176,6 +176,132 @@ bool instantiate(const Json& blueprint, const std::string& work_id, int opened_w
     return true;
 }
 
+// ---- M2 交付结算辅助 ----
+
+// 评级阈值沿用 V3.5 grade_thresholds 85/75/65/50（S/A/B/C，其余 D）。
+// M5 接入完整评价体系后由纯函数替换，调用方不变。
+std::string rating_from_score(int score) {
+    if (score >= 85) return "S";
+    if (score >= 75) return "A";
+    if (score >= 65) return "B";
+    if (score >= 50) return "C";
+    return "D";
+}
+
+// 门槛完成比例：已 delivered 的 is_gate 工作项 / 全部 is_gate 工作项，千分比。
+// 强制交付时用它折算质量分，表达"按当前完成度结算并扣罚"。
+int gate_completion_permille(const Project& work) {
+    int gates = 0;
+    int delivered = 0;
+    walk_items(work, [&gates, &delivered](const WorkItem& item) {
+        if (!item.is_gate) return;
+        ++gates;
+        if (item.delivered()) ++delivered;
+    });
+    return gates == 0 ? 0 : delivered * 1000 / gates;
+}
+
+// 项目累计直接成本：唯一账本中按 work_id 归因的支出（金额为负）。
+// 项目账是归因视图，不是第二账本（DEC-FIN-001）。
+std::int64_t project_costs(const GameState& state, const std::string& work_id) {
+    std::int64_t total = 0;
+    for (const auto& entry : state.finance.entries) {
+        if (entry.work_id && *entry.work_id == work_id && entry.amount < 0) total -= entry.amount;
+    }
+    return total;
+}
+
+// 交付结算：质量聚合 → 评级 → Archive 只追加 → 员工解绑 → 项目转 settled。
+// 周数不变、生产立即停止（架构 §7.3.6）。非正常交付（强制截止 / 中止）时
+// 按门槛完成度折算质量分并记 occurrence_issues，不重算已入账成本。
+// 声望变化与商业窗口分账属于 M4/M5，本函数不处理。
+Json settle_project(GameState& state, Project& work, const std::string& end_reason) {
+    const int week = state.company.week;
+    const auto quality = kernel::aggregate_work(work);
+    const int permille = gate_completion_permille(work);
+    int score = quality.mean;
+    if (end_reason != "delivered") score = score * permille / 1000;
+
+    // 交付即停产：员工归属清空，回到未分配（玩家需重新分配，否则下周空转仍计薪）。
+    for (auto& member : state.staff) {
+        if (member.assignment_work_id && *member.assignment_work_id == work.id) {
+            member.assignment_work_id.reset();
+        }
+    }
+
+    Json quality_json = Json::object();
+    for (int i = 0; i < kDimensionCount; ++i) {
+        quality_json[kDimensions[static_cast<std::size_t>(i)]] = quality.dims[static_cast<std::size_t>(i)];
+    }
+
+    Json episode_summary = Json::array();
+    for (const auto& episode : work.episodes) {
+        const auto episode_quality = kernel::aggregate_episode(episode);
+        episode_summary.push_back(Json{{"index", episode.index}, {"quality", episode_quality.mean}});
+    }
+
+    std::set<std::string> contributors;
+    walk_items(work, [&contributors](const WorkItem& item) {
+        for (const auto& id : item.contributors) contributors.insert(id);
+    });
+    Json team = Json::array();
+    for (const auto& id : contributors) team.push_back(id);
+
+    const std::int64_t contract_received =
+        work.offer.is_object() ? work.offer.value("contract_budget", std::int64_t{0}) : 0;
+    const std::int64_t costs = project_costs(state, work.id);
+    const std::string rating = rating_from_score(score);
+    Json issues = Json::array();
+    if (end_reason != "delivered") issues.push_back(end_reason);
+
+    if (!state.archive.contains("works") || !state.archive.at("works").is_array()) {
+        state.archive["works"] = Json::array();
+    }
+    state.archive["works"].push_back(Json{
+        {"id", "record." + work.id},
+        {"work_id", work.id},
+        {"name", work.offer.is_object() ? work.offer.value("name", work.id) : work.id},
+        {"ip_id", nullptr},
+        {"source", work.offer.is_object() ? work.offer.value("source", "custom") : "custom"},
+        {"genre", nullptr},
+        {"scale", work.offer.is_object() ? work.offer.value("scale", "short") : "short"},
+        {"mode", work.mode},
+        {"investment_percent", 0},
+        {"start_week", work.opened_week},
+        {"end_week", week},
+        {"end_reason", end_reason},
+        {"episode_count", static_cast<int>(work.episodes.size())},
+        {"gate_completion_permille", permille},
+        {"quality", quality_json},
+        {"quality_score", score},
+        {"rating", rating},
+        {"occurrence_issues", issues},
+        {"commercial_revenue", 0},
+        {"channel_breakdown", Json::array()},
+        {"commercial_rank", nullptr},
+        {"finance_summary", Json{{"contract_received", contract_received},
+                                 {"investment_paid", 0},
+                                 {"commercial_share", 0},
+                                 {"success_reward", 0},
+                                 {"costs", Json{{"salary_direct", costs}}},
+                                 {"profit", contract_received - costs}}},
+        {"team", team},
+        {"episode_summary", episode_summary},
+        {"committee_snapshot", Json::array()},
+        {"major_events", Json::array()}});
+
+    work.status = "settled";
+    work.delivery = Json{{"week", week},
+                         {"end_reason", end_reason},
+                         {"quality_score", score},
+                         {"rating", rating},
+                         {"gate_completion_permille", permille},
+                         {"contract_received", contract_received},
+                         {"costs", costs},
+                         {"profit", contract_received - costs}};
+    return work.delivery;
+}
+
 // 必填字段检查：from_json 的默认值会把"缺字段的坏存档"读成"合法但错误的状态"，
 // 所以命令入口先确认结构，再交给反序列化。缺失一律 INVALID_INPUT，不落库、不静默修复。
 GameState decode_state(const Json& request) {
@@ -812,12 +938,24 @@ std::string advance_week(const std::string& input) {
 
         state.company.week = week + 1;
 
+        // ---- 强制交付（DEC-PROD-004 / 架构 §7.3.6）----
+        // 到截止周仍在 producing 的项目自动按当前完成度结算，不能等下一周再罚。
+        // 本周记账与生产已完成，强制交付只做归档结算，不再产生工作量或改账面流水。
+        // 按 id 排序遍历，保证回执顺序可复现。
+        Json deliveries = Json::array();
+        for (Project* work : ordered) {
+            if (work->status != "producing") continue;
+            if (state.company.week < work->deadline_week) continue;
+            deliveries.push_back(settle_project(state, *work, "forced_delivery"));
+        }
+
         const auto post_errors = validate(state);
         if (!post_errors.empty()) return encode(error_body("INTERNAL_ERROR", "结算后状态非法: " + post_errors.front()));
 
         Json report = Json{{"week", week},
                            {"works", works_report},
                            {"staff", staff_report},
+                           {"deliveries", deliveries},
                            {"funds", Json{{"delta", -total_cost},
                                           {"balance", state.finance.balance},
                                           {"costs", Json{{"salary", salary_total},
@@ -848,6 +986,113 @@ std::string initialize_game(const std::string& input) {
 }
 
 std::string set_work_plan(const std::string& input) { return set_plan(input); }
+
+// ---- M0 命令 2：start_work（M2 单项目纵切）----
+// M2 用请求内的 blueprint/offer 代替 M3 企划槽，只支持承制。制作费在立项时
+// 一次性入账（DEC-COMM-003）：它是制作公司的收入，不是划拨给项目的钱包。
+std::string start_work(const std::string& input) {
+    try {
+        const Json request = Json::parse(input);
+        GameState state = decode_state(request);
+        if (state.company.status != "running") return encode(error_body("INVALID_PHASE", "公司已结束"));
+        if (state.finance.solvency.state == "crisis") {
+            return encode(error_body("CRISIS_COMMITMENT_BLOCKED", "危机期间不得新增项目"));
+        }
+        const std::string work_id = request.value("work_id", std::string{});
+        const std::string mode = request.value("mode", std::string("contract"));
+        if (mode != "contract") {
+            return encode(error_body("MODE_NOT_ALLOWED", "M2 仅支持承制模式，委员会路线属 M4"));
+        }
+        if (find_work(state, work_id) != nullptr) {
+            return encode(error_body("INVALID_INPUT", "work_id 已存在"));
+        }
+        const std::int64_t contract_budget = request.value("contract_budget", std::int64_t{0});
+        if (contract_budget <= 0) {
+            return encode(error_body("INVALID_INPUT", "contract_budget 必须为正"));
+        }
+        const int duration_weeks = request.value("duration_weeks", 30);
+        if (duration_weeks <= 0) {
+            return encode(error_body("INVALID_INPUT", "duration_weeks 必须为正"));
+        }
+        const Json blueprint = request.at("blueprint");
+
+        Project work;
+        std::string error;
+        if (!instantiate(blueprint, work_id, state.company.week, duration_weeks, work, error)) {
+            return encode(error_body("INVALID_INPUT", error));
+        }
+        work.offer = Json{{"id", request.value("offer_id", "offer." + work_id)},
+                          {"name", request.value("name", work_id)},
+                          {"source", request.value("source", "market")},
+                          {"scale", request.value("scale", "short")},
+                          {"contract_budget", contract_budget},
+                          {"episode_count", static_cast<int>(work.episodes.size())}};
+
+        // 制作费一次入账：现金增加、账本可归因到项目，与成本流水分开。
+        const std::string entry_id = "start." + work_id;
+        state.finance.entries.push_back(
+            LedgerEntry{entry_id, state.company.week, work_id, "contract", contract_budget, std::nullopt, "制作费"});
+        state.finance.balance += contract_budget;
+        state.works.push_back(std::move(work));
+
+        const auto errors = validate(state);
+        if (!errors.empty()) return encode(error_body("INVALID_STATE", errors.front()));
+        return encode(Json{{"state", state}});
+    } catch (const Json::exception&) {
+        return encode(error_body("INVALID_INPUT", "JSON 或字段类型无效"));
+    } catch (...) {
+        return encode(error_body("INTERNAL_ERROR", "内部错误"));
+    }
+}
+
+// M0 命令 10：deliver_work。主动交付，周数不变、当次完成结算。
+std::string deliver_work(const std::string& input) {
+    try {
+        const Json request = Json::parse(input);
+        GameState state = decode_state(request);
+        if (state.company.status != "running") return encode(error_body("INVALID_PHASE", "公司已结束"));
+        const std::string work_id = request.value("work_id", std::string{});
+        Project* work = find_work(state, work_id);
+        if (work == nullptr) return encode(error_body("NOT_FOUND", "项目不存在"));
+        if (work->status != "producing") return encode(error_body("INVALID_PHASE", "项目不在制作中"));
+        if (!work->deliverable()) {
+            return encode(error_body("GATE_UNMET", "并非全部门槛项已达标"));
+        }
+        if (state.company.week > work->deadline_week) {
+            return encode(error_body("INVALID_PHASE", "已过截止周，应由强制交付处理"));
+        }
+        Json delivery = settle_project(state, *work, "delivered");
+        const auto errors = validate(state);
+        if (!errors.empty()) return encode(error_body("INVALID_STATE", errors.front()));
+        return encode(Json{{"state", state}, {"delivery", delivery}});
+    } catch (const Json::exception&) {
+        return encode(error_body("INVALID_INPUT", "JSON 或字段类型无效"));
+    } catch (...) {
+        return encode(error_body("INTERNAL_ERROR", "内部错误"));
+    }
+}
+
+// M0 命令 11：abort_work。终止 + 扣罚 + 释放占用（M2 切片：只做终止归档，
+// 违约扣罚金额属待标定参数，本阶段以 0 记账，不虚构系数）。
+std::string abort_work(const std::string& input) {
+    try {
+        const Json request = Json::parse(input);
+        GameState state = decode_state(request);
+        if (state.company.status != "running") return encode(error_body("INVALID_PHASE", "公司已结束"));
+        const std::string work_id = request.value("work_id", std::string{});
+        Project* work = find_work(state, work_id);
+        if (work == nullptr) return encode(error_body("NOT_FOUND", "项目不存在"));
+        if (work->status != "producing") return encode(error_body("INVALID_PHASE", "项目不在制作中"));
+        Json delivery = settle_project(state, *work, "aborted");
+        const auto errors = validate(state);
+        if (!errors.empty()) return encode(error_body("INVALID_STATE", errors.front()));
+        return encode(Json{{"state", state}, {"delivery", delivery}});
+    } catch (const Json::exception&) {
+        return encode(error_body("INVALID_INPUT", "JSON 或字段类型无效"));
+    } catch (...) {
+        return encode(error_body("INTERNAL_ERROR", "内部错误"));
+    }
+}
 
 std::string hash_state(const std::string& input) {
     try {
