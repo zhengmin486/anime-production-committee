@@ -114,9 +114,9 @@ M0 现有 9 个读模型：`company_overview`、`work_detail`、`production_boar
 | 周回执（产出与原因、人员变化、下周关注） | `week_receipt` | 有 |
 | **设施列表与效果** | 无 | **缺口**：需 `company_overview` 扩展一节，或由架构侧新增 |
 | **合作方 / 委员会** | 无 | **缺口**：`relationships[]`、`committees[]` 展示投影；M4 前只做结构验证 |
-| **已交付作品履历** | 无 | **缺口**：`archive.works` 展示投影，M2 Archive 落地后补 `archive_board` |
+| **已交付作品履历** | 无 | **缺口**：`archive.works` 展示投影；M2 本地核心已生成最小 Archive，但前端读模型仍未接入 |
 
-事件确认只修改 `WeeklyOperations` 的本地选择/回显状态，结果文本来自 `event.outcomes[optionId]`，不按选项重新计算工作点、现金或风险；切换周次保留回显，刷新页面恢复样本初态。关闭快照禁用推进按钮，结清与总结仅预览信息层级，不调用核心命令。
+事件确认只修改 `WeeklyOperations` 的本地选择/回显状态，结果文本来自 `event.outcomes[optionId]`，不按选项重新计算工作点、现金或风险；切换周次保留回显，刷新页面恢复样本初态。关闭快照禁用推进按钮，结清与总结仅预览信息层级，不调用核心命令。本文是静态原型证据，不代表已接入当前 v4 M2 运行时；真实事件应按 `instance_id` 解决， Archive 与 Finance 读模型在 M6 接入。
 
 命令入口（原型均不提交真实命令）：`advance_week`、`start_work`、`set_work_plan`、`assign_staff`、`hire_core`、`scout`、`hire_temporary`、`dismiss_staff`、`sign_outsourcing`、`deliver_work`、`abort_work`、`request_extension`、`arrange_financing`、`resolve_event`、`adopt_proposal`、`reject_proposal`、`create_custom_offer`、`buy_tv_service`。
 

@@ -1,14 +1,14 @@
 # M1 运行时切片：能跑一周
 
-> 状态：M1 实现中（内核 + 状态骨架 + 单周结算 + 财务最小切片 + 质量评级与聚合已可运行；交付、事件、危机未实现）。2026-11-25 按 PR #42 复审修正质量模型、不变式、维度权重与公共制作传递，见 §11
+> 状态：M1 基础切片已随 PR #66 合入 main（内核 + 状态骨架 + 单周结算 + 财务最小切片 + 质量评级与聚合已可运行；交付、事件、存档未实现，危机属于 M2.5）。本文保留实现过程与历史复审记录；当前 M2 入口见 [M2 前置准备](M2_PREPARATION_2026-11-25.md)。
 > 契约依据：[M0_CONTRACT_FREEZE.md](M0_CONTRACT_FREEZE.md)、[DOMAIN_ARCHITECTURE.md](DOMAIN_ARCHITECTURE.md)
 > 路线依据：[DEVELOPMENT_ROADMAP.md](DEVELOPMENT_ROADMAP.md) 的 M1 条
-> 分支：`feat/v4-m1-runtime`
+> 当前基线：`main@177dc489e7a926407b25306bfda2270726280235`
 
 ## 1. 这一版能做什么
 
 ```bash
-npm run test:v4      # 构建 v4 模块 + 跑 25 条契约测试
+npm run test:v4      # 当前工作树 40 条；M1 合入基线为 25 条
 ```
 
 - 初始化 v4 状态（公司 + 3 名员工 + 空项目集）。
@@ -74,6 +74,8 @@ npm run test:v4      # 构建 v4 模块 + 跑 25 条契约测试
 周成本：工资 = Σ 核心员工 weekly_salary；运营 = 30000；
         制作 = 60000 × 强度系数（low 0.8 / standard 1.0 / high 1.3），仅对"有人的 producing 项目"计
 ```
+
+以上为 M1 基线公式。当前 M2 将已归属核心员工周薪归因到其项目，闲置核心周薪记公司级；`production_cost` 由项目归因流水重算，不另设项目钱包。
 
 数值不是平衡结论，只用于让 M1 的结果可手算、可回归。
 
@@ -143,29 +145,31 @@ npm run test:v4      # 构建 v4 模块 + 跑 25 条契约测试
 
 **已知会让 M1 看起来"越玩越穷"**：没有合同回款（M2），而工资与制作费每周照扣。这是刻意的——现金约束必须真实存在，否则多项目与取舍都无从谈起。测试用 3–4 周即可，长跑留给 M2 接入收入之后。
 
-## 9. 仍未做（M2 起）
+## 9. M1 基线时仍未做（M2 起；部分已在当前工作树补齐）
+
+以下保留 M1 合入时的差距记录；当前立项、收入、交付、Archive、事件与存档实现见 [M2_DATA_CONTRACT.md](M2_DATA_CONTRACT.md)，不得把本节历史状态当作当前代码状态。
 
 - **收入与合同回款**：只有支出没有进账（M2 立项/交付），所以长跑必然破产；INV-25 的负余额分支与危机仍未实现。
-- **六阶段模板权重**：目前取等权；传递上限已按 §7.3.4 实现。
-- **生命周期**：`deadline_week` 从不检查，项目不会转 `delivering`；`Project::deliverable()` 尚无调用点。
+- **六阶段模板权重**：M1 基线取等权；当前内核已按阶段/能力权重抽样，传递上限按 §7.3.4 实现。
+- **生命周期（M1 基线）**：当时 `deadline_week` 从不检查，`Project::deliverable()` 尚无调用点；当前 M2 已接入主动与截止交付。
 - **回执 `causes`**：契约要求能解释"为什么只推进这么多"，现在只有数字。
-- **`last_participation` 已对齐 INV-11**：周结算里没有产出就清空，校验器只接受"上一周或 null"。磨合判定本来就用 `contributors` 前缀做接手判断；监督换项目只看"上一周是否在别的项目"，休息一周后返回不触发团队磨合。
+- **`last_participation` 已对齐 INV-11**：周结算里没有产出就清空，校验器只接受“上一周或 null”。非监督人员按本周开始前的工作项进度与参与者快照判断接手；监督人员把 null 或上周属于其他项目都视为切换，但只有该监督当周实际获得非零产出时才施加团队级损失。
 - 计划取向 `quality` 目前不参与排序（同一阶段内质量权重相同），它对结果的影响只体现在质量落点；是否需要更强的语义由平衡阶段定。
 
 ## 10. M2 接入点（给 Event / 后续领域）
 
-事件域（`feat/11-event-m2`）要接的三处，位置与形状先定下来，避免实现时再改契约：
+本节保留 M1 的接入设想；当前 M2 实际契约如下，旧分支与旧 report 形状不再作为实现依据：
 
-| 接入点 | 位置 | 约定 |
+| 接入点 | 当前位置 | 当前约定 |
 | --- | --- | --- |
-| 抽取时机 | `runtime.cpp::advance_week`，人员结算之后、`state.company.week = week + 1` 之前 | 读本周已提交的结果，不碰账；本周结算已完整，抽取失败只丢弃事件，不影响已结算部分 |
-| 周回执 | `report` 增加 `events: {drawn, event_id?, dropped_*}` | 与 `funds`/`works`/`staff` 平级；空周为 `{drawn:false}` |
-| 命令 | `resolve_event(event_id, option_id)` 单独文件 `event.hpp/.cpp`，`runtime.cpp` 只加一行分发 | 与"事件在结算完成后抽取"配合：事件阻塞的是下一次 `advance_week` |
+| 抽取时机 | `runtime.cpp::advance_week`，本周制作、费用与交付之后 | 整周共用工作副本；抽取或校验失败整周回滚，不保留半结算事件 |
+| 周回执 | `report.events` | 已触发实例数组，每项含 `instance_id/event_id/work_id/stage_key`；空周为 `[]` |
+| 命令 | `resolve_event(event_id=<instance_id>, option_id, catalog)` | 仅移除目标实例；pending 非空阻塞下一次推进；非零 funds 返回 NOT_IMPLEMENTED |
 
 两条确定性要求（写在这里，防止 M2 踩坑）：
 
-1. `events.pending.options[]` 必须按事件目录顺序生成，不能按 map 遍历顺序拼——它原样进哈希。
-2. `state_hash` 已对 `staff`/`works`/`items`/`deps`/`contributors`/`finance.entries` 做规范化；M2 新增的集合语义数组要一并加进去。
+1. `events.pending[].option_ids` 保留触发时的目录选项顺序，解决时还必须同时存在于本次提供的目录中。
+2. `hash_state` 已对 M2 的集合语义数组（含 `staff`、`works`、工作项、`deps`、`contributors`、`finance.entries`、`events.pending`、市场、委员会与 Archive 快照）做规范化；`reputation_log` 等有序日志和固定阶段顺序不按集合重排。
 
 文件边界：`model.hpp` 与 `runtime.cpp` 由本分支持有；事件域可以先在 `feat/v4-m1-runtime` 之上开 stacked 分支只加 `event.hpp/.cpp` + CMake，等 #42 合入后再做 `model.hpp` 的 `Json events` → 强类型替换。
 
@@ -220,14 +224,24 @@ npm run test:v4      # 构建 v4 模块 + 跑 25 条契约测试
 
 ### 11.6 测试执行情况
 
-本机没有 Emscripten，`npm run test:v4` 仍无法直接执行。为拿到真实结果，本轮用 MSVC 19.51 把 `model.cpp / kernel.cpp / runtime.cpp` 与一个临时 JSON CLI 编成本地可执行文件，用同一份 `scripts/v4.test.mjs` 正文（只替换调用壳）跑完 **25/25**。该壳不进入仓库；正式证据仍以 `npm run test:v4` 为准，需在有 emsdk 的环境复跑一次。
+2026-11-25 在最新 `main@177dc48` 基线使用本机 Emscripten 工具链执行真实 `npm run test:v4`，生成 `build/v4/v4.mjs` 并通过 **25/25** 契约测试。此前 MSVC 临时壳结果保留为历史证据，不再作为当前测试状态的限制。
 
-## 12. 集成方案（#42 / #45）
+复跑时需显式提供本机 Emscripten 编译器和 nlohmann/json 单头文件路径：
 
-复审要求以最新 `main` 为最终集成基线，保留 #45 的 stacked 工作，不把旧架构分支的历史差异带进合并。建议按下面顺序执行：
+```bash
+EMXX="E:/anime-production-committee/.tools/emsdk/upstream/emscripten/em++.bat" \
+JSON_INCLUDE="E:/anime-production-committee/build/native/_deps/nlohmann_json-src/single_include" \
+npm run test:v4
+```
+
+## 12. 历史集成方案（#42 / #45）
+
+> 本节记录 M1 合入前的历史方案。PR #42 与旧事件 PR #45 已因基线过时关闭，M1 有效切片已由 PR #66 合入当前 main；后续不得继续按旧分支叠加。
+
+复审要求以最新 `main` 为最终集成基线，保留 #45 的 stacked 工作，不把旧架构分支的历史差异带进合并。当时建议按下面顺序执行：
 
 1. **不改** #42 现有 base，也不把 `main` 合进旧架构分支。
 2. 复核通过后，从最新 `main` 建 `feat/v4-m1-integration`，只 cherry-pick M1 的三个提交（`105329e`、`85946c9`、`323b06c`）与本轮修正提交。这些提交只碰 `packages/game-core` 的 v4 文件、`scripts/build-v4.mjs`、`scripts/v4.test.mjs`、`docs/M1_RUNTIME_SLICE.md` 和 `package.json` 的两条脚本；`package.json` 需要手工合并一次。
 3. 用新分支开正式 PR（base = `main`），#42 关闭或标记 superseded。
 4. #45 以新 head 为 base 重放；它只加 `event.hpp/.cpp` 与三处钩子，差异范围保持纯事件域。
-5. 集成前在有 emsdk 的环境跑 `npm run test:v4`，把输出贴到 PR；本轮的 MSVC 结果只作为本机可复现证据。
+5. 集成前在有 emsdk 的环境跑 `npm run test:v4`，把输出贴到 PR；2026-11-25 已在最新 main 基线通过真实 WASM 25/25，后续变更仍需重新执行。

@@ -1,16 +1,5 @@
 #pragma once
 
-// v4 领域模型（M1 切片）
-//
-// 范围：Company / Staff / Project（公共制作 + 单集 + 工作项）/ Finance 余额与流水。
-// 未在 M1 实现行为的领域（Vendor / Partnership / Market / Event / Archive）保留 JSON 形状占位，
-// 由 M2 起逐项替换为强类型。M1 只对已实现部分做结构校验，见 validate.cpp。
-//
-// 约定：
-// - 全部字段 snake_case，与 M0_CONTRACT_FREEZE §3 对齐。
-// - 无浮点。金额为日元整数，工作量为整数"点"（1 点 = 1/100 人周）。
-// - 空值用 std::optional 表达，序列化为 null。
-
 #include <array>
 #include <cstdint>
 #include <functional>
@@ -25,19 +14,17 @@ namespace apc::v4 {
 using Json = nlohmann::json;
 
 inline constexpr int kContractVersion = 4;
+inline constexpr const char* kRulesVersion = "2026-11-25";
 inline constexpr int kMaxWeek = 520;
 inline constexpr int kAbilityCount = 6;
 inline constexpr int kDimensionCount = 6;
 inline constexpr int kStageCount = 6;
 
-// 能力顺序与 game_rules 一致：planning/direction/drawing/animation/management/postproduction
 extern const std::array<const char*, kAbilityCount> kAbilities;
-// 质量维度：story/direction/drawing/animation/art/sound
 extern const std::array<const char*, kDimensionCount> kDimensions;
-// 单集六阶段（顺序固定，不可换序）
 extern const std::array<const char*, kStageCount> kStages;
 
-int ability_index(const std::string& name);       // -1 表示未知
+int ability_index(const std::string& name);
 int dimension_index(const std::string& name);
 int stage_index(const std::string& key);
 
@@ -53,9 +40,10 @@ struct Company {
     std::string name;
     int founded_week = 0;
     int week = 0;
-    std::string status = "running";      // running / closing / ended
+    std::string status = "running";
     std::optional<std::string> end_reason;
     int64_t reputation = 0;
+    std::vector<std::string> facilities;
     std::vector<ReputationLog> reputation_log;
 };
 
@@ -65,24 +53,33 @@ struct Participation {
     int week = 0;
 };
 
+struct WorkHistory {
+    std::string work_id;
+    int contribution = 0;
+    int total_work = 0;
+};
+
 struct Staff {
     std::string id;
     std::string name;
     std::string role;
-    std::string employment = "core";     // core / temporary
+    std::string employment = "core";
     std::array<int, kAbilityCount> abilities{};
     std::array<int, kAbilityCount> experience{};
     std::array<int, kAbilityCount> potential{};
     std::array<bool, kAbilityCount> revealed_potential{};
+    std::vector<std::string> traits;
     std::string talent_type;
     int64_t weekly_salary = 0;
     int64_t project_fee = 0;
+    int joined_week = 0;
     int fatigue = 0;
     int morale = 0;
     bool departure_warning = false;
     std::optional<std::string> assignment_work_id;
     std::optional<Participation> last_participation;
-    Json temporary_contract = nullptr;   // M2：临时合同，M1 不参与规则
+    std::vector<WorkHistory> works_history;
+    Json temporary_contract = nullptr;
 };
 
 struct Quality {
@@ -123,38 +120,48 @@ struct CommonProduction {
 };
 
 struct Target {
-    std::string kind;   // episode / stage
-    std::string id;     // episode_id 或 stage_key
+    std::string kind;
+    std::string id;
 };
 
 struct WorkPlan {
-    // 生效状态（M1）：
-    // - intensity：已生效，决定每周制作费；
-    // - focus：部分生效，schedule/cost 影响同阶段工作项排序，quality 仅保存（质量落点由阶段权重决定）；
-    // - outsourcing / overtime：仅保存，等 M2/M3 外包与加班规则接入后才有效果。
-    std::string intensity = "standard";   // low / standard / high
-    std::string focus = "quality";        // quality / schedule / cost
-    std::string outsourcing = "gap_fill"; // none / gap_fill / aggressive（M3）
-    bool overtime = false;                // M2
+    std::string intensity = "standard";
+    std::string focus = "quality";
+    std::string outsourcing = "gap_fill";
+    std::string overtime = "off";
     std::optional<Target> target;
+};
+
+struct DeliveryRecord {
+    int delivered_week = 0;
+    bool on_time = false;
+    Json quality = Json::object();
+    Json staff_snapshot = Json::array();
+    int64_t production_cost = 0;
+    Json commercial_entries = Json::array();
+    int64_t commercial_income = 0;
+    int64_t profit = 0;
+    std::string archive_id;
 };
 
 struct Project {
     std::string id;
-    Json offer;                            // 企划快照（M2 强类型化）
+    Json offer = Json::object();
     std::string mode = "contract";
     Json investment = Json::object();
     std::vector<std::string> channels;
     int opened_week = 0;
     int deadline_week = 0;
     Json extension = Json::object();
-    std::string status = "producing";      // planning / producing / delivering / settled
+    std::string status = "producing";
+    std::optional<std::string> ip_id;
+    std::optional<std::string> committee_id;
+    Json tv_service = Json{{"status", "none"}};
     CommonProduction common;
     std::vector<Episode> episodes;
     WorkPlan plan;
     Json delivery = nullptr;
 
-    // 派生：作品是否可交付（全部门槛项 delivered）
     bool deliverable() const;
 };
 
@@ -169,7 +176,7 @@ struct LedgerEntry {
 };
 
 struct Solvency {
-    std::string state = "normal";   // normal / crisis
+    std::string state = "normal";
     std::optional<int> since_week;
     std::optional<int> deadline_week;
     int64_t gap = 0;
@@ -179,8 +186,50 @@ struct Finance {
     int64_t opening_funds = 0;
     int64_t balance = 0;
     std::vector<LedgerEntry> entries;
-    Json loans = Json::array();     // M2.5
+    Json loans = Json::array();
     Solvency solvency;
+};
+
+struct EventInstance {
+    std::string instance_id;
+    std::string event_id;
+    std::string work_id;
+    std::string episode_id;
+    std::string stage_key;
+    std::string item_id;
+    int triggered_week = 0;
+    int expires_week = 0;
+    std::string status = "pending";
+    std::vector<std::string> option_ids;
+    Json escalation = nullptr;
+};
+
+struct EventState {
+    std::vector<EventInstance> pending;
+    std::optional<int> last_event_week;
+    Json per_work = Json::object();
+};
+
+struct WorkRecord {
+    std::string id;
+    std::string work_id;
+    std::string title;
+    std::string mode;
+    int opened_week = 0;
+    int delivered_week = 0;
+    int deadline_week = 0;
+    bool on_time = false;
+    Json quality = Json::object();
+    Json staff_snapshot = Json::array();
+    int64_t production_cost = 0;
+    int64_t commercial_income = 0;
+    int64_t profit = 0;
+};
+
+struct Archive {
+    std::vector<WorkRecord> works;
+    Json series = Json::array();
+    Json company_result = nullptr;
 };
 
 struct GameState {
@@ -194,12 +243,11 @@ struct GameState {
     Json partners = Json::array();
     Json committees = Json::array();
     Json market = Json::object();
-    Json events = Json::object();
+    EventState events;
     Finance finance;
-    Json archive = Json::object();
+    Archive archive;
 };
 
-// ---- 序列化 ----
 void to_json(Json& j, const Company& value);
 void from_json(const Json& j, Company& value);
 void to_json(Json& j, const Staff& value);
@@ -208,18 +256,20 @@ void to_json(Json& j, const WorkItem& value);
 void from_json(const Json& j, WorkItem& value);
 void to_json(Json& j, const Project& value);
 void from_json(const Json& j, Project& value);
+void to_json(Json& j, const EventState& value);
+void from_json(const Json& j, EventState& value);
 void to_json(Json& j, const Finance& value);
 void from_json(const Json& j, Finance& value);
+void to_json(Json& j, const Archive& value);
+void from_json(const Json& j, Archive& value);
 void to_json(Json& j, const GameState& value);
 void from_json(const Json& j, GameState& value);
 
-// ---- 查询辅助 ----
 Staff* find_staff(GameState& state, const std::string& id);
 Project* find_work(GameState& state, const std::string& id);
 const Project* find_work(const GameState& state, const std::string& id);
 WorkItem* find_item(Project& work, const std::string& item_id);
 const WorkItem* find_item(const Project& work, const std::string& item_id);
-// 遍历全部工作项（公共制作 + 各单集），回调携带所属容器信息
-void for_each_item(Project& work, const std::function<void(WorkItem&, const std::string& episode_id, const std::string& stage_key)>& fn);
+void for_each_item(Project& work, const std::function<void(WorkItem&, const std::string&, const std::string&)>& fn);
 
 }  // namespace apc::v4

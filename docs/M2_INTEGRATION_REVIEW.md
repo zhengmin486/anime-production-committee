@@ -2,7 +2,9 @@
 
 > 审查日期：2026-11-23  
 > 基线：`main` @ `4044a7085afcfb62a875c079bb426044149f1b5c`  
-> 范围：依据当前 `GAME_RULES.md`、`DATA_MODEL.md`、`API.md`、`PROGRESS.md` 进行的规则与契约交界审查。本文是集成设计审查，不是对全部 C++/WASM 行为的源码审计，也不代表下列功能已经实现或测试通过。
+> 范围：依据当时的 `GAME_RULES.md`、`DATA_MODEL.md`、`API.md`、`PROGRESS.md` 进行的规则与契约交界审查。本文是历史设计审查，不是对全部 C++/WASM 行为的源码审计，也不代表下列功能已经实现或测试通过。
+>
+> **2026-11-25 归档说明：**本文仅保留历史审查背景，不再作为当前 M2 契约。已被后续规则覆盖的内容包括：临时员工按周领取正薪酬；事件使用项目级 `pending[]`；正常周费用预检失败按限时资金危机处理；项目流水只是公司账本归因；交付/中止保留终态项目并释放人员；公司级 `phase` 不再是项目生命周期字段。现行契约与实现边界见 [M2_DATA_CONTRACT.md](M2_DATA_CONTRACT.md)、[M0_CONTRACT_FREEZE.md](M0_CONTRACT_FREEZE.md) 和 [DOMAIN_ARCHITECTURE.md](DOMAIN_ARCHITECTURE.md)，不得按本文旧表述补建状态或金额规则。
 
 ## 1. 审查结论
 

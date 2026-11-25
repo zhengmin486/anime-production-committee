@@ -15,7 +15,7 @@ const STAGES = [
 ]
 const ABILITIES = ['planning', 'direction', 'drawing', 'animation', 'management', 'postproduction']
 const SCALES = ['ova', 'short', 'tv', 'movie']
-const EPISODE_RANGE = { ova: [1, 1], short: [1, 3], tv: [1, 13], movie: [1, 1] }
+const EPISODE_RANGE = { ova: [1, 1], short: [1, 3], tv: [12, 13], movie: [1, 1] }
 const KEY = /^[a-z][a-z0-9_]{1,39}$/
 const COMMON_PREFIX = 'common:'
 
@@ -101,7 +101,7 @@ const gates = doc.episode.filter((item) => item.is_gate === true)
 if (gates.length === 0) fail('episode', '必须至少有一个 is_gate 工作项，否则作品无法判定可交付')
 for (const gate of gates) {
   if (gate.stage !== 'sound_delivery') {
-    warn('episode', `门槛项 ${gate.key} 不在 sound_delivery 阶段，请确认这是有意设计`)
+    fail(`episode.${gate.key}`, `门槛项只能出现在 sound_delivery 阶段，当前为 ${gate.stage}`)
   }
 }
 

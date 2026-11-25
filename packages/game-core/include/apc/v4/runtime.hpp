@@ -1,7 +1,7 @@
 #pragma once
 
-// v4 运行时（M1）：结构校验、单周结算、JSON 命令入口、状态哈希。
-// 与 v3 的 game_core.hpp 并存：M1 不改旧入口，v4 走独立函数名。
+// v4 运行时：严格状态校验、M2 单项目命令、事件、周结算、存档与状态哈希。
+// 与 v3 的 game_core.hpp 并存，v4 走独立函数名。
 
 #include <string>
 
@@ -9,7 +9,7 @@
 
 namespace apc::v4 {
 
-// 校验：返回错误列表（空表示合法）。只覆盖 M1 已实现的领域。
+// 校验：返回错误列表（空表示合法）。
 std::vector<std::string> validate(const GameState& state);
 
 // 规范化哈希：实体按 id 排序后序列化，FNV-1a 64 十六进制。
@@ -17,8 +17,7 @@ std::string state_hash(const GameState& state);
 
 // JSON 命令入口。成功返回 {"state": ..., ...}，失败返回 {"error": {"code","message"}}。
 //
-// 命名说明：M1 的 initialize / instantiate_work / set_plan 是内部/测试入口，
-// 不等同于 M0 冻结的玩家命令；正式语义由下面两个适配入口承担，M2 起统一走契约名。
+// initialize / instantiate_work / set_plan 保留为内部测试入口；玩家命令使用契约名。
 std::string initialize(const std::string& input);        // 内部/测试：{seed, company_name?}
 std::string instantiate_work(const std::string& input);  // 内部/测试：{state, blueprint, work_id, duration_weeks?}
 std::string set_plan(const std::string& input);          // 内部/测试：{state, work_id, plan}
@@ -27,7 +26,13 @@ std::string advance_week(const std::string& input);      // M0 命令 18：{stat
 std::string hash_state(const std::string& input);        // {state}
 
 // M0 契约名适配层（薄封装，不改变语义）：
-std::string initialize_game(const std::string& input);   // M0 命令 1：{seed}
-std::string set_work_plan(const std::string& input);     // M0 命令 3：{state, work_id, plan}
+std::string initialize_game(const std::string& input);   // {seed, company_name?}
+std::string set_work_plan(const std::string& input);     // {state, work_id, plan}
+std::string start_work(const std::string& input);        // {state, offer_id, mode, percent, committee_partner_ids, blueprint}
+std::string deliver_work(const std::string& input);      // {state, work_id, settlement?}
+std::string abort_work(const std::string& input);        // {state, work_id}
+std::string resolve_event(const std::string& input);     // {state, event_id, option_id, catalog}
+std::string save_game(const std::string& input);         // {state, saved_at?, rules_version?}
+std::string load_game(const std::string& input);         // {save}
 
 }  // namespace apc::v4

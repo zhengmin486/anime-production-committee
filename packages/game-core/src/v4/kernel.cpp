@@ -275,7 +275,7 @@ ProductionResult apply_production(WorkItem& item, const Staff& staff, int points
                                   const std::array<int, kDimensionCount>& caps) {
     ProductionResult result;
     int effective = points;
-    if (hands_over) effective = points * (1000 - kHandoverLoss) / 1000;
+    if (hands_over) effective = (points * (1000 - kHandoverLoss) + 500) / 1000;
     const int gain = std::min(std::max(effective, 0), item.remaining());
     if (gain <= 0) return result;
 
@@ -341,9 +341,7 @@ bool hands_over_item(int prior_work_done, int work_total, bool prior_contributed
 
 bool supervisor_switched(const Staff& staff, const std::string& work_id) {
     if (!is_supervisor(staff.role)) return false;
-    // 从未参与过任何项目不算"切换"；只有确实从别的项目转过来才产生团队级磨合。
-    if (!staff.last_participation) return false;
-    return staff.last_participation->work_id != work_id;
+    return !staff.last_participation || staff.last_participation->work_id != work_id;
 }
 
 int supervisor_switch_penalty(int points) { return points * kSupervisorSwitchLoss / 1000; }

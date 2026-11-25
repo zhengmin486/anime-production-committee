@@ -7,6 +7,7 @@ const fixturePath = process.argv[2] || 'docs/event_test_fixtures.json'
 const read = (path) => JSON.parse(readFileSync(path, 'utf8'))
 const errors = []
 const fail = (where, message) => errors.push(`${where}: ${message}`)
+const STAGES = ['content_design', 'storyboard_key_animation', 'animation', 'art_visual', 'photography_editing', 'sound_delivery']
 
 let fixtures
 try {
@@ -27,7 +28,34 @@ try {
 
 const events = new Map((catalog.events || []).map((event) => [event.id, event]))
 const tags = new Set((catalog.events || []).map((event) => event.tag))
-const STAGES = ['script', 'storyboard', 'key_animation', 'animation_check', 'postproduction']
+
+function checkPending(value, where) {
+  if (value === undefined) return []
+  if (!Array.isArray(value)) {
+    fail(where, 'pending_events 必须是数组；无事件写 []')
+    return []
+  }
+  return value.map((entry, index) => {
+    const at = `${where}[${index}]`
+    const normalized = typeof entry === 'string' ? { id: entry } : entry
+    if (!normalized || typeof normalized !== 'object' || typeof normalized.id !== 'string') {
+      fail(at, '必须是事件 id 字符串或 { id, work_id?, triggered_week? }')
+      return null
+    }
+    if (!events.has(normalized.id)) fail(at, `引用不存在的事件: ${normalized.id}`)
+    if (normalized.work_id !== undefined && (typeof normalized.work_id !== 'string' || normalized.work_id.length === 0)) {
+      fail(at, 'work_id 必须是非空字符串')
+    }
+    if (normalized.triggered_week !== undefined && !Number.isInteger(normalized.triggered_week)) {
+      fail(at, 'triggered_week 必须是整数')
+    }
+    return normalized
+  }).filter(Boolean)
+}
+
+function checkStage(value, where) {
+  if (value !== undefined && !STAGES.includes(value)) fail(where, `未知阶段: ${value}`)
+}
 
 if (fixtures.schema_version !== 1) fail('root', 'schema_version 必须为 1')
 if (!Array.isArray(fixtures.cases) || fixtures.cases.length === 0) fail('root', 'cases 必须是非空数组')
@@ -46,38 +74,90 @@ for (const [index, item] of (fixtures.cases || []).entries()) {
   else for (const tag of item.covers) covered.add(tag)
 
   const given = item.given || {}
-  if (given.stage !== undefined && !STAGES.includes(given.stage)) fail(where, `未知阶段: ${given.stage}`)
+  const expect = item.expect || {}
+  checkStage(given.stage, `${where}.given.stage`)
+  if (given.completed_stages !== undefined) {
+    if (!Array.isArray(given.completed_stages)) fail(`${where}.given.completed_stages`, '必须是数组')
+    else given.completed_stages.forEach((stage, stageIndex) => checkStage(stage, `${where}.given.completed_stages[${stageIndex}]`))
+  }
   if (given.cooldowns && typeof given.cooldowns === 'object') {
     for (const key of Object.keys(given.cooldowns)) {
       if (!tags.has(key)) fail(where, `cooldowns 键 ${key} 不是目录中任何事件的 tag`)
     }
   }
   if (given.major_seen) {
-    for (const id of given.major_seen) if (!events.has(id)) fail(where, `major_seen 引用了不存在的事件: ${id}`)
+    if (!Array.isArray(given.major_seen)) fail(`${where}.given.major_seen`, '必须是数组')
+    else for (const id of given.major_seen) if (!events.has(id)) fail(where, `major_seen 引用了不存在的事件: ${id}`)
+  }
+  if (given.projects !== undefined) {
+    if (!Array.isArray(given.projects)) fail(`${where}.given.projects`, '必须是数组')
+    else given.projects.forEach((project, projectIndex) => checkStage(project.stage, `${where}.given.projects[${projectIndex}].stage`))
   }
 
-  const expect = item.expect || {}
-  const triggered = expect.pending_event
-  if (triggered !== undefined && triggered !== null) {
-    const event = events.get(triggered)
-    if (!event) fail(where, `expect.pending_event 引用了不存在的事件: ${triggered}`)
-    else if (given.stage && !event.stages.includes(given.stage)) {
-      fail(where, `${triggered} 不适用于阶段 ${given.stage}`)
+  const givenPending = checkPending(given.pending_events, `${where}.given.pending_events`)
+  const expectedPending = checkPending(expect.pending_events, `${where}.expect.pending_events`)
+  if (expect.pending_events === undefined) fail(where, 'expect.pending_events 必须显式写数组；无事件写 []')
+  for (const [pendingIndex, pending] of expectedPending.entries()) {
+    const event = events.get(pending.id)
+    const stage = pending.work_id && Array.isArray(given.projects)
+      ? given.projects.find((project) => project.work_id === pending.work_id)?.stage
+      : given.stage
+    if (event && stage && !event.stages.includes(stage)) {
+      fail(`${where}.expect.pending_events[${pendingIndex}]`, `${pending.id} 不适用于阶段 ${stage}`)
     }
   }
-  if (expect.option !== undefined && triggered) {
-    const event = events.get(triggered)
-    const option = event && event.options.find((entry) => entry.id === expect.option)
-    if (!option) fail(where, `expect.option ${expect.option} 不在 ${triggered} 中`)
-    else if (given.funds !== undefined && option.cost <= given.funds) {
-      fail(where, `disabled 用例不成立：cost ${option.cost} 未超过 funds ${given.funds}`)
+
+  const duplicates = []
+  for (const pendingList of [givenPending, expectedPending]) {
+    const perProjectWeek = new Map()
+    for (const pending of pendingList) {
+      if (!pending.work_id || pending.triggered_week === undefined) continue
+      const key = `${pending.work_id}@${pending.triggered_week}`
+      perProjectWeek.set(key, (perProjectWeek.get(key) || 0) + 1)
+    }
+    duplicates.push(...[...perProjectWeek].filter(([, count]) => count > 1))
+  }
+  if (duplicates.length > 0 && !(expect.action === 'validate_state' && expect.error === 'INVALID_STATE')) {
+    fail(where, `同一项目同周出现多个事件: ${duplicates.map(([key]) => key).join(', ')}`)
+  }
+  if (expect.action === 'validate_state' && expect.error === 'INVALID_STATE' && duplicates.length === 0) {
+    fail(where, 'INVALID_STATE 夹具必须给出同项目同周重复事件')
+  }
+
+  const choiceEvent = given.choice_event || expect.option && expectedPending[0]?.id
+  const choice = given.choice || expect.option
+  if (choiceEvent || choice) {
+    if (!choiceEvent || !events.has(choiceEvent)) fail(where, 'choice_event 必须引用目录事件')
+    else if (!choice) fail(where, '指定 choice_event 时必须给出 choice')
+    else {
+      const option = events.get(choiceEvent).options.find((entry) => entry.id === choice)
+      if (!option) fail(where, `选项 ${choice} 不在 ${choiceEvent} 中`)
+      else {
+        if (given.funds !== undefined && option.cost > given.funds && !expect.disabled_reason) {
+          fail(where, `现金不足用例必须说明 disabled_reason：cost ${option.cost} > funds ${given.funds}`)
+        }
+        if (expect.funds_delta !== undefined && expect.pending_events?.length === 0 && expect.reject_if_charged_twice) {
+          if (expect.funds_delta !== -option.cost || expect.costs_events_delta !== option.cost) {
+            fail(where, 'ledger_once 金额必须与选项 cost 一致')
+          }
+        }
+        const nonzeroFunds = option.effects.some((effect) => effect.target === 'funds' && effect.value !== 0)
+        if (nonzeroFunds && expect.error !== 'NOT_IMPLEMENTED') fail(where, '非零 funds 选项必须断言 NOT_IMPLEMENTED')
+        if (expect.error === 'NOT_IMPLEMENTED' && !nonzeroFunds && !['outsource', 'extension'].includes(option.kind)) {
+          fail(where, 'NOT_IMPLEMENTED 夹具的效果或选项类型必须支持该错误')
+        }
+      }
     }
   }
-  if (expect.stage_effect && !STAGES.includes(expect.stage_effect.stage)) {
-    fail(where, `expect.stage_effect.stage 未知: ${expect.stage_effect.stage}`)
+
+  if (expect.stage_effect) {
+    checkStage(expect.stage_effect.stage, `${where}.expect.stage_effect.stage`)
+    if (!['quality', 'work_done'].includes(expect.stage_effect.target)) fail(where, 'stage_effect.target 必须是 quality 或 work_done')
+    if (!Number.isInteger(expect.stage_effect.value) || expect.stage_effect.value === 0) fail(where, 'stage_effect.value 必须是非零整数')
   }
-  if (expect.action === 'advance_week' && expect.error !== 'INVALID_PHASE') {
-    fail(where, '暂停用例应断言 INVALID_PHASE')
+  if (expect.action === 'advance_week' && expect.error !== 'INVALID_PHASE') fail(where, '暂停用例应断言 INVALID_PHASE')
+  if (expect.advance_week_allowed !== undefined && typeof expect.advance_week_allowed !== 'boolean') {
+    fail(where, 'advance_week_allowed 必须是布尔值')
   }
 }
 

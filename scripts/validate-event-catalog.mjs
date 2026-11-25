@@ -3,7 +3,7 @@
 // 用法: node scripts/validate-event-catalog.mjs [文件路径]
 import { readFileSync } from 'node:fs'
 
-const STAGES = ['script', 'storyboard', 'key_animation', 'animation_check', 'postproduction']
+const STAGES = ['content_design', 'storyboard_key_animation', 'animation', 'art_visual', 'photography_editing', 'sound_delivery']
 const CATEGORIES = ['personnel', 'quality', 'budget', 'schedule']
 const METRICS = ['stage_quality', 'stage_progress_permille', 'max_fatigue', 'weeks_in_project', 'weeks_to_deadline', 'funds', 'morale']
 const OPS = ['<', '<=', '>', '>=']
@@ -28,6 +28,17 @@ const warnings = []
 const fail = (where, message) => errors.push(`${where}: ${message}`)
 const warn = (where, message) => warnings.push(`${where}: ${message}`)
 const isInt = (value) => Number.isInteger(value)
+const textLength = (value) => [...value].length
+const exactFields = (value, required, optional, where) => {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    fail(where, '必须是对象')
+    return false
+  }
+  const allowed = new Set([...required, ...optional])
+  for (const key of Object.keys(value)) if (!allowed.has(key)) fail(`${where}.${key}`, '未知字段')
+  for (const key of required) if (!Object.hasOwn(value, key)) fail(where, `缺少字段: ${key}`)
+  return true
+}
 
 let doc
 try {
@@ -37,7 +48,9 @@ try {
   process.exit(1)
 }
 
+exactFields(doc, ['schema_version', 'events'], ['note'], 'root')
 if (doc.schema_version !== 1) fail('root', 'schema_version 必须为 1')
+if (doc.note !== undefined && typeof doc.note !== 'string') fail('root.note', '必须是字符串')
 if (!Array.isArray(doc.events) || doc.events.length === 0) fail('root', 'events 必须是非空数组')
 if (Array.isArray(doc.events) && doc.events.length > 40) fail('root', 'events 超过 40 条，首版应控制在 40 条以内')
 
@@ -47,17 +60,20 @@ const rows = []
 
 for (const [index, event] of (doc.events || []).entries()) {
   const where = `events[${index}]${event && event.id ? ` (${event.id})` : ''}`
-  if (typeof event !== 'object' || event === null) { fail(where, '必须是对象'); continue }
+  if (!exactFields(event, [
+    'id', 'name', 'polarity', 'tier', 'category', 'stages', 'tag', 'priority', 'cooldown_weeks',
+    'once_per_project', 'trigger', 'random_weight', 'expires_weeks', 'escalation', 'description', 'options'
+  ], [], where)) continue
 
   if (typeof event.id !== 'string' || !SNAKE.test(event.id)) fail(where, 'id 必须是 3–40 位小写蛇形命名')
   else if (seenIds.has(event.id)) fail(where, `id 重复: ${event.id}`)
   else seenIds.add(event.id)
 
-  if (typeof event.name !== 'string' || event.name.length < 1 || event.name.length > 24) fail(where, 'name 长度须为 1–24')
+  if (typeof event.name !== 'string' || textLength(event.name) < 1 || textLength(event.name) > 24) fail(where, 'name 长度须为 1–24')
   else if (seenNames.has(event.name)) warn(where, `name 重复: ${event.name}`)
   else seenNames.add(event.name)
 
-  if (typeof event.description !== 'string' || event.description.length < 1 || event.description.length > 200) fail(where, 'description 长度须为 1–200')
+  if (typeof event.description !== 'string' || textLength(event.description) < 1 || textLength(event.description) > 200) fail(where, 'description 长度须为 1–200')
   if (!['negative', 'positive'].includes(event.polarity)) fail(where, 'polarity 须为 negative/positive')
   if (!['normal', 'major'].includes(event.tier)) fail(where, 'tier 须为 normal/major')
   if (!CATEGORIES.includes(event.category)) fail(where, `category 须为 ${CATEGORIES.join('/')}`)
@@ -66,8 +82,9 @@ for (const [index, event] of (doc.events || []).entries()) {
   const stages = event.stages
   if (!Array.isArray(stages) || stages.length === 0) fail(where, 'stages 必须是非空数组')
   else {
+    if (stages.length > STAGES.length) fail(where, `stages 最多包含 ${STAGES.length} 个阶段`)
     if (new Set(stages).size !== stages.length) fail(where, 'stages 有重复项')
-    for (const stage of stages) if (!STAGES.includes(stage)) fail(where, `未知阶段: ${stage}`)
+    for (const stage of stages) if (!STAGES.includes(stage)) fail(where, `未知阶段: ${stage}；v4 阶段须为 ${STAGES.join('/')}`)
   }
 
   if (!isInt(event.priority) || event.priority < 1 || event.priority > 100) fail(where, 'priority 须为 1–100 的整数，数字越小越优先')
@@ -79,8 +96,7 @@ for (const [index, event] of (doc.events || []).entries()) {
   }
 
   const trigger = event.trigger
-  if (typeof trigger !== 'object' || trigger === null) fail(where, 'trigger 必须是对象')
-  else {
+  if (exactFields(trigger, ['metric', 'op', 'threshold'], [], `${where}.trigger`)) {
     if (!METRICS.includes(trigger.metric)) fail(where, `未知触发指标: ${trigger.metric}`)
     if (!OPS.includes(trigger.op)) fail(where, `未知比较符: ${trigger.op}`)
     if (!isInt(trigger.threshold)) fail(where, 'trigger.threshold 必须是整数')
@@ -92,13 +108,27 @@ for (const [index, event] of (doc.events || []).entries()) {
 
   if (event.expires_weeks > 0) {
     const escalation = event.escalation
-    if (typeof escalation !== 'object' || escalation === null) fail(where, '有处理期限时必须提供 escalation 对象')
-    else {
-      if (typeof escalation.description !== 'string' || escalation.description.length < 1 || escalation.description.length > 160) fail(where, 'escalation.description 长度须为 1–160')
+    if (exactFields(escalation, ['description', 'effects'], [], `${where}.escalation`)) {
+      if (typeof escalation.description !== 'string' || textLength(escalation.description) < 1 || textLength(escalation.description) > 160) fail(where, 'escalation.description 长度须为 1–160')
       if (!Array.isArray(escalation.effects) || escalation.effects.length === 0) fail(where, 'escalation.effects 必须是非空数组')
+      else escalation.effects.forEach((effect, effectIndex) => {
+        const ep = `${where}.escalation.effects[${effectIndex}]`
+        if (!exactFields(effect, ['scope', 'target', 'value'], ['stage'], ep)) return
+        if (!SCOPES.includes(effect.scope)) fail(ep, `scope 须为 ${SCOPES.join('/')}`)
+        if (!TARGETS.includes(effect.target)) { fail(ep, `target 须为 ${TARGETS.join('/')}`); return }
+        if (!isInt(effect.value) || effect.value === 0) fail(ep, 'value 必须是非零整数')
+        else {
+          const [min, max] = RANGES[effect.target]
+          if (effect.value < min || effect.value > max) fail(ep, `${effect.target} 取值须在 ${min}–${max}`)
+        }
+        if (INSTANT_ONLY.includes(effect.target) && effect.scope !== 'instant') fail(ep, `${effect.target} 只能即时结算（scope=instant）`)
+        if (effect.scope === 'stage' && effect.stage !== undefined && (!Array.isArray(stages) || !stages.includes(effect.stage))) fail(ep, `effect.stage=${effect.stage} 不在事件适用阶段内`)
+        if (effect.scope !== 'stage' && effect.stage !== undefined) fail(ep, '只有 stage 作用域可以携带 effect.stage')
+        if (effect.target === 'work_done' && effect.scope === 'project') fail(ep, 'work_done 不能作用于 project，工作量只影响具体阶段')
+      })
     }
-  } else if (event.escalation !== null && event.escalation !== undefined) {
-    warn(where, 'expires_weeks 为 0 时 escalation 会被忽略，建议填 null')
+  } else if (event.escalation !== null) {
+    fail(where, 'expires_weeks 为 0 时 escalation 必须为 null')
   }
 
   const options = event.options
@@ -109,12 +139,12 @@ for (const [index, event] of (doc.events || []).entries()) {
   let hasPaidOption = false
   for (const [optionIndex, option] of options.entries()) {
     const at = `${where}.options[${optionIndex}]`
-    if (typeof option !== 'object' || option === null) { fail(at, '必须是对象'); continue }
+    if (!exactFields(option, ['id', 'label', 'kind', 'cost', 'effects'], [], at)) continue
     if (typeof option.id !== 'string' || !SNAKE.test(option.id)) fail(at, 'id 必须是 3–40 位小写蛇形命名')
     else if (seenOptions.has(option.id)) fail(at, `选项 id 重复: ${option.id}`)
     else seenOptions.add(option.id)
 
-    if (typeof option.label !== 'string' || option.label.length < 1 || option.label.length > 24) fail(at, 'label 长度须为 1–24')
+    if (typeof option.label !== 'string' || textLength(option.label) < 1 || textLength(option.label) > 24) fail(at, 'label 长度须为 1–24')
     if (!KINDS.includes(option.kind)) fail(at, `kind 须为 ${KINDS.join('/')}`)
     if (event.polarity === 'positive' && !POSITIVE_KINDS.includes(option.kind)) fail(at, '正面机会只能使用 accept/decline')
     if (event.polarity === 'negative' && !NEGATIVE_KINDS.includes(option.kind)) fail(at, '负面异常不能使用 accept/decline，应使用 abandon/overtime/outsource/extension')
@@ -125,13 +155,16 @@ for (const [index, event] of (doc.events || []).entries()) {
     if (!Array.isArray(option.effects) || option.effects.length > 4) { fail(at, 'effects 必须是数组且不超过 4 项'); continue }
     for (const [effectIndex, effect] of option.effects.entries()) {
       const ep = `${at}.effects[${effectIndex}]`
-      if (typeof effect !== 'object' || effect === null) { fail(ep, '必须是对象'); continue }
+      if (!exactFields(effect, ['scope', 'target', 'value'], ['stage'], ep)) continue
       if (!SCOPES.includes(effect.scope)) fail(ep, `scope 须为 ${SCOPES.join('/')}`)
       if (!TARGETS.includes(effect.target)) { fail(ep, `target 须为 ${TARGETS.join('/')}`); continue }
       if (!isInt(effect.value) || effect.value === 0) fail(ep, 'value 必须是非零整数')
       else {
         const [min, max] = RANGES[effect.target]
         if (effect.value < min || effect.value > max) fail(ep, `${effect.target} 取值须在 ${min}–${max}`)
+      }
+      if (effect.target === 'funds' && isInt(effect.value) && effect.value !== 0) {
+        warn(ep, '非零 funds 效果尚未获得统一财务授权；schema 暂保留，当前运行时返回 NOT_IMPLEMENTED，确定支出请使用选项 cost，不得改记其他类别')
       }
       if (INSTANT_ONLY.includes(effect.target) && effect.scope !== 'instant') fail(ep, `${effect.target} 只能即时结算（scope=instant）`)
       if (effect.scope === 'stage') {
@@ -140,7 +173,7 @@ for (const [index, event] of (doc.events || []).entries()) {
           else if (Array.isArray(stages) && !stages.includes(effect.stage)) fail(ep, `effect.stage=${effect.stage} 不在事件适用阶段内`)
         }
       } else if (effect.stage !== undefined) {
-        warn(ep, '只有 stage 作用域需要 effect.stage')
+        fail(ep, '只有 stage 作用域可以携带 effect.stage')
       }
       if (effect.target === 'work_done' && effect.scope === 'project') fail(ep, 'work_done 不能作用于 project，工作量只影响具体阶段')
     }
@@ -161,8 +194,8 @@ for (const [index, event] of (doc.events || []).entries()) {
     event.id,
     `${event.tier}/${event.polarity}`,
     event.category,
-    stages.join(','),
-    `${trigger.metric} ${trigger.op} ${trigger.threshold}`,
+    Array.isArray(stages) ? stages.join(',') : String(stages ?? ''),
+    `${trigger?.metric ?? '?'} ${trigger?.op ?? '?'} ${trigger?.threshold ?? '?'}`,
     String(options.length),
   ])
 }
