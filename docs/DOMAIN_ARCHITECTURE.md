@@ -58,7 +58,7 @@ v1.0 只给了骨架，并把"公共制作 + 单集 + 工作项"和"资金危机
 | 危机期间的时间与成本 | 推进周数、继续计提固定成本、允许现金暂时为负；只允许融资，禁止其他新增承诺与新增项目支出 | DEC-FIN-003 |
 | 项目内定向 | 每项目至多一个目标（单集/阶段/无），只调排序优先级，不额外花钱 | DEC-PLAY-004 |
 
-**待产品裁决的边界**：自主原创的声望/资金阈值，企划能力员工作为执行资源的必要性与消耗方式，核心招聘是否另收公司级费用，以及 pending 期间是否封锁其他经营操作，均不得由工程实现自行补规则。其余剩余项主要为参数标定：危机周数、融资额度与利率、还款周期；单集数与每集工作项数量；磨合损失比例；质量聚合权重。由模拟/平衡给值。
+**待产品裁决的边界**：自主原创的声望/资金阈值，企划能力员工作为创建资格门槛或执行资源的定位与消耗方式，核心招聘是否另收公司级费用，以及 pending 期间是否封锁其他经营操作，均不得由工程实现自行补规则。其余剩余项主要为参数标定：危机周数、融资额度与利率、还款周期；单集数与每集工作项数量；磨合损失比例；质量聚合权重。由模拟/平衡给值。
 
 制作蓝图已从"待设计"变为"有可检查样例"：[蓝图规范](BLUEPRINT_SPEC.md) + [`tv_standard` 样例](blueprints/tv_standard.blueprint.json) + `npm run validate:blueprint`。
 
@@ -971,7 +971,7 @@ WorkRecord { id, name, ip_id, source, genre, scale, mode, investment_percent,
 | `sign_outsourcing(work_id, item_id, supplier_id, work_total, mode)` | Vendor + Finance | 工作项已解锁；专业匹配；供应商产能余量；现金 | 合同建立、费用入账、占用产能 |
 | `deliver_work(work_id)` | Project + Application | 全部门槛项已交付；未过截止 | 转 delivering 并当次结清；临时员工自动退出解绑 |
 | `abort_work(work_id)` | Project + Finance | 项目 producing | 项目终止、违约扣罚入账、释放核心归属与外包占用、临时员工自动退出解绑 |
-| `create_custom_offer(name, source, scale, style)` | Market + Finance | 公司 running；非资金危机；自主原创声望门槛（阈值待标定）；现金 ≥ 开发费；自定槽可用。企划会议室与企划能力员工不是资格门槛 | 自定企划入槽、开发费入账 |
+| `create_custom_offer(name, source, scale, style)` | Market + Finance | 公司 running；非资金危机；自主原创声望门槛（阈值待标定）；现金 ≥ 开发费；自定槽可用。企划会议室不是资格门槛；企划能力员工的资格/执行角色待确认 | 自定企划入槽、开发费入账 |
 | `adopt_proposal()` / `reject_proposal()` | Market | 公司 running；非资金危机；存在提案。不要求全公司空闲 | 提案转自定槽或清空 |
 | `buy_tv_service(work_id)` | Project + Finance | 委员会模式；未购买；现金 | 渠道开放、发行费入账 |
 | `request_extension(work_id)` | Project + Finance | 委员会模式；未用过；未过截止；现金 | 延期生效、压力与费用 |
@@ -982,7 +982,7 @@ WorkRecord { id, name, ip_id, source, genre, scale, mode, investment_percent,
 | `finalize_delivery(work_id)` | Application | 项目 delivering | 交付结算、写 Archive、关闭委员会 |
 | `finalize_company()` | Application | 公司 ended 且全部项目已结算 | 生成公司结局评价 |
 
-**自主原创的两级准入**：`create_custom_offer` 只判断已确认的独立公司声望与资金/开发费条件，企划会议室不垄断资格，企划能力员工不是额外资格守卫。创建企划不等于正式立项；`start_work` 仍须校验企划存在、原创仅委员会模式、投资与资金、委员会/渠道等既有立项条件。企划能力员工是否作为执行资源、是否占用产能或需要指定人员，正式决策尚不足以唯一确定，标为待确认；在确认前既不能把它当作隐性资格门槛，也不能自行新增资源消耗规则。
+**自主原创的两级准入**：`create_custom_offer` 执行已确认的独立公司声望与资金/开发费条件，企划会议室不垄断资格。企划能力员工是否构成创建资格门槛，还是仅作为执行资源，正式决策尚不足以唯一确定，标为待确认；确认前不得新增或删除该项守卫，也不得自行新增资源消耗规则。创建企划不等于正式立项；`start_work` 仍须校验企划存在、原创仅委员会模式、投资与资金、委员会/渠道等既有立项条件。
 
 **为什么不是 `apply_decision(type, ...)`**：当前实现的单一 decision 联合类型把所有守卫挤进一个长 if 链，错误码与前置条件互相纠缠，新增玩法必须改同一个函数。用例级命令把守卫放在各自入口，也让 UI 与测试的意图更清楚。
 

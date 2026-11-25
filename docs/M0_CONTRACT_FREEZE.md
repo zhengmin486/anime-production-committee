@@ -146,7 +146,7 @@ SaveRecord { version: 4, savedAt: ISO8601, rules_version: string, state: GameSta
 | 9 | `sign_outsourcing(work_id, item_id, supplier_id, work_total, mode)` | 工作项已解锁 ∧ 专业匹配 ∧ 产能余量 ∧ 现金 | DEPENDENCY_UNMET / CAPACITY_EXCEEDED / INSUFFICIENT_FUNDS | 合同+费用+占用 |
 | 10 | `deliver_work(work_id)` | 全部门槛项 delivered ∧ 未过截止 ∧ 项目 producing | GATE_UNMET / INVALID_PHASE | 交付结算+释放占用+临时合同自动退出解绑 |
 | 11 | `abort_work(work_id)` | 项目 producing | NOT_FOUND | 终止+扣罚+释放占用+临时合同自动退出解绑 |
-| 12 | `create_custom_offer(name, source, scale, style)` | running ∧ 非危机 ∧ 自主原创声望门槛（阈值待标定）∧ 现金 ≥ 开发费 ∧ 自定槽可用；企划会议室与企划能力员工不是资格门槛 | CRISIS_COMMITMENT_BLOCKED / INSUFFICIENT_FUNDS / INVALID_PHASE | 自定槽+开发费 |
+| 12 | `create_custom_offer(name, source, scale, style)` | running ∧ 非危机 ∧ 自主原创声望门槛（阈值待标定）∧ 现金 ≥ 开发费 ∧ 自定槽可用；企划会议室不是资格门槛；企划能力员工的资格/执行角色待确认 | CRISIS_COMMITMENT_BLOCKED / INSUFFICIENT_FUNDS / INVALID_PHASE | 自定槽+开发费 |
 | 13 | `adopt_proposal()` | 存在提案 ∧ running ∧ 非危机 | NOT_FOUND / CRISIS_COMMITMENT_BLOCKED | 提案→自定槽 |
 | 14 | `reject_proposal()` | 存在提案 ∧ running ∧ 非危机 | NOT_FOUND / CRISIS_COMMITMENT_BLOCKED | 清空提案 |
 | 15 | `buy_tv_service(work_id)` | 委员会模式 ∧ 未购买 ∧ 非危机 ∧ 现金 | MODE_NOT_ALLOWED / INSUFFICIENT_FUNDS | 渠道+发行费 |
@@ -162,7 +162,7 @@ SaveRecord { version: 4, savedAt: ISO8601, rules_version: string, state: GameSta
 
 **通用幂等性**：命令不保证幂等；重复提交同一命令按新一次业务动作校验（例如重复 `deliver_work` 因项目已 settled 而失败）。
 
-**自主原创准入**：`create_custom_offer` 的资格由独立公司声望与资金/开发费条件决定，企划、会议室与企划能力员工不构成隐性资格门槛。创建原创企划不等于正式立项；`start_work` 仍须校验企划存在、原创仅委员会模式、投资与资金、委员会/渠道等既有条件。企划能力员工是否必须作为执行资源、是否占用产能或需要指定人员，正式决策尚不足以唯一确定，保留待确认；确认前不得新增资源消耗规则。pending 期间是否封锁其他经营操作也仍待确认，已确认的硬限制仅为 `advance_week` 被阻塞。
+**自主原创准入**：`create_custom_offer` 已确认的资格由独立公司声望与资金/开发费条件决定，企划会议室不构成隐性资格门槛。企划能力员工是否构成创建资格门槛，还是仅作为执行资源，正式决策尚不足以唯一确定，保留待确认；确认前不得新增或删除该项守卫，也不得新增资源消耗规则。创建原创企划不等于正式立项；`start_work` 仍须校验企划存在、原创仅委员会模式、投资与资金、委员会/渠道等既有条件。pending 期间是否封锁其他经营操作也仍待确认，已确认的硬限制仅为 `advance_week` 被阻塞。
 
 **人员命令边界**：核心员工解雇在 `running` 期间随时可执行，包括有待处理事件或资金危机时，不要求先清空 pending，也不收取预付遣散费。普通 `dismiss_staff` 对临时员工返回 `INVALID_PHASE`；临时员工提前解约只能作为 `resolve_event` 中明确授权选项的原子效果，校验该合同属于 `work_id` 所指项目。事件授权解约不追溯签约费或已计周薪，生效后停止后续周薪；如事件设一次性现金代价，只按事件配置即时结算，不建立通用买断费、欠款或延期付款。
 
