@@ -141,7 +141,7 @@ SaveRecord { version: 4, savedAt: ISO8601, rules_version: string, state: GameSta
 | 9 | `sign_outsourcing(work_id, item_id, supplier_id, work_total, mode)` | 工作项已解锁 ∧ 专业匹配 ∧ 产能余量 ∧ 现金 | DEPENDENCY_UNMET / CAPACITY_EXCEEDED / INSUFFICIENT_FUNDS | 合同+费用+占用 |
 | 10 | `deliver_work(work_id)` | 全部门槛项 delivered ∧ 未过截止 ∧ 项目 producing | GATE_UNMET / INVALID_PHASE | 当次完成交付结算（周数不变） |
 | 11 | `abort_work(work_id)` | 项目 producing | NOT_FOUND | 终止+扣罚+释放占用 |
-| 12 | `create_custom_offer(name, source, scale, style)` | running ∧ 非危机 ∧ 现金充足 | CRISIS_COMMITMENT_BLOCKED / INSUFFICIENT_FUNDS | 自定槽+开发费 |
+| 12 | `create_custom_offer(name, source, scale, style)` | running ∧ 非危机 ∧ 自主原创资格（声望与资金；具体检查时点待明确） | CRISIS_COMMITMENT_BLOCKED / INSUFFICIENT_FUNDS | 自定槽+开发费 |
 | 13 | `adopt_proposal()` | 存在提案 ∧ running | NOT_FOUND | 提案→自定槽 |
 | 14 | `reject_proposal()` | 存在提案 | NOT_FOUND | 清空提案 |
 | 15 | `buy_tv_service(work_id)` | 委员会模式 ∧ 未购买 ∧ 非危机 ∧ 现金 | MODE_NOT_ALLOWED / INSUFFICIENT_FUNDS | 渠道+发行费 |
