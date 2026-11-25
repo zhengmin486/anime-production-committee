@@ -32,7 +32,8 @@
     "test:v4": "node scripts/build-event-catalog.mjs && node scripts/build-v4.mjs && node --test scripts/v4.test.mjs",
     "build:events": "node scripts/build-event-catalog.mjs",
     "validate:content": "node scripts/validate-event-content.mjs",
-    "audit:v4": "node scripts/audit-v4-contract.mjs"
+    "audit:v4": "node scripts/audit-v4-contract.mjs",
+    "check:docs": "python scripts/check_docs.py"
   },
   "devDependencies": {
     "playwright-core": "1.65.1"

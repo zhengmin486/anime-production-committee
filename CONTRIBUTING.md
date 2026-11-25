@@ -19,6 +19,8 @@
 
 旧最小纵向切片曾实现六个 C++ 接口，React 通过真实 WASM 完成初始化、接取企划、决策、日结、事件与结算；本地验收记录见 README。该运行时采用单项目/五阶段模型，属于迁移前历史实现。当前先完成新架构设计；新增玩法前应核对 DECISION_LOG 与 DOMAIN_ARCHITECTURE，不得把旧接口或旧阶段模型当作目标契约。
 
+规则数值变化写进 [DECISION_LOG.md](docs/DECISION_LOG.md) 的 `DEC-*` 条目；流程、治理与契约级变化写进 [docs/decisions/](docs/decisions/INDEX.md) 的 `ADR-*` 文件，接受后不再就地改写。研究文件与审查文件只写证据和建议；文档改动提交前运行 `npm run check:docs`。
+
 ## Issue 与分工
 
 1. 先搜索已有 Issue，避免重复工作。选择“开发任务”“缺陷报告”或“功能提案”模板。
@@ -111,7 +113,7 @@ git switch -c feat/12-project-flow
 | C++ 规则、Embind 或 JSON 协议 | `npm run test:native`、`npm run test:wasm`；涉及前端协议时同时执行前端检查 |
 | 用户交互、WASM 加载、存档流程或跨语言集成 | `npm run test:browser`，并操作受影响的页面与异常路径 |
 | 构建或部署产物 | `npm run build`、`npm run verify:dist`；涉及运行行为时补充浏览器检查 |
-| 纯文档或模板 | 检查相对链接、命令、格式与实际实现是否一致 |
+| 纯文档或模板 | `npm run check:docs`，并检查命令、格式与实际实现是否一致 |
 
 `npm test` 运行前端单元、真实 WASM 和原生测试；`npm run test:browser` 另行执行，自动完整构建并驱动已安装的 Edge。其他兼容浏览器可通过 `BROWSER_CHANNEL` 或 `BROWSER_EXECUTABLE` 指定。截图输出到 `build/browser-tests/`，供 PR 展示，不提交整个生成目录。
 

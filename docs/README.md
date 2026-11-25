@@ -27,6 +27,7 @@
 - [M0–M7 开发路线与里程碑](DEVELOPMENT_ROADMAP.md)
 - [制作蓝图规范](BLUEPRINT_SPEC.md)
 - [权威决策登记册](DECISION_LOG.md)
+- [决定索引与 ADR 记录](decisions/INDEX.md)：流程、治理与契约级决定单独建档，`accepted` 后不就地改写。
 - [游戏愿景与产品方向](GAME_VISION.md)：产品定位、核心体验、设计支柱、复杂度预算与成品成功标准；具体规则以决策登记册为准。
 - [研究与审计成果目录](RESEARCH_CATALOG.md)
 - [领域架构设计](DOMAIN_ARCHITECTURE.md)
@@ -120,3 +121,14 @@
 3. 不覆盖旧报告。需要修订时保留历史版本或明确记录修订关系。
 4. 设计提案、已确认规则、已实现行为分别标识，不用“写进文档”代替“已确认”或“已实现”。
 5. 不为整理而大规模移动现有文件；旧链接和历史引用优先保持稳定。
+
+## 决定的写法与文档检查
+
+规则内容继续写进 [决定登记册](DECISION_LOG.md) 的 `DEC-*` 条目；组织方式、流程和契约级决定写进 [decisions/](decisions/INDEX.md) 的 `ADR-*` 文件：
+
+1. 复制 [ADR 模板](templates/ADR_TEMPLATE.md)，写明背景、决定、后果、被否决方案与来源，状态从 `proposed` 开始。
+2. 负责人确认后改为 `accepted`，正文冻结；后续变更新建 ADR，用 `supersedes` 指向旧文件。
+3. 研究文件与审查文件只写证据和建议，不声明规则已变更。
+4. 提交前运行 `npm run check:docs`，检查决定字段、ADR 编号、`canonical_for` 唯一性和本地链接；CI 会在改动 `docs/` 时自动执行。
+
+这套流程的取舍见 [ADR-0001](decisions/ADR-0001-decision-record-process.md)。

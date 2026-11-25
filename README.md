@@ -60,6 +60,11 @@ scripts/                     # 原生/WASM 构建、集成测试、产物检查
 docs/
   PRODUCT.md ARCHITECTURE.md GAME_DESIGN.md DATA_MODEL.md GAME_RULES.md API.md
   V1_GAP_REVIEW.md           # V1.0 差距审查与迁移计划
+  README.md                  # 文档导航与权威顺序
+  decisions/                 # 决定登记册与 ADR
+  templates/                 # ADR / 研究 / 审查模板
+  research/                  # 研究资料与论文索引
+  archive/                   # 历史审查与已归档材料
 package.json                 # npm workspaces: apps/*、packages/*
 ```
 
@@ -119,6 +124,7 @@ npm run test:wasm       # 重新编译 WASM，再实际导入模块并执行 C++
 npm test               # 顺序运行以上三类测试
 npm run typecheck
 npm run test:browser    # 完整构建后，用本机 Edge 进行实际点击与截图
+npm run check:docs      # 文档决定字段、ADR 编号与本地链接
 ```
 
 浏览器测试默认使用已安装的 Microsoft Edge。也可设置 `BROWSER_CHANNEL=chrome`，或用 `BROWSER_EXECUTABLE` 指向兼容浏览器的绝对路径。截图输出至 build/browser-tests。测试自动启动仅监听回环地址的临时静态服务器，使用隔离的浏览器上下文，结束时自动关闭；不会修改用户的浏览器配置。
@@ -206,6 +212,7 @@ Sites 官方插件本地打包约束：单文件不超过 50 MiB，整体发布 
 
 - [贡献与协作指南](CONTRIBUTING.md)
 - [权威玩法决策登记册](docs/DECISION_LOG.md)
+- [决定索引与 ADR 记录](docs/decisions/INDEX.md)
 - [数值参数总清单与标定查阅索引](docs/NUMERICAL_PARAMETERS_CATALOG.md)
 - [项目文档导航](docs/README.md)
 - [研究与审计成果目录](docs/RESEARCH_CATALOG.md)
