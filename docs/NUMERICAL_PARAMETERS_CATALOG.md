@@ -51,7 +51,7 @@
 | 不同作品规模的集数 | TV、短篇、OVA、剧场版等集数范围 | **临时参考**：TV 12–13、短篇 1–3、OVA/剧场版 1 | [蓝图规范](BLUEPRINT_SPEC.md)、[TV 蓝图样例](blueprints/tv_standard.blueprint.json)、[#63 工期](https://github.com/zhengmin486/anime-production-committee/issues/63) |
 | 公共制作工作项数量 | 不同蓝图的公共制作项数量和拆分粒度 | **待细化 / 临时样例** | [蓝图规范](BLUEPRINT_SPEC.md)、[TV 蓝图样例](blueprints/tv_standard.blueprint.json)、[DOMAIN_ARCHITECTURE](DOMAIN_ARCHITECTURE.md) |
 | 单集工作项数量 | 六阶段下各工作项数量及拆分粒度 | **待细化 / 临时样例** | [蓝图规范](BLUEPRINT_SPEC.md)、[TV 蓝图样例](blueprints/tv_standard.blueprint.json) |
-| 核心员工编制上限 | 不同公司成长里程碑允许的核心员工人数 | **待标定**；由公司成长独立开放，不绑定设施等级/槽位/作画工作室，开放编制不收扩容费 | [DECISION_LOG](DECISION_LOG.md)、[DOMAIN_ARCHITECTURE](DOMAIN_ARCHITECTURE.md)、[#61 公司](https://github.com/zhengmin486/anime-production-committee/issues/61) |
+| 核心员工编制上限 | 不同公司成长里程碑允许的核心员工人数 | **待标定**；里程碑达成时立即解锁，只统计核心员工、不含临时工；已解锁名额永久保留、只增不减；不绑定设施等级/槽位/作画工作室，开放编制不收扩容费 | [DECISION_LOG](DECISION_LOG.md)、[DOMAIN_ARCHITECTURE](DOMAIN_ARCHITECTURE.md)、[#61 公司](https://github.com/zhengmin486/anime-production-committee/issues/61) |
 | 同时经营项目数 | 是否存在项目槽位硬上限 | **已确认**：不设置固定项目数上限 | [DECISION_LOG](DECISION_LOG.md)、[M0 契约](M0_CONTRACT_FREEZE.md) |
 | 市场企划槽位 | 初始槽位和最大槽位 | **已确认**：初始 4、上限 10 | [DECISION_LOG](DECISION_LOG.md)、[#59 市场](https://github.com/zhengmin486/anime-production-committee/issues/59) |
 | 市场每周刷新数量 | 每周补充数量、旧企划保留和替换数量 | **待标定** | [DECISION_LOG](DECISION_LOG.md)、[DESIGN_BACKLOG](DESIGN_BACKLOG_2026-11-25.md)、[#59 市场](https://github.com/zhengmin486/anime-production-committee/issues/59) |
@@ -300,7 +300,7 @@
 - 初始核心员工人数及总周薪。
 - 公司固定运营成本。
 - 办公场地租金。
-- 办公场地扩容的一次性搬迁费（声望 190：2→4 槽；声望 350：4→6 槽）及扩容后的每周基础房租增量。
+- 办公场地扩容的一次性搬迁费（声望 190 解锁 4 槽、声望 350 解锁 6 槽；允许跨级直达目标规模）及扩容后的每周基础房租增量；租金增量从扩容确认后的下一次周结算起计提。
 - 行政、人事及其他固定支出。
 - 不同公司规模下的固定成本增长。
 - 闲置员工工资。
