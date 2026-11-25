@@ -185,21 +185,32 @@ struct Finance {
 };
 
 // ---- 事件（M2，M0 §14.1：pending 是数组，不是全局单槽）----
-// 待处理事件按项目保留；同一项目同时最多一条。选项快照随事件冻结，
-// 内容卡后续改版不会改变已经在盘上的选择。
+// 待处理事件按项目保留；同一项目同时最多一条。选项与效果快照随事件冻结，
+// 内容卡后续改版不会改变已经在盘上的选择（DEC-EVENT-001 / #50 审查）。
+struct EffectView {
+    std::string scope;    // instant / stage / project
+    std::string target;   // quality / work_done / fatigue / morale / funds
+    std::string stage;    // scope=stage 时的阶段；空表示当前阶段
+    int value = 0;
+};
+
 struct EventOptionView {
     std::string id;
     std::string label;
     std::string kind;         // accept/abandon/overtime/decline（outsource/extension 预留但当前不可用）
     std::string risk_hint;
     int cost = 0;
+    std::vector<EffectView> effects;
 };
 
 struct PendingEvent {
     std::string event_id;
+    std::string name;         // 快照：结算回执不依赖可能变化的内容目录
     std::string work_id;
     int triggered_week = 0;
     std::optional<int> expires_week;
+    int cooldown_weeks = 0;
+    bool once_per_project = false;
     std::vector<EventOptionView> options;
 };
 

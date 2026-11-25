@@ -626,6 +626,10 @@ test('事件内容：非法卡被拒绝并定位到卡片与字段', () => {
   const badVersion = validate([{ ...card, schema_version: 2 }])
   assert.ok(badVersion.issues.some((issue) => issue.field === 'schema_version'))
 
+  // 首版没有期限/超时行为，非 0 必须被拒绝，避免内容作者误以为会生效
+  const expiry = validate([{ ...card, expires_weeks: 2 }])
+  assert.ok(expiry.issues.some((issue) => issue.field === 'expires_weeks'))
+
   const empty = ok('validate_event_catalog', { source: 'empty', catalog: { schema_version: 1, cards: [] } })
   assert.equal(empty.ok, false)
   assert.equal(empty.issues[0].field, 'cards')
@@ -655,9 +659,10 @@ test('事件仲裁：两个项目同周各自触发，互不覆盖，处理前�
   assert.equal(blocked.error.code, 'INVALID_PHASE')
   assert.ok(blocked.error.message.includes('2'))
 
-  // 同名事件跨项目时必须指定 work_id
+  // M0 命令 19：work_id 必填，省略即拒绝
   const ambiguous = call('resolve_event', { state, event_id: 'schedule_slip', option_id: 'accept' })
   assert.equal(ambiguous.error.code, 'INVALID_INPUT')
+  assert.ok(ambiguous.error.message.includes('work_id'))
 
   const resolvedA = ok('resolve_event', { state, event_id: 'schedule_slip', option_id: 'accept', work_id: 'work_a' }).state
   assert.equal(pendingOf(resolvedA).length, 1)
@@ -731,4 +736,29 @@ test('事件确定性：同 seed 同操作，待处理事件与哈希一致', ()
     }
   }
   assert.deepEqual(run(), run())
+})
+
+test('事件快照：选项效果冻结在 pending，JSON 往返后仍按触发时效果结算', () => {
+  let state = twoProjectsNearDeadline()
+  state = ok('advance_week', { state }).state
+  const event = state.events.pending.find((entry) => entry.work_id === 'work_a')
+  assert.equal(event.name, '作画进度落后')
+  const option = event.options.find((entry) => entry.id === 'accept')
+  assert.equal(option.effects.length, 1)
+  // 模拟内容卡改版：把快照里的 -3 改成 -20。若 resolve 回查目录，仍会是 -3。
+  option.effects[0].value = -20
+
+  const loaded = JSON.parse(JSON.stringify(state))
+  const resolved = ok('resolve_event', {
+    state: loaded,
+    work_id: 'work_a',
+    event_id: 'schedule_slip',
+    option_id: 'accept'
+  }).state
+  const quality = findItem(resolved, 'work_a', 'ep01.inbetween').quality
+  assert.equal(quality.story, 30)
+
+  // 存档往返后 pending 仍保留完整效果载荷
+  assert.equal(resolved.events.pending.length, 1)
+  assert.equal(resolved.events.pending[0].options[0].effects.length >= 0, true)
 })
