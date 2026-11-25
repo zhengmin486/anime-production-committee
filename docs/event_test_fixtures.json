@@ -1,0 +1,481 @@
+{
+  "schema_version": 1,
+  "catalog": "docs/event_catalog.example.json",
+  "note": "v4 事件机制的原生测试夹具。given 只列出与判定相关的状态切片，实际测试需在完整 GameState 上构造；expect 描述唯一正确结果。pending_events 始终是数组：单项目可简写事件 id，多项目或校验周上限时使用 { id, work_id, triggered_week }。",
+  "required_covers": [
+    "performance_trigger",
+    "random_trigger",
+    "priority_order",
+    "cooldown",
+    "major_once",
+    "pause_resume",
+    "stage_effect_scope",
+    "cash_disabled_option",
+    "ledger_once",
+    "per_project_weekly_limit",
+    "parallel_project_events",
+    "pending_array_preserved",
+    "resolve_any_order",
+    "pending_array_guard",
+    "nonzero_funds_not_implemented"
+  ],
+  "cases": [
+    {
+      "id": "performance_quality_rework",
+      "covers": ["performance_trigger"],
+      "given": {
+        "seed": 12345,
+        "week": 12,
+        "company_status": "running",
+        "work_status": "producing",
+        "stage": "storyboard_key_animation",
+        "stage_quality": 40,
+        "max_fatigue": 50,
+        "weeks_in_project": 5,
+        "weeks_to_deadline": 8,
+        "funds": 1500000,
+        "morale": 60,
+        "cooldowns": {},
+        "major_seen": []
+      },
+      "expect": {
+        "pending_events": ["key_cut_rework"],
+        "reason": "stage_quality 40 < 55，表现触发优先于随机",
+        "company_status": "running",
+        "work_status": "producing"
+      }
+    },
+    {
+      "id": "performance_beats_random",
+      "covers": ["performance_trigger"],
+      "given": {
+        "seed": 12345,
+        "week": 20,
+        "company_status": "running",
+        "work_status": "producing",
+        "stage": "animation",
+        "stage_quality": 80,
+        "max_fatigue": 90,
+        "weeks_in_project": 8,
+        "weeks_to_deadline": 2,
+        "funds": 2000000,
+        "morale": 55,
+        "cooldowns": {},
+        "major_seen": []
+      },
+      "expect": {
+        "pending_events": ["director_illness"],
+        "reason": "疲劳 90 >= 65 同时工期压力成立，重大事件 priority 1 最小",
+        "company_status": "running",
+        "work_status": "producing"
+      }
+    },
+    {
+      "id": "random_pool_station_visit",
+      "covers": ["random_trigger"],
+      "given": {
+        "seed": 7,
+        "week": 14,
+        "company_status": "running",
+        "work_status": "producing",
+        "stage": "storyboard_key_animation",
+        "stage_quality": 60,
+        "max_fatigue": 50,
+        "weeks_in_project": 6,
+        "weeks_to_deadline": 8,
+        "funds": 1500000,
+        "morale": 60,
+        "cooldowns": {},
+        "major_seen": [],
+        "roll_permille": 10
+      },
+      "expect": {
+        "pending_events": ["station_visit"],
+        "reason": "无表现条件成立；抽样 10 < 250‰，随机池仅 station_visit（weight 25，chance=min(25×10,1000)）",
+        "company_status": "running",
+        "work_status": "producing"
+      }
+    },
+    {
+      "id": "random_roll_miss",
+      "covers": ["random_trigger"],
+      "given": {
+        "seed": 7,
+        "week": 14,
+        "company_status": "running",
+        "work_status": "producing",
+        "stage": "storyboard_key_animation",
+        "stage_quality": 60,
+        "max_fatigue": 50,
+        "weeks_in_project": 6,
+        "weeks_to_deadline": 8,
+        "funds": 1500000,
+        "morale": 60,
+        "cooldowns": {},
+        "major_seen": [],
+        "roll_permille": 900
+      },
+      "expect": {
+        "pending_events": [],
+        "reason": "抽样 900 >= 250‰，本周无事件；坐标随机流仍消耗一次抽样",
+        "company_status": "running",
+        "work_status": "producing"
+      }
+    },
+    {
+      "id": "priority_within_week",
+      "covers": ["priority_order"],
+      "given": {
+        "seed": 99,
+        "week": 16,
+        "company_status": "running",
+        "work_status": "producing",
+        "stage": "animation",
+        "stage_quality": 40,
+        "max_fatigue": 80,
+        "weeks_in_project": 9,
+        "weeks_to_deadline": 2,
+        "funds": 300000,
+        "morale": 40,
+        "cooldowns": {},
+        "major_seen": []
+      },
+      "expect": {
+        "pending_events": ["director_illness"],
+        "reason": "同一项目多个条件同时成立，取 priority 最小（1）；同种子重放结果一致",
+        "company_status": "running",
+        "work_status": "producing"
+      }
+    },
+    {
+      "id": "cooldown_blocks_repeat",
+      "covers": ["cooldown"],
+      "given": {
+        "seed": 12345,
+        "week": 12,
+        "company_status": "running",
+        "work_status": "producing",
+        "stage": "storyboard_key_animation",
+        "stage_quality": 40,
+        "max_fatigue": 50,
+        "weeks_in_project": 5,
+        "weeks_to_deadline": 8,
+        "funds": 1500000,
+        "morale": 60,
+        "cooldowns": { "quality_rework": 15 },
+        "major_seen": []
+      },
+      "expect": {
+        "pending_events": [],
+        "reason": "quality_rework 冷却到第 15 周，本周不进入候选",
+        "company_status": "running",
+        "work_status": "producing"
+      }
+    },
+    {
+      "id": "major_event_once",
+      "covers": ["major_once"],
+      "given": {
+        "seed": 99,
+        "week": 18,
+        "company_status": "running",
+        "work_status": "producing",
+        "stage": "animation",
+        "stage_quality": 70,
+        "max_fatigue": 70,
+        "weeks_in_project": 8,
+        "weeks_to_deadline": 6,
+        "funds": 1500000,
+        "morale": 60,
+        "cooldowns": { "staff_fatigue": 20 },
+        "major_seen": ["director_illness"]
+      },
+      "expect": {
+        "pending_events": [],
+        "reason": "director_illness 已在本项目触发过，once_per_project 生效；普通疲劳事件仍在冷却",
+        "company_status": "running",
+        "work_status": "producing"
+      }
+    },
+    {
+      "id": "pause_then_resume",
+      "covers": ["pause_resume", "pending_array_guard"],
+      "given": {
+        "seed": 12345,
+        "week": 12,
+        "company_status": "running",
+        "work_status": "producing",
+        "stage": "storyboard_key_animation",
+        "pending_events": ["key_cut_rework"]
+      },
+      "expect": {
+        "pending_events": ["key_cut_rework"],
+        "action": "advance_week",
+        "error": "INVALID_PHASE",
+        "reason": "待处理事件数组非空时周推进被拒绝，state、funds、week、seed 全部不变",
+        "after_resolve": {
+          "pending_events": [],
+          "advance_week_allowed": true
+        }
+      }
+    },
+    {
+      "id": "stage_effect_not_retroactive",
+      "covers": ["stage_effect_scope"],
+      "given": {
+        "seed": 12345,
+        "week": 14,
+        "company_status": "running",
+        "work_status": "producing",
+        "stage": "animation",
+        "completed_stages": ["content_design", "storyboard_key_animation"],
+        "pending_events": ["director_illness"],
+        "choice_event": "director_illness",
+        "choice": "accept"
+      },
+      "expect": {
+        "pending_events": [],
+        "stage_effect": { "stage": "animation", "target": "quality", "value": -5 },
+        "unchanged": ["content_design", "storyboard_key_animation"],
+        "reason": "未指定 effect.stage 时作用于当前 animation 阶段；已完成的 content_design 与 storyboard_key_animation 不变",
+        "company_status": "running",
+        "work_status": "producing"
+      }
+    },
+    {
+      "id": "cash_blocks_expensive_option",
+      "covers": ["cash_disabled_option"],
+      "given": {
+        "seed": 12345,
+        "week": 12,
+        "company_status": "running",
+        "work_status": "producing",
+        "stage": "storyboard_key_animation",
+        "funds": 100000,
+        "pending_events": ["key_cut_rework"]
+      },
+      "expect": {
+        "pending_events": ["key_cut_rework"],
+        "option": "rework",
+        "disabled_reason": "现金不足",
+        "available_options": ["accept"],
+        "reason": "cost 180000 > funds 100000，选项禁用但事件照常展示",
+        "company_status": "running",
+        "work_status": "producing"
+      }
+    },
+    {
+      "id": "paid_option_ledger_once",
+      "covers": ["ledger_once"],
+      "given": {
+        "seed": 12345,
+        "week": 12,
+        "company_status": "running",
+        "work_status": "producing",
+        "stage": "storyboard_key_animation",
+        "funds": 1000000,
+        "pending_events": ["key_cut_rework"],
+        "choice_event": "key_cut_rework",
+        "choice": "rework"
+      },
+      "expect": {
+        "pending_events": [],
+        "funds_delta": -180000,
+        "costs_events_delta": 180000,
+        "reject_if_charged_twice": true,
+        "reason": "现金只扣一次，events 账目恰增一次，同笔支出不进入项目账的第二条现金流",
+        "company_status": "running",
+        "work_status": "producing"
+      }
+    },
+    {
+      "id": "same_project_same_week_limit",
+      "covers": ["per_project_weekly_limit"],
+      "given": {
+        "seed": 12345,
+        "week": 12,
+        "company_status": "running",
+        "work_status": "producing",
+        "stage": "animation",
+        "pending_events": [
+          { "id": "key_cut_rework", "work_id": "work_a", "triggered_week": 12 },
+          { "id": "schedule_slip", "work_id": "work_a", "triggered_week": 12 }
+        ]
+      },
+      "expect": {
+        "pending_events": [
+          { "id": "key_cut_rework", "work_id": "work_a", "triggered_week": 12 },
+          { "id": "schedule_slip", "work_id": "work_a", "triggered_week": 12 }
+        ],
+        "action": "validate_state",
+        "error": "INVALID_STATE",
+        "state_unchanged": true,
+        "reason": "同一 work_id 在同一 triggered_week 出现两条事件，违反每项目每周最多一个"
+      }
+    },
+    {
+      "id": "parallel_projects_same_week",
+      "covers": ["parallel_project_events", "pending_array_preserved"],
+      "given": {
+        "seed": 12345,
+        "week": 12,
+        "company_status": "running",
+        "cooldowns": {},
+        "major_seen": [],
+        "projects": [
+          {
+            "work_id": "work_a",
+            "status": "producing",
+            "stage": "storyboard_key_animation",
+            "stage_quality": 40,
+            "max_fatigue": 50,
+            "weeks_in_project": 5,
+            "weeks_to_deadline": 8,
+            "funds": 1500000,
+            "morale": 60
+          },
+          {
+            "work_id": "work_b",
+            "status": "producing",
+            "stage": "animation",
+            "stage_quality": 80,
+            "max_fatigue": 80,
+            "weeks_in_project": 8,
+            "weeks_to_deadline": 6,
+            "funds": 1500000,
+            "morale": 60
+          }
+        ]
+      },
+      "expect": {
+        "pending_events": [
+          { "id": "key_cut_rework", "work_id": "work_a", "triggered_week": 12 },
+          { "id": "director_illness", "work_id": "work_b", "triggered_week": 12 }
+        ],
+        "reason": "两个项目同周各触发一个事件，pending 数组同时保留两条，不设全局单事件上限",
+        "company_status": "running"
+      }
+    },
+    {
+      "id": "resolve_pending_any_order",
+      "covers": ["resolve_any_order", "pending_array_preserved"],
+      "given": {
+        "seed": 12345,
+        "week": 12,
+        "company_status": "running",
+        "work_status": "producing",
+        "pending_events": [
+          { "id": "key_cut_rework", "work_id": "work_a", "triggered_week": 12 },
+          { "id": "director_illness", "work_id": "work_b", "triggered_week": 12 }
+        ],
+        "choice_event": "director_illness",
+        "choice": "accept"
+      },
+      "expect": {
+        "pending_events": [
+          { "id": "key_cut_rework", "work_id": "work_a", "triggered_week": 12 }
+        ],
+        "advance_week_allowed": false,
+        "reason": "先解决数组第二条事件，不要求 FIFO；另一项目事件原样保留，周推进仍被阻塞",
+        "company_status": "running",
+        "work_status": "producing"
+      }
+    },
+    {
+      "id": "pending_array_blocks_week",
+      "covers": ["pending_array_guard"],
+      "given": {
+        "seed": 12345,
+        "week": 12,
+        "company_status": "running",
+        "work_status": "producing",
+        "pending_events": [
+          { "id": "key_cut_rework", "work_id": "work_a", "triggered_week": 12 },
+          { "id": "director_illness", "work_id": "work_b", "triggered_week": 12 }
+        ]
+      },
+      "expect": {
+        "pending_events": [
+          { "id": "key_cut_rework", "work_id": "work_a", "triggered_week": 12 },
+          { "id": "director_illness", "work_id": "work_b", "triggered_week": 12 }
+        ],
+        "action": "advance_week",
+        "error": "INVALID_PHASE",
+        "state_unchanged": true,
+        "reason": "只要 pending 数组非空就拒绝推进，不按项目或事件顺序豁免"
+      }
+    },
+    {
+      "id": "budget_nonzero_funds_not_implemented",
+      "covers": ["nonzero_funds_not_implemented"],
+      "given": {
+        "seed": 12345,
+        "week": 12,
+        "company_status": "running",
+        "work_status": "producing",
+        "stage": "art_visual",
+        "funds": 500000,
+        "pending_events": ["budget_overrun"],
+        "choice_event": "budget_overrun",
+        "choice": "advance"
+      },
+      "expect": {
+        "pending_events": ["budget_overrun"],
+        "error": "NOT_IMPLEMENTED",
+        "funds_delta": 0,
+        "state_unchanged": true,
+        "reason": "正向 funds 未获统一财务授权；当前 runtime 统一返回 NOT_IMPLEMENTED，不得直接增加现金或改记其他收入类别",
+        "company_status": "running",
+        "work_status": "producing"
+      }
+    },
+    {
+      "id": "station_nonzero_funds_not_implemented",
+      "covers": ["nonzero_funds_not_implemented"],
+      "given": {
+        "seed": 12345,
+        "week": 12,
+        "company_status": "running",
+        "work_status": "producing",
+        "stage": "animation",
+        "funds": 1000000,
+        "pending_events": ["station_visit"],
+        "choice_event": "station_visit",
+        "choice": "host"
+      },
+      "expect": {
+        "pending_events": ["station_visit"],
+        "error": "NOT_IMPLEMENTED",
+        "funds_delta": 0,
+        "state_unchanged": true,
+        "reason": "接待收入属于正向 funds；当前 runtime 不直接入账，选项返回 NOT_IMPLEMENTED",
+        "company_status": "running",
+        "work_status": "producing"
+      }
+    },
+    {
+      "id": "sponsor_nonzero_funds_not_implemented",
+      "covers": ["nonzero_funds_not_implemented"],
+      "given": {
+        "seed": 12345,
+        "week": 12,
+        "company_status": "running",
+        "work_status": "producing",
+        "stage": "sound_delivery",
+        "funds": 1000000,
+        "pending_events": ["sponsor_boost"],
+        "choice_event": "sponsor_boost",
+        "choice": "take"
+      },
+      "expect": {
+        "pending_events": ["sponsor_boost"],
+        "error": "NOT_IMPLEMENTED",
+        "funds_delta": 0,
+        "state_unchanged": true,
+        "reason": "赞助追加不得绕过 INV-17 的交付结算收入边界，当前选项返回 NOT_IMPLEMENTED",
+        "company_status": "running",
+        "work_status": "producing"
+      }
+    }
+  ]
+}

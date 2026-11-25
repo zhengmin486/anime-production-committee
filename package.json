@@ -24,7 +24,8 @@
     "test:wasm": "npm run build:wasm && node --test scripts/wasm.test.mjs",
     "test:native": "node scripts/build-core.mjs test",
     "test:browser": "npm run build && node --test scripts/browser.test.mjs",
-    "verify:dist": "node scripts/verify-dist.mjs"
+    "verify:dist": "node scripts/verify-dist.mjs",
+    "check:docs": "python scripts/check_docs.py"
   },
   "devDependencies": {
     "playwright-core": "1.65.1"

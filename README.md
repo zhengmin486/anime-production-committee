@@ -4,13 +4,13 @@ ANIME PRODUCTION COMMITTEE · 浏览器经营模拟游戏最小纵向切片 · v
 
 当前范围是初始化公司、选择企划、安排团队、推进制作、处理事件、结算并接取下一部的最小循环，不是完整游戏或最终平衡版本。React 通过 Emscripten 的真实 WebAssembly 调用 C++ 六接口；没有用 TypeScript 伪造核心计算，也没有独立后端。
 
-> **V1.0 迁移进行中。** 下面的玩法、协议与验收描述的是已合入的 v2 纵向切片，仍然准确，但不是目标形态。《游戏设计总案 V1.0》要求周制经营、五阶段、企划市场、委员会投资、六能力用工与公司终局，差距见 [docs/V1_GAP_REVIEW.md](docs/V1_GAP_REVIEW.md)，本轮分工与顺序见 [docs/TEAM_PLAN.md](docs/TEAM_PLAN.md)，任务在 [议题 #1](https://github.com/zhengmin486/anime-production-committee/issues/1) 与 #2–#9。
+> **V1.0 迁移进行中。** 下面的玩法、协议与验收描述的是已合入的 v2 纵向切片，仍然准确，但不是目标形态。《游戏设计总案 V1.0》要求周制经营、五阶段、企划市场、委员会投资、六能力用工与公司终局，差距见 [docs/reviews/V1_GAP_REVIEW.md](docs/reviews/V1_GAP_REVIEW.md)，本轮分工与顺序见 [docs/plans/TEAM_PLAN.md](docs/plans/TEAM_PLAN.md)，任务在 [议题 #1](https://github.com/zhengmin486/anime-production-committee/issues/1) 与 #2–#9。
 
 ## M0 契约交付
 
-v3 目标结构、合法动作、周结算顺序、同周破产优先级、承制/委员会手算账与旧档拒绝策略见 [DATA_MODEL](docs/DATA_MODEL.md)、[API](docs/API.md)、[GAME_RULES](docs/GAME_RULES.md) 的 V3 部分。可编译契约与校验在 [gameV3.ts](apps/web/src/types/gameV3.ts)，静态夹具与契约测试供后续前后端独立开发。交接与尚未实现项见 [TEAM_PLAN](docs/TEAM_PLAN.md)。
+v3 目标结构、合法动作、周结算顺序、同周破产优先级、承制/委员会手算账与旧档拒绝策略见 [DATA_MODEL](docs/canon/DATA_MODEL.md)、[API](docs/canon/API.md)、[GAME_RULES](docs/canon/GAME_RULES.md) 的 V3 部分。可编译契约与校验在 [gameV3.ts](apps/web/src/types/gameV3.ts)，静态夹具与契约测试供后续前后端独立开发。交接与尚未实现项见 [TEAM_PLAN](docs/plans/TEAM_PLAN.md)。
 
-**M0 没有更换运行时。** M1 已由 `9e2d023` 将 C++/WASM 核心切到 v3，但前端仍调用 v2 六接口；浏览器端没有 v3 端到端证据，由 #5 完成切换。当前进度见 [docs/PROGRESS.md](docs/PROGRESS.md)。
+**M0 没有更换运行时。** M1 已由 `9e2d023` 将 C++/WASM 核心切到 v3，但前端仍调用 v2 六接口；浏览器端没有 v3 端到端证据，由 #5 完成切换。当前进度见 [docs/status/PROGRESS.md](docs/status/PROGRESS.md)。
 
 ## 当前可玩内容
 
@@ -26,7 +26,7 @@ v3 目标结构、合法动作、周结算顺序、同周破产优先级、承�
 - 支持单槽手动存档、刷新后恢复、核心加载失败重试；不提供旧版 v1 存档迁移。
 - 2026-11-21 本地验收通过：前端 204、原生 44、真实 WASM 10、浏览器 8 项；构建与产物检查通过，不代表数值已最终平衡或已上线。
 
-六个 JSON 接口依次为 `initialize_game`、`start_project`、`apply_decision`、`advance_day`、`resolve_event`、`calculate_result`；输入、输出、错误与阶段限制见 [API.md](docs/API.md)。
+六个 JSON 接口依次为 `initialize_game`、`start_project`、`apply_decision`、`advance_day`、`resolve_event`、`calculate_result`；输入、输出、错误与阶段限制见 [API.md](docs/canon/API.md)。
 
 ## 技术栈与版本
 
@@ -119,6 +119,7 @@ npm run test:wasm       # 重新编译 WASM，再实际导入模块并执行 C++
 npm test               # 顺序运行以上三类测试
 npm run typecheck
 npm run test:browser    # 完整构建后，用本机 Edge 进行实际点击与截图
+npm run check:docs      # 检查文档 front matter、canonical_for 与本地链接
 ```
 
 浏览器测试默认使用已安装的 Microsoft Edge。也可设置 `BROWSER_CHANNEL=chrome`，或用 `BROWSER_EXECUTABLE` 指向兼容浏览器的绝对路径。截图输出至 build/browser-tests。测试自动启动仅监听回环地址的临时静态服务器，使用隔离的浏览器上下文，结束时自动关闭；不会修改用户的浏览器配置。
@@ -153,11 +154,11 @@ v2 验收范围（2026-11-21 本地验收已通过）：
 ### 本次纵向切片修改文件
 
 - C++ 核心：[接口声明](packages/game-core/include/game_core.hpp)、[规则与暂定参数](packages/game-core/include/game_rules.hpp)（新增）、[六接口实现](packages/game-core/src/game_core.cpp)。
-- 前端数据链路：[v2 类型与校验](apps/web/src/types/game.ts)、[WASM 服务](apps/web/src/services/gameCore.ts)、[存档服务](apps/web/src/services/saveGame.ts)、[状态层](apps/web/src/stores/gameStore.ts)。
+- 前端数据链路：[v2 类型与校验](apps/web/src/types/gameV3.ts)、[WASM 服务](apps/web/src/services/gameCore.ts)、[存档服务](apps/web/src/services/saveGame.ts)、[状态层](apps/web/src/stores/gameStore.ts)。
 - 前端界面：[应用入口](apps/web/src/App.tsx)、[首页](apps/web/src/pages/HomePage.tsx)、[制作与结算页](apps/web/src/pages/StudioPage.tsx)、[样式](apps/web/src/styles/index.css)。
-- 前端测试：[协议夹具](apps/web/src/test/fixtures.ts)（新增）、[类型校验测试](apps/web/src/types/game.test.ts)、[WASM 服务测试](apps/web/src/services/gameCore.test.ts)、[存档测试](apps/web/src/services/saveGame.test.ts)、[状态层测试](apps/web/src/stores/gameStore.test.ts)、[首页测试](apps/web/src/pages/HomePage.test.tsx)、[应用测试](apps/web/src/App.test.tsx)。
+- 前端测试：[协议夹具](apps/web/src/test/fixtures.ts)（新增）、[类型校验测试](apps/web/src/types/gameV3.test.ts)、[WASM 服务测试](apps/web/src/services/gameCore.test.ts)、[存档测试](apps/web/src/services/saveGame.test.ts)、[状态层测试](apps/web/src/stores/gameStore.test.ts)、[首页测试](apps/web/src/pages/HomePage.test.tsx)、[应用测试](apps/web/src/App.test.tsx)。
 - 核心与端到端测试：[原生测试](packages/game-core/tests/game_core_test.cpp)、[真实 WASM 测试](packages/game-core/tests/wasm.test.mjs)、[根 WASM 测试入口](scripts/wasm.test.mjs)、[浏览器测试](scripts/browser.test.mjs)。
-- 文档：[README](README.md)、[接口](docs/API.md)、[规则](docs/GAME_RULES.md)、[数据模型](docs/DATA_MODEL.md)、[架构](docs/ARCHITECTURE.md)、[产品范围](docs/PRODUCT.md)、[V1.0 游戏设计总览](docs/GAME_DESIGN.md)。
+- 文档：[README](README.md)、[接口](docs/canon/API.md)、[规则](docs/canon/GAME_RULES.md)、[数据模型](docs/canon/DATA_MODEL.md)、[架构](docs/canon/ARCHITECTURE.md)、[产品范围](docs/canon/PRODUCT.md)、[V1.0 游戏设计总览](docs/canon/GAME_DESIGN.md)。
 
 仓库同步包含上述实现与测试，以及关联的贡献指南、Issue / PR 模板、素材目录占位和来源记录；素材来源记录不代表图片已入库或授权已确认。没有修改构建配置、依赖、CI 工作流或 `.gitignore`，没有执行线上部署；生成图片、工具链、依赖和构建产物不随 Git 提交。
 
@@ -204,22 +205,24 @@ Sites 官方插件本地打包约束：单文件不超过 50 MiB，整体发布 
 
 ## 文档
 
+- [文档索引](docs/00_INDEX.md)：文档权威顺序、状态与维护规则。
+- [核心决策登记册](docs/decisions/DECISION_LOG.md)：规则冲突时的最高文档依据。
 - [贡献与协作指南](CONTRIBUTING.md)
-- [产品定位](docs/PRODUCT.md)
-- [技术架构](docs/ARCHITECTURE.md)
-- [V1.0 游戏设计总览](docs/GAME_DESIGN.md)
-- [统一数据模型](docs/DATA_MODEL.md)
-- [规则与暂定参数](docs/GAME_RULES.md)
-- [六接口协议与同步流程](docs/API.md)
-- [V1.0 差距审查与迁移计划](docs/V1_GAP_REVIEW.md)
-- [本轮分工（V1.0 迁移）](docs/TEAM_PLAN.md)
-- [当前进度与方向](docs/PROGRESS.md)
+- [产品定位](docs/canon/PRODUCT.md)
+- [技术架构](docs/canon/ARCHITECTURE.md)
+- [V1.0 游戏设计总览](docs/canon/GAME_DESIGN.md)
+- [统一数据模型](docs/canon/DATA_MODEL.md)
+- [规则与暂定参数](docs/canon/GAME_RULES.md)
+- [六接口协议与同步流程](docs/canon/API.md)
+- [V1.0 差距审查与迁移计划](docs/reviews/V1_GAP_REVIEW.md)
+- [本轮分工（V1.0 迁移）](docs/plans/TEAM_PLAN.md)
+- [当前进度与方向](docs/status/PROGRESS.md)
 
 ## 当前范围与未完项
 
 - 六接口均实现；协议使用 snake_case、完整 GameState v2 往返，每次动作由 C++ 严格校验状态，错误包括 INVALID_PHASE，无前端规则兜底。
 - 外包/加班只安排今天，推进前可撤销；截止日当天结算后仍未完成就强制交付/违约，不无限拖到做完。
-- 当前运行切片的数值和公式以 `packages/game-core/src/game_core.cpp` 与 `packages/game-core/include/game_rules.hpp` 为准；V1.0 目标规则见 `docs/GAME_RULES.md`，尚未实现的规则不得当作当前功能。
+- 当前运行切片的数值和公式以 `packages/game-core/src/game_core.cpp` 与 `packages/game-core/include/game_rules.hpp` 为准；V1.0 目标规则见 `docs/canon/GAME_RULES.md`，尚未实现的规则不得当作当前功能。
 - 开工资金加上拨款，草案利润 `profit = revenue - spent` 不含拨款，付费事件计入 spent；此经济口径待团队复核。
 - 上述招聘成长、企划市场、委员会投资、商业渠道、十年履历与结局等属于 V1.0 目标范围，当前 v2 纵向切片尚未实现；v2 当前不包含这些玩法。存档仍为单槽手动保存，不支持旧版迁移或历史结算持久化。
 - 本地真实 WASM 与浏览器完整循环已按上述记录验证；没有执行线上部署，托管后的 MIME、资源加载和访问策略仍需发布后单独验收。

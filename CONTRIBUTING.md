@@ -8,12 +8,12 @@
 
 | 文档 | 负责回答 |
 | --- | --- |
-| [PRODUCT.md](docs/PRODUCT.md) | 产品定位、目标玩法、当前与延期范围 |
-| [ARCHITECTURE.md](docs/ARCHITECTURE.md) | 工程分层、数据流与模块边界 |
-| [API.md](docs/API.md) | 当前前端与 C++ 的输入、输出和错误契约 |
+| [PRODUCT.md](docs/canon/PRODUCT.md) | 产品定位、目标玩法、当前与延期范围 |
+| [ARCHITECTURE.md](docs/canon/ARCHITECTURE.md) | 工程分层、数据流与模块边界 |
+| [API.md](docs/canon/API.md) | 当前前端与 C++ 的输入、输出和错误契约 |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | 分支、提交、PR、评审与协作流程 |
 
-玩法细节见 [GAME_DESIGN.md](docs/GAME_DESIGN.md)，规则与暂定参数见 [GAME_RULES.md](docs/GAME_RULES.md)，现行 v2 数据结构见 [DATA_MODEL.md](docs/DATA_MODEL.md)。模型、API、实现与测试应同步更新，不各自维护不同含义的同名字段。
+玩法细节见 [GAME_DESIGN.md](docs/canon/GAME_DESIGN.md)，规则与暂定参数见 [GAME_RULES.md](docs/canon/GAME_RULES.md)，现行 v2 数据结构见 [DATA_MODEL.md](docs/canon/DATA_MODEL.md)。模型、API、实现与测试应同步更新，不各自维护不同含义的同名字段。
 
 当前最小纵向切片已实现六个 C++ 接口，React 通过真实 WASM 完成初始化、接取企划、决策、日结、事件与结算；本地验收记录见 README。固定名册、目录、事件和系数仍是暂定参数，经济口径与最终平衡待团队复核。新增玩法前，在 Issue 中确认范围、接口与验收标准；不要把计划中的能力描述成已实现。
 
@@ -33,7 +33,7 @@
 | 核心 | `packages/game-core/src/`、`include/`、`tests/` | Embind 导出、JSON 协议、规则数值 |
 | 集成与规范 | `scripts/`、`docs/`、根配置 | workspace 配置、锁文件、CMake、部署配置 |
 
-共享文件包括 `apps/web/src/types/game.ts`、`packages/game-core/bindings/embind.cpp`、`docs/API.md`、各 `package.json`、`package-lock.json` 和 `CMakeLists.txt`。需要跨边界修改时，先在 Issue 说明并协调，避免两人同时重写同一份协议或锁文件。
+共享文件包括 `apps/web/src/types/game.ts`、`packages/game-core/bindings/embind.cpp`、`docs/canon/API.md`、各 `package.json`、`package-lock.json` 和 `CMakeLists.txt`。需要跨边界修改时，先在 Issue 说明并协调，避免两人同时重写同一份协议或锁文件。
 
 ## 开发环境
 
@@ -86,7 +86,7 @@ git switch -c feat/12-project-flow
 - React 组件通过 Zustand 状态操作和服务接口交互，不自行实现预算、进度或评价规则。
 - C++ 保持明确输入输出，不负责 UI、存档、网络、浏览器或随机种子生命周期。
 - TypeScript 管理种子并传入 C++；相同状态、决策序列和种子必须可以复现结果。
-- JSON 字段、错误码或接口行为改变时，先确认数据模型草案中的命名、单位、状态变化与数值范围，再同步更新 TypeScript 类型、C++、测试和 `docs/API.md`；新增正式数值前更新 `docs/GAME_RULES.md` 并取得范围确认。
+- JSON 字段、错误码或接口行为改变时，先确认数据模型草案中的命名、单位、状态变化与数值范围，再同步更新 TypeScript 类型、C++、测试和 `docs/canon/API.md`；新增正式数值前更新 `docs/canon/GAME_RULES.md` 并取得范围确认。
 - 改变存档结构时说明版本与迁移或失效策略，不静默按新结构解释旧数据。
 - 不用 JavaScript 假结果冒充 WASM。单元测试可以隔离服务，但必须明确与真实集成测试的区别。
 - 不擅自引入独立后端、远程数据库、Electron、Phaser、多人系统或与当前任务无关的依赖。
@@ -125,7 +125,7 @@ git switch -c feat/12-project-flow
 ### 现状与分工原则
 
 - 现有 `main` 是最小纵向切片（v2）：日推进、三工序、固定 4 人、3 报价、3 事件。技术链路（C++→WASM→React、确定性种子、Zustand 锁、IndexedDB、三层测试）保留，规则与数据模型按 V1.0 重做。
-- 差距与里程碑见 [docs/V1_GAP_REVIEW.md](docs/V1_GAP_REVIEW.md)；本轮分工与顺序见 [docs/TEAM_PLAN.md](docs/TEAM_PLAN.md)。
+- 差距与里程碑见 [docs/reviews/V1_GAP_REVIEW.md](docs/reviews/V1_GAP_REVIEW.md)；本轮分工与顺序见 [docs/plans/TEAM_PLAN.md](docs/plans/TEAM_PLAN.md)。
 - **M0 契约冻结（#2）评审合入前，不允许后续任务改契约字段、C++ 状态结构或存档版本**，只允许读现状、写结构草案、补对照样例。M0 本地目标模块为 `types/gameV3.ts`，交付与集成切换说明见 TEAM_PLAN；当前 v2 运行时仍保留，不能将文档目标当作已实现。
 - 规则只在 C++；单元测试里的模拟服务不能代替真实 WASM 验收。
 - 所有任务初始待认领，未指定真实 Assignee 或 Reviewer。每项最多一名主负责人、至少一名其他成员评审。

@@ -1,0 +1,309 @@
+{
+  "schema_version": 1,
+  "note": "示例事件目录，用于对齐 v4 内容与系统字段；稳定 id 与卡片文案保持不变，阶段迁移为 v4 六阶段。所有非零 funds 效果均未获得统一财务授权：schema 保留该效果，但运行时一律返回 NOT_IMPLEMENTED，budget_overrun/advance、station_visit/host、sponsor_boost/take 不得改记为其他收入或支出类别。",
+  "events": [
+    {
+      "id": "key_cut_rework",
+      "name": "关键镜头返修",
+      "polarity": "negative",
+      "tier": "normal",
+      "category": "quality",
+      "stages": ["storyboard_key_animation", "animation"],
+      "tag": "quality_rework",
+      "priority": 20,
+      "cooldown_weeks": 6,
+      "once_per_project": false,
+      "trigger": { "metric": "stage_quality", "op": "<", "threshold": 55 },
+      "random_weight": 0,
+      "expires_weeks": 0,
+      "escalation": null,
+      "description": "本阶段有几卡关键镜头没有达到作画监督的要求。现在返修还来得及，但要多占用一周的人手。",
+      "options": [
+        {
+          "id": "accept",
+          "kind": "abandon",
+          "label": "按现状推进",
+          "cost": 0,
+          "effects": [{ "scope": "instant", "target": "morale", "value": -3 }]
+        },
+        {
+          "id": "rework",
+          "kind": "overtime",
+          "label": "抽调人手返修",
+          "cost": 180000,
+          "effects": [
+            { "scope": "instant", "target": "fatigue", "value": 6 },
+            { "scope": "stage", "target": "quality", "value": 4 }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "schedule_slip",
+      "name": "作画进度落后",
+      "polarity": "negative",
+      "tier": "normal",
+      "category": "schedule",
+      "stages": ["storyboard_key_animation", "animation"],
+      "tag": "schedule_slip",
+      "priority": 10,
+      "cooldown_weeks": 4,
+      "once_per_project": false,
+      "trigger": { "metric": "weeks_to_deadline", "op": "<=", "threshold": 3 },
+      "random_weight": 0,
+      "expires_weeks": 0,
+      "escalation": null,
+      "description": "离交付只剩三周，作画进度明显落后于计划。继续按原节奏推进很可能赶不上截止周。",
+      "options": [
+        {
+          "id": "accept",
+          "kind": "abandon",
+          "label": "维持原计划",
+          "cost": 0,
+          "effects": [{ "scope": "stage", "target": "quality", "value": -3 }]
+        },
+        {
+          "id": "crunch",
+          "kind": "overtime",
+          "label": "全员赶工",
+          "cost": 120000,
+          "effects": [
+            { "scope": "instant", "target": "fatigue", "value": 8 },
+            { "scope": "instant", "target": "work_done", "value": 120 }
+          ]
+        },
+        {
+          "id": "delay",
+          "kind": "extension",
+          "label": "向委员会申请延期",
+          "cost": 250000,
+          "effects": [{ "scope": "instant", "target": "morale", "value": -4 }]
+        }
+      ]
+    },
+    {
+      "id": "animator_exhaustion",
+      "name": "原画师过劳",
+      "polarity": "negative",
+      "tier": "normal",
+      "category": "personnel",
+      "stages": ["storyboard_key_animation", "animation", "photography_editing", "sound_delivery"],
+      "tag": "staff_fatigue",
+      "priority": 5,
+      "cooldown_weeks": 6,
+      "once_per_project": false,
+      "trigger": { "metric": "max_fatigue", "op": ">=", "threshold": 78 },
+      "random_weight": 0,
+      "expires_weeks": 0,
+      "escalation": null,
+      "description": "主力原画师连续加班，本周已经出现明显的状态下滑。再压下去可能影响整段作画质量。",
+      "options": [
+        {
+          "id": "accept",
+          "kind": "abandon",
+          "label": "让他自己调整",
+          "cost": 0,
+          "effects": [{ "scope": "instant", "target": "morale", "value": -6 }]
+        },
+        {
+          "id": "replace",
+          "kind": "outsource",
+          "label": "临时找外包接手",
+          "cost": 320000,
+          "effects": [{ "scope": "stage", "target": "quality", "value": -2 }]
+        }
+      ]
+    },
+    {
+      "id": "budget_overrun",
+      "name": "预算见底",
+      "polarity": "negative",
+      "tier": "normal",
+      "category": "budget",
+      "stages": ["storyboard_key_animation", "animation", "art_visual", "photography_editing", "sound_delivery"],
+      "tag": "budget_pressure",
+      "priority": 25,
+      "cooldown_weeks": 8,
+      "once_per_project": false,
+      "trigger": { "metric": "funds", "op": "<", "threshold": 600000 },
+      "random_weight": 0,
+      "expires_weeks": 0,
+      "escalation": null,
+      "description": "账面现金已经压到低位，下周的工资与制作支出可能不够。制作组在等一个说法。",
+      "options": [
+        {
+          "id": "accept",
+          "kind": "abandon",
+          "label": "压缩开支硬撑",
+          "cost": 0,
+          "effects": [{ "scope": "instant", "target": "morale", "value": -5 }]
+        },
+        {
+          "id": "advance",
+          "kind": "overtime",
+          "label": "向投资方预支部分制作费",
+          "cost": 90000,
+          "effects": [{ "scope": "instant", "target": "funds", "value": 450000 }]
+        }
+      ]
+    },
+    {
+      "id": "storyboard_spark",
+      "name": "分镜灵光",
+      "polarity": "positive",
+      "tier": "normal",
+      "category": "quality",
+      "stages": ["content_design", "storyboard_key_animation"],
+      "tag": "creative_spark",
+      "priority": 35,
+      "cooldown_weeks": 10,
+      "once_per_project": false,
+      "trigger": { "metric": "stage_quality", "op": ">=", "threshold": 70 },
+      "random_weight": 0,
+      "expires_weeks": 0,
+      "escalation": null,
+      "description": "演出在会议里提了一个更大胆的调度方案，能把这一段的气氛再推高一层，但需要额外的人手配合。",
+      "options": [
+        {
+          "id": "take",
+          "kind": "accept",
+          "label": "采纳方案",
+          "cost": 100000,
+          "effects": [
+            { "scope": "instant", "target": "fatigue", "value": 4 },
+            { "scope": "stage", "target": "quality", "value": 3 }
+          ]
+        },
+        {
+          "id": "skip",
+          "kind": "decline",
+          "label": "按原方案走",
+          "cost": 0,
+          "effects": []
+        }
+      ]
+    },
+    {
+      "id": "station_visit",
+      "name": "电视台探班",
+      "polarity": "positive",
+      "tier": "normal",
+      "category": "budget",
+      "stages": ["storyboard_key_animation", "animation"],
+      "tag": "external_relations",
+      "priority": 40,
+      "cooldown_weeks": 12,
+      "once_per_project": false,
+      "trigger": { "metric": "weeks_in_project", "op": ">=", "threshold": 6 },
+      "random_weight": 25,
+      "expires_weeks": 0,
+      "escalation": null,
+      "description": "电视台的编成部想来现场看看进度。接待要花钱，但对方对成片的兴趣会直接体现在后续的资源上。",
+      "options": [
+        {
+          "id": "host",
+          "kind": "accept",
+          "label": "接待并展示样片",
+          "cost": 60000,
+          "effects": [
+            { "scope": "instant", "target": "funds", "value": 300000 },
+            { "scope": "instant", "target": "morale", "value": 6 }
+          ]
+        },
+        {
+          "id": "decline",
+          "kind": "decline",
+          "label": "礼貌婉拒",
+          "cost": 0,
+          "effects": []
+        }
+      ]
+    },
+    {
+      "id": "director_illness",
+      "name": "作画监督病倒",
+      "polarity": "negative",
+      "tier": "major",
+      "category": "personnel",
+      "stages": ["storyboard_key_animation", "animation"],
+      "tag": "major_director_illness",
+      "priority": 1,
+      "cooldown_weeks": 0,
+      "once_per_project": true,
+      "trigger": { "metric": "max_fatigue", "op": ">=", "threshold": 65 },
+      "random_weight": 0,
+      "expires_weeks": 0,
+      "escalation": null,
+      "description": "作画监督在连续两周通宵后倒下，医生要求至少静养两周。他手上还压着后半个阶段的检查工作。",
+      "options": [
+        {
+          "id": "accept",
+          "kind": "abandon",
+          "label": "让副手顶上",
+          "cost": 0,
+          "effects": [
+            { "scope": "stage", "target": "quality", "value": -5 },
+            { "scope": "project", "target": "quality", "value": -2 }
+          ]
+        },
+        {
+          "id": "overtime",
+          "kind": "overtime",
+          "label": "请退休前辈回来救场",
+          "cost": 300000,
+          "effects": [
+            { "scope": "instant", "target": "fatigue", "value": 8 },
+            { "scope": "stage", "target": "quality", "value": 2 }
+          ]
+        },
+        {
+          "id": "outsource",
+          "kind": "outsource",
+          "label": "把检查工作分包出去",
+          "cost": 500000,
+          "effects": [{ "scope": "project", "target": "quality", "value": -1 }]
+        },
+        {
+          "id": "extend",
+          "kind": "extension",
+          "label": "用掉委员会延期",
+          "cost": 250000,
+          "effects": [{ "scope": "instant", "target": "morale", "value": -4 }]
+        }
+      ]
+    },
+    {
+      "id": "sponsor_boost",
+      "name": "赞助商追加",
+      "polarity": "positive",
+      "tier": "major",
+      "category": "budget",
+      "stages": ["animation", "art_visual", "photography_editing", "sound_delivery"],
+      "tag": "major_sponsor_boost",
+      "priority": 2,
+      "cooldown_weeks": 0,
+      "once_per_project": true,
+      "trigger": { "metric": "weeks_in_project", "op": ">=", "threshold": 10 },
+      "random_weight": 15,
+      "expires_weeks": 0,
+      "escalation": null,
+      "description": "一家做地方联合宣传的赞助商看中了这部作品的题材，愿意追加一笔制作费，条件是在片尾加一行协赞字幕。",
+      "options": [
+        {
+          "id": "take",
+          "kind": "accept",
+          "label": "接受追加",
+          "cost": 0,
+          "effects": [{ "scope": "instant", "target": "funds", "value": 900000 }]
+        },
+        {
+          "id": "decline",
+          "kind": "decline",
+          "label": "不接这笔钱",
+          "cost": 0,
+          "effects": []
+        }
+      ]
+    }
+  ]
+}
