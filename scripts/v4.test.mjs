@@ -841,6 +841,18 @@ test('事件内容：非法卡被拒绝并定位到卡片与字段', () => {
   }])
   assert.ok(noDefault.issues.some((issue) => issue.field === 'options' && issue.message.includes('默认分支')))
 
+  // #121：§14.11 一次升级字段未冻结，非空配置必须拒绝加载，不能静默忽略。
+  const escalation = validate([{
+    ...card,
+    expires_weeks: 2,
+    escalation: { description: '升级', expires_weeks: 1, options: [], timeout_option_id: 'accept' }
+  }])
+  assert.ok(escalation.issues.some((issue) => issue.field === 'escalation' && issue.message.includes('未冻结')))
+  const timeoutOption = validate([{ ...card, timeout_option_id: 'accept' }])
+  assert.ok(timeoutOption.issues.some((issue) => issue.field === 'timeout_option_id'))
+  const nullEscalation = validate([{ ...card, escalation: null }])
+  assert.equal(nullEscalation.ok, true, 'escalation: null 只是占位，不应拒绝')
+
   const empty = ok('validate_event_catalog', { source: 'empty', catalog: { schema_version: 1, cards: [] } })
   assert.equal(empty.ok, false)
   assert.equal(empty.issues[0].field, 'cards')

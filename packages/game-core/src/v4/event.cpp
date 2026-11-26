@@ -114,6 +114,15 @@ bool parse_card(const Json& raw, Checker& checker, std::set<std::string>& ids, E
     const int expires = int_field(raw, "expires_weeks", 0);
     if (expires < 0 || expires > 8) checker.fail(id, "expires_weeks", "expires_weeks 必须在 0..8");
 
+    // #121：§14.11 的一次升级字段尚未在 #13/#53 冻结。允许 null 占位（既有示例目录的写法），
+    // 但任何非空升级配置必须拒绝加载——否则运行时会静默忽略，内容侧误以为升级已生效。
+    for (const char* key : {"escalation", "timeout_option_id", "escalation_note"}) {
+        if (!raw.contains(key)) continue;
+        const auto& value = raw.at(key);
+        if (value.is_null()) continue;
+        checker.fail(id, key, std::string("§14.11 一次升级字段尚未冻结（#13/#53），当前拒绝加载非空 ") + key);
+    }
+
     // trigger
     std::string metric, op;
     int threshold = 0;

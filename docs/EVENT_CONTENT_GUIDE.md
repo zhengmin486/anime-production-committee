@@ -35,7 +35,7 @@
 | `trigger` | 是 | `{metric, op, threshold}` | 见下表 |
 | `random_weight` | 是 | 0–100 | 0 表示只靠表现触发；>0 才进随机池 |
 | `expires_weeks` | 是 | 0–8 | 处理期限；正面机会必须 0 |
-| `escalation` | 是 | `null` 或 `{description, effects}` | `expires_weeks>0` 时必填 |
+| `escalation` | 否 | 仅允许 `null` 占位 | 一次升级载荷尚未冻结（#121 / #13 / #53）；写非空值会被内容校验与运行时同时拒绝 |
 | `options` | 是 | 1–4 项 | 负面必须有 `abandon`；正面必须有 `accept` 和 `decline` |
 
 ### 可用指标

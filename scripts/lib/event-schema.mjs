@@ -28,6 +28,8 @@ const OPS = ['<', '<=', '>', '>=']
 const KINDS = ['accept', 'abandon', 'overtime', 'decline', 'outsource', 'extension']
 const SCOPES = ['instant', 'stage', 'project']
 const TARGETS = ['quality', 'work_done', 'fatigue', 'morale', 'funds']
+// 已提出但未冻结的升级字段（#121 → #13/#53）。允许 null 占位，非空即拒绝加载。
+const UNFROZEN_ESCALATION_KEYS = ['escalation', 'timeout_option_id', 'escalation_note']
 
 const isInt = (value) => Number.isInteger(value)
 const isText = (value) => typeof value === 'string' && value.length > 0
@@ -64,6 +66,13 @@ export function validateCard(card, source) {
   }
   if (!isInt(card.expires_weeks) || card.expires_weeks < 0 || card.expires_weeks > 8) {
     fail('expires_weeks', 'expires_weeks 必须在 0..8')
+  }
+
+  // #121：§14.11 的一次升级字段尚未在 #13/#53 冻结。允许 null 占位（event_catalog.example.json 既有写法），
+  // 但任何非空升级配置必须拒绝加载——否则运行时会静默忽略，内容侧误以为升级已生效。
+  for (const key of UNFROZEN_ESCALATION_KEYS) {
+    if (card[key] === undefined || card[key] === null) continue
+    fail(key, `§14.11 一次升级字段尚未冻结（#13/#53），当前拒绝加载非空 ${key}`)
   }
 
   if (typeof card.trigger !== 'object' || card.trigger === null) fail('trigger', '缺少 trigger 对象')
