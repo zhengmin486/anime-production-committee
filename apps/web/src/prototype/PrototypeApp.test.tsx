@@ -216,22 +216,194 @@ it('四场景以办公室为主入口，导航与数字快捷键共享同一状�
   expect(screen.getByRole('region', { name: '办公室场景' })).toBeVisible()
   expect(within(nav).getByRole('button', { name: /办公室/ })).toHaveAttribute('aria-current', 'page')
   const officeSprites = screen.getByRole('region', { name: '办公室场景' }).querySelectorAll('image.asset-sprite')
-  expect(officeSprites).toHaveLength(6)
-  expect(Array.from(officeSprites, (sprite) => sprite.getAttribute('href'))).toContain('/assets/vendor/pixel-office/COFFEE.png')
+  const officeSources = Array.from(officeSprites, (sprite) => sprite.getAttribute('href'))
+  expect(officeSprites.length).toBeGreaterThanOrEqual(14)
+  expect(officeSources).toEqual(expect.arrayContaining([
+    '/assets/vendor/pixel-office/floor_5.png',
+    '/assets/vendor/pixel-office/PC_FRONT_ON_1.png',
+    '/assets/vendor/pixel-office/PC_FRONT_ON_2.png',
+    '/assets/vendor/pixel-office/PC_FRONT_ON_3.png',
+    '/assets/vendor/pixel-office/WHITEBOARD.png',
+    '/assets/vendor/pixel-office/DOUBLE_BOOKSHELF.png',
+    '/assets/vendor/pixel-office/CLOCK.png',
+    '/assets/vendor/pixel-office/COFFEE.png',
+  ]))
+  const office = screen.getByRole('region', { name: '办公室场景' })
+  expect(office.querySelector('rect[fill="#6d7e76"]')).toBeNull()
+  expect(office.querySelector('path[fill="#8b9a8a"]')).toBeNull()
+  expect(office.querySelector('path[fill="#b79a72"]')).toBeNull()
   await user.click(within(nav).getByRole('button', { name: /工作室/ }))
   expect(screen.getByRole('region', { name: '工作室场景' })).toBeVisible()
   expect(screen.getByRole('region', { name: '公共制作与单集制作是两层' })).toBeVisible()
   const studioSprites = screen.getByRole('region', { name: '工作室场景' }).querySelectorAll('image.asset-sprite')
-  expect(studioSprites).toHaveLength(8)
-  expect(Array.from(studioSprites, (sprite) => sprite.getAttribute('href'))).toContain('/assets/vendor/pixel-adventure/Items/Boxes/Box1/Idle.png')
+  const studioSources = Array.from(studioSprites, (sprite) => sprite.getAttribute('href'))
+  expect(studioSprites.length).toBeGreaterThanOrEqual(14)
+  expect(studioSources).toEqual(expect.arrayContaining([
+    '/assets/vendor/pixel-office/floor_6.png',
+    '/assets/vendor/pixel-office/LARGE_PAINTING.png',
+  ]))
+  expect(studioSources.some((source) => source?.includes('/Boxes/Box'))).toBe(false)
+  expect(studioSources.some((source) => source?.startsWith('/assets/vendor/pixel-office/PC_FRONT_ON_'))).toBe(false)
   await user.keyboard('3')
   expect(screen.getByRole('region', { name: '会议室场景' })).toBeVisible()
+  expect(screen.getByRole('region', { name: '会议室场景' }).querySelector('[data-desk-briefcase], [data-office-wall-briefcase]')).toBeNull()
   expect(screen.getByRole('region', { name: '制作委员会与发行窗口' })).toBeVisible()
   await user.click(within(nav).getByRole('button', { name: /发行与市场/ }))
   expect(screen.getByRole('region', { name: '发行与市场场景' })).toBeVisible()
+  expect(screen.getByRole('region', { name: '发行与市场场景' }).querySelector('[data-desk-briefcase], [data-office-wall-briefcase]')).toBeNull()
   expect(screen.getByRole('region', { name: '下一部作品，从哪里开始？' })).toBeVisible()
+  const marketSources = Array.from(screen.getByRole('region', { name: '发行与市场场景' }).querySelectorAll('image.asset-sprite'), (sprite) => sprite.getAttribute('href'))
+  expect(marketSources).toEqual(expect.arrayContaining([
+    '/assets/vendor/pixel-office/LARGE_PAINTING.png',
+    '/assets/vendor/pixel-office/CACTUS.png',
+    '/assets/vendor/pixel-office/BIN.png',
+  ]))
   await user.keyboard('1')
   expect(screen.getByRole('region', { name: '办公室场景' })).toBeVisible()
+})
+
+it('办公室保持上一版，工作室第二排靠书架墙平移且柜子归位墙角', async () => {
+  const user = userEvent.setup()
+  const verifyRoom = (name: string, deskCount: number, briefcaseCount: number) => {
+    const room = screen.getByRole('region', { name })
+    const desks = Array.from(room.querySelectorAll<SVGGElement>('[data-iso-desk]'))
+    const plants = Array.from(room.querySelectorAll('[data-room-plant]'))
+    const wallObject = room.querySelector('image[href$="WHITEBOARD.png"], image[href$="LARGE_PAINTING.png"]')
+    expect(desks).toHaveLength(deskCount)
+    expect(plants).toHaveLength(2)
+    expect(room.querySelectorAll('[data-desk-briefcase]')).toHaveLength(briefcaseCount)
+    expect(wallObject).not.toBeNull()
+    for (const desk of desks) {
+      const top = desk.querySelector('[data-desk-top]')
+      const legs = Array.from(desk.querySelectorAll('[data-desk-leg]'))
+      const computer = desk.querySelector('[data-desk-computer]')
+      const briefcases = desk.querySelectorAll('[data-desk-briefcase]')
+      const briefcase = briefcases[0]
+      const expectedDeskBriefcases = briefcaseCount === deskCount ? 1 : 0
+      expect(top).not.toBeNull()
+      expect(computer).not.toBeNull()
+      expect(briefcases).toHaveLength(expectedDeskBriefcases)
+      if (briefcase) {
+        expect(briefcase.getAttribute('data-briefcase-anchor')).toBe('left')
+        expect(briefcase.getAttribute('data-briefcase-color')).toBe('brown')
+        expect(briefcase.querySelector('[data-briefcase-shadow]')).not.toBeNull()
+        expect(Array.from(briefcase.querySelectorAll('path[fill]:not([fill="none"])'), (path) => path.getAttribute('fill'))).toEqual(['#76523b', '#5f412f', '#8b6245'])
+        const anchorLeg = desk.querySelector('[data-desk-leg="left"]')
+        expect(anchorLeg!.compareDocumentPosition(briefcase) & Node.DOCUMENT_POSITION_FOLLOWING).toBe(Node.DOCUMENT_POSITION_FOLLOWING)
+        expect(top!.compareDocumentPosition(briefcase) & Node.DOCUMENT_POSITION_FOLLOWING).toBe(Node.DOCUMENT_POSITION_FOLLOWING)
+        expect(briefcase.compareDocumentPosition(computer!) & Node.DOCUMENT_POSITION_FOLLOWING).toBe(Node.DOCUMENT_POSITION_FOLLOWING)
+      }
+      expect(['translate(5.5 -17.5)', 'translate(6 8)', 'translate(0 0)', 'translate(1.5 10)']).toContain(computer?.getAttribute('transform'))
+      const computerOffset = computer?.getAttribute('transform')?.match(/-?\d+(?:\.\d+)?/g)?.map(Number) ?? []
+      const footprint = computer?.querySelector('[data-desk-computer-footprint]')?.getAttribute('d')?.match(/-?\d+(?:\.\d+)?/g)?.map(Number) ?? []
+      expect(computerOffset).toHaveLength(2)
+      expect(footprint.length).toBeGreaterThanOrEqual(8)
+      for (let index = 0; index < footprint.length; index += 2) {
+        const desktopDistance = Math.abs(footprint[index] + computerOffset[0]) / 89 + Math.abs(footprint[index + 1] + computerOffset[1]) / 43
+        expect(desktopDistance).toBeLessThanOrEqual(1)
+      }
+      expect(legs.map((leg) => leg.getAttribute('data-desk-leg'))).toEqual(['back', 'left', 'right', 'front'])
+      expect(legs.map((leg) => leg.getAttribute('height'))).toEqual(['56', '56', '56', '56'])
+      expect(legs.map((leg) => leg.getAttribute('y'))).toEqual(['-43', '0', '0', '43'])
+      for (const leg of legs) {
+        expect(leg.compareDocumentPosition(top!) & Node.DOCUMENT_POSITION_FOLLOWING).toBe(Node.DOCUMENT_POSITION_FOLLOWING)
+      }
+    }
+    for (const plant of plants) {
+      expect(wallObject!.compareDocumentPosition(plant) & Node.DOCUMENT_POSITION_FOLLOWING).toBe(Node.DOCUMENT_POSITION_FOLLOWING)
+      for (const desk of desks) {
+        expect(plant.compareDocumentPosition(desk) & Node.DOCUMENT_POSITION_FOLLOWING).toBe(Node.DOCUMENT_POSITION_FOLLOWING)
+      }
+    }
+  }
+
+  verifyRoom('办公室场景', 4, 0)
+  const office = screen.getByRole('region', { name: '办公室场景' })
+  const officeDesks = Array.from(office.querySelectorAll('[data-iso-desk]'))
+  expect(officeDesks.map((desk) => desk.getAttribute('data-desk-id'))).toEqual(expect.arrayContaining(['office-desk-0', 'office-desk-1', 'office-desk-2', 'office-desk-3']))
+  for (const desk of officeDesks) {
+    const computer = desk.querySelector('[data-desk-computer]')
+    expect(computer?.getAttribute('transform')).toBe('translate(1.5 10)')
+    expect(computer?.querySelector('image[href*="PC_FRONT_ON_"]')).not.toBeNull()
+  }
+  const officeBriefcase = office.querySelector('[data-office-wall-briefcase]')
+  expect(officeBriefcase?.getAttribute('data-wall-side')).toBe('bookshelf')
+  expect(officeBriefcase?.getAttribute('data-briefcase-color')).toBe('brown')
+  for (const desk of officeDesks) {
+    expect(desk.querySelectorAll('[data-desk-briefcase]')).toHaveLength(0)
+  }
+  expect(officeBriefcase?.querySelector('[data-briefcase-shadow]')?.getAttribute('cy')).toBe('9')
+  expect(officeBriefcase?.querySelector('[data-briefcase-contact-shadow]')).not.toBeNull()
+  const briefcasePosition = officeBriefcase?.getAttribute('transform')?.match(/-?\d+(?:\.\d+)?/g)?.map(Number) ?? []
+  expect(briefcasePosition[0]).toBeCloseTo(1083.6)
+  expect(briefcasePosition[1]).toBeCloseTo(299.75)
+  const bookshelf = office.querySelector('image[href$="DOUBLE_BOOKSHELF.png"]')
+  expect(bookshelf).not.toBeNull()
+  expect(bookshelf!.compareDocumentPosition(officeBriefcase!) & Node.DOCUMENT_POSITION_FOLLOWING).toBe(Node.DOCUMENT_POSITION_FOLLOWING)
+  expect(office.querySelector('[data-room-floor]')?.getAttribute('d')).toBe('M600 105L1120 310 600 525 80 310z')
+  expect(office.querySelector('[data-room-wall-seam]')?.getAttribute('d')).toBe('M80 310L600 105 1120 310')
+  const leftWall = office.querySelector('[data-office-wall="left"]')
+  const rightWall = office.querySelector('[data-office-wall="right"]')
+  expect(leftWall?.getAttribute('transform')).toBe('translate(80 310) skewY(-21.5)')
+  expect(rightWall?.getAttribute('transform')).toBe('translate(600 105) skewY(21.5)')
+  expect(leftWall?.querySelector('rect[fill="none"][stroke="#ead9b8"]')?.getAttribute('height')).toBe('110')
+  expect(rightWall?.querySelector('rect[fill="none"][stroke="#ead9b8"]')?.getAttribute('height')).toBe('96')
+  expect(office.querySelector('[data-office-baseboard="left"]')?.getAttribute('d')).toBe('M80 300L600 95 600 105 80 310z')
+  expect(office.querySelector('[data-office-baseboard="right"]')?.getAttribute('d')).toBe('M600 95L1120 300 1120 310 600 105z')
+  expect(office.querySelectorAll('[data-office-baseboard]')).toHaveLength(2)
+  await user.click(within(screen.getByRole('navigation', { name: '场景切换' })).getByRole('button', { name: /工作室/ }))
+  verifyRoom('工作室场景', 6, 6)
+  const studio = screen.getByRole('region', { name: '工作室场景' })
+  const studioDesks = Array.from(studio.querySelectorAll<SVGGElement>('[data-iso-desk]'))
+  const studioBriefcase = studio.querySelector('[data-desk-briefcase]')
+  for (const desk of studioDesks) {
+    const computer = desk.querySelector('[data-desk-computer]')
+    expect(computer?.getAttribute('transform')).toBe('translate(0 0)')
+    expect(computer?.hasAttribute('data-white-monitor')).toBe(true)
+    expect(computer?.querySelector('[data-white-computer]')).not.toBeNull()
+    expect(computer?.querySelector('[data-white-computer-stand]')).not.toBeNull()
+    expect(computer?.querySelector('image[href*="PC_FRONT_ON_"]')).toBeNull()
+  }
+  expect(studioBriefcase?.getAttribute('data-briefcase-anchor')).toBe('left')
+  expect(studioBriefcase?.querySelector('[data-briefcase-shadow]')?.getAttribute('cy')).toBe('53')
+  expect(studio.querySelector('[data-desk-id="studio-0"] [data-desk-briefcase]')).not.toBeNull()
+  const secondRowTransforms = ['studio-0', 'studio-1', 'studio-2'].map((id) => {
+    const transform = studio.querySelector(`[data-desk-id="${id}"]`)?.getAttribute('transform')
+    const values = transform?.match(/-?\d+(?:\.\d+)?/g)?.map(Number)
+    return values ?? []
+  })
+  expect(secondRowTransforms).toHaveLength(3)
+  for (const [index, expected] of [[574, 164.45], [730, 225.95], [886, 287.45]].entries()) {
+    expect(secondRowTransforms[index][0]).toBeCloseTo(expected[0])
+    expect(secondRowTransforms[index][1]).toBeCloseTo(expected[1])
+  }
+  const cabinet = studio.querySelector('[data-studio-cabinet]')
+  expect(cabinet?.getAttribute('data-wall-corner')).toBe('front-left')
+  const cabinetPosition = cabinet?.getAttribute('transform')?.match(/-?\d+(?:\.\d+)?/g)?.map(Number) ?? []
+  expect(cabinetPosition[0]).toBeCloseTo(80)
+  expect(cabinetPosition[1]).toBeCloseTo(184)
+  expect(cabinet?.getAttribute('transform')).toContain('skewY(-21.5)')
+  expect(studio.querySelectorAll('[data-studio-cabinet]')).toHaveLength(1)
+  expect(studio.querySelectorAll('[data-studio-cabinet-top]')).toHaveLength(1)
+  expect(studio.querySelectorAll('[data-studio-cabinet-side]')).toHaveLength(1)
+  expect(studio.querySelectorAll('[data-studio-cabinet-front]')).toHaveLength(1)
+  expect(studio.querySelector('[data-studio-wall-painting="0"]')?.getAttribute('transform')).toContain('scale(0.65 1)')
+  expect(studio.querySelector('[data-studio-wall-painting="1"]')?.getAttribute('transform')).not.toContain('scale(0.65 1)')
+  const frontRowTransforms = ['studio-3', 'studio-4', 'studio-5'].map((id) => {
+    const transform = studio.querySelector(`[data-desk-id="${id}"]`)?.getAttribute('transform')
+    const values = transform?.match(/-?\d+(?:\.\d+)?/g)?.map(Number)
+    return values ?? []
+  })
+  expect(frontRowTransforms).toHaveLength(3)
+  for (const [index, expected] of [[319.2, 264.9], [475.2, 326.4], [631.2, 387.9]].entries()) {
+    expect(frontRowTransforms[index][0]).toBeCloseTo(expected[0])
+    expect(frontRowTransforms[index][1]).toBeCloseTo(expected[1])
+  }
+  expect(studio.querySelector('path[fill="#c9a474"]')).toBeNull()
+  expect(studio.querySelectorAll('[data-desk-chair]')).toHaveLength(0)
+  for (const desk of studioDesks) {
+    expect(desk.querySelector('[data-desk-chair]')).toBeNull()
+  }
 })
 
 it('会议室地砖收敛到单一消失点，加宽桌体位于座椅与人物之上', async () => {
@@ -239,13 +411,22 @@ it('会议室地砖收敛到单一消失点，加宽桌体位于座椅与人物�
   await user.click(screen.getByRole('button', { name: /会议室/ }))
   const room = screen.getByRole('img', { name: /长会议室/ })
   const floor = room.querySelector('[data-meeting-floor]')
+  const floorTexture = room.querySelector('[data-meeting-floor-texture]')
   const seams = room.querySelector('[data-meeting-floor-seams]')
   const table = room.querySelector('[data-meeting-table]')
 
-  expect(floor?.getAttribute('d')).toBe('M425.64 228H774.36L1200 560H0z')
-  expect(room.querySelector('path[stroke="#92734f"]')?.getAttribute('d')).toBe('M425.64 228L0 560M774.36 228L1200 560')
+  expect(floor?.getAttribute('d')).toBe('M251.28 228H948.72L1800 560H-600z')
+  expect(floorTexture?.getAttribute('d')).toBe(floor?.getAttribute('d'))
+  expect(floorTexture?.getAttribute('fill')).toBe('url(#meeting-floor-texture)')
+  expect(room.getAttribute('aria-label')).toContain('无玻璃幕墙')
+  expect(room.querySelector('image[href="/assets/vendor/pixel-office/WHITEBOARD.png"]')).not.toBeNull()
+  expect(room.querySelector('[data-meeting-display]')?.getAttribute('transform')).toBe('translate(600 125.5) scale(1.875 1.5) translate(-600 -125.5)')
+  expect(room.querySelector('[data-meeting-display-content]')?.getAttribute('width')).toBe('200')
+  expect(room.querySelector('[data-meeting-display-content]')?.getAttribute('height')).toBe('91')
+  expect(room.querySelector('image[href="/assets/vendor/pixel-office/CLOCK.png"]')?.getAttribute('x')).toBe('850')
+  expect(room.querySelector('path[stroke="#92734f"]')?.getAttribute('d')).toBe('M251.28 228L-600 560M948.72 228L1800 560')
   expect(seams?.getAttribute('clip-path')).toBe('url(#meeting-floor)')
-  expect(seams?.querySelector('path')?.getAttribute('d')?.match(/M600 92L/g)).toHaveLength(13)
+  expect(seams?.querySelector('path')?.getAttribute('d')?.match(/M600 92L/g)).toHaveLength(21)
   expect(seams?.querySelectorAll('path')).toHaveLength(7)
   expect(room.querySelector('path[stroke="#657b73"]')).toBeNull()
   expect(table?.querySelector('path')?.getAttribute('d')).toBe('M240 520H960V534H240z')
