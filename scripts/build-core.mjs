@@ -1,4 +1,4 @@
-import { existsSync, readdirSync } from 'node:fs';
+import { existsSync, readdirSync, statSync } from 'node:fs';
 import { delimiter, dirname, extname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
@@ -32,7 +32,8 @@ function which(name) {
   for (const directory of directories) {
     for (const extension of extensions) {
       const candidate = directory ? join(directory.replace(/^"|"$/g, ''), name + extension) : name + extension;
-      if (existsSync(candidate)) return resolve(candidate);
+      // emsdk 的 PATH 里存在名为 cmake 的目录；只接受普通文件，避免把目录当可执行文件。
+      if (existsSync(candidate) && statSync(candidate).isFile()) return resolve(candidate);
     }
   }
   return undefined;

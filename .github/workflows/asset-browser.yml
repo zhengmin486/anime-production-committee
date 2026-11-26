@@ -50,6 +50,8 @@ jobs:
           source "$HOME/emsdk/emsdk_env.sh"
           echo "$PATH" >> "$GITHUB_PATH"
           em++ --version
+          # build-core.mjs pins the expected emcc version; use the version actually installed here.
+          echo "EMCC_VERSION=$(emcc --version | head -n1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -n1)" >> "$GITHUB_ENV"
 
       - name: Install Chromium for playwright-core
         run: npx --yes playwright@1.65.1 install --with-deps chromium
