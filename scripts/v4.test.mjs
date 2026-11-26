@@ -599,6 +599,20 @@ test('输入边界：缺必填字段返回 INVALID_INPUT，不用默认值掩盖
   assert.equal(call('assign_staff', { state: missingTotal, staff_id: 'staff_dir', work_id: null }).error?.code, 'INVALID_INPUT')
 })
 
+test('员工 fatigue / morale 缺失时拒绝输入且不改变原状态', () => {
+  const state = setupTiny()
+  const before = ok('hash_state', { state }).hash
+  for (const field of ['fatigue', 'morale']) {
+    const bad = JSON.parse(JSON.stringify(state))
+    delete bad.staff[0][field]
+    for (const command of ['assign_staff', 'advance_week', 'hash_state']) {
+      const result = call(command, { state: bad, staff_id: 'staff_dir', work_id: null })
+      assert.equal(result.error?.code, 'INVALID_INPUT', `缺 staff.${field} 时 ${command} 应拒绝`)
+    }
+    assert.equal(ok('hash_state', { state }).hash, before, `缺 staff.${field} 不得改变原状态`)
+  }
+})
+
 test('契约名适配：initialize_game / set_work_plan 与内部入口等价', () => {
   const internal = ok('initialize', { seed: 42 }).state
   const contract = ok('initialize_game', { seed: 42 }).state
