@@ -262,6 +262,53 @@ it('四场景以办公室为主入口，导航与数字快捷键共享同一状�
   expect(screen.getByRole('region', { name: '办公室场景' })).toBeVisible()
 })
 
+it('场景热点先打开情境卡，再进入作品详情', async () => {
+  const user = userEvent.setup()
+  const hotspot = screen.getByRole('button', { name: /作品看板/ })
+  await user.click(hotspot)
+  expect(hotspot).toHaveAttribute('aria-pressed', 'true')
+  const context = screen.getByRole('region', { name: '作品看板情境信息' })
+  expect(context).toHaveTextContent('雾港信使 II')
+  expect(context).toHaveTextContent('完成度')
+  expect(context).toHaveTextContent('5 / 12 集')
+  await user.click(within(context).getByRole('button', { name: '查看作品详情' }))
+  expect(screen.getByRole('region', { name: '工作室场景' })).toBeVisible()
+  expect(screen.queryByRole('region', { name: '作品看板情境信息' })).not.toBeInTheDocument()
+})
+
+it('情境卡支持 Esc 与场景快捷键关闭', async () => {
+  const user = userEvent.setup()
+  const people = screen.getByRole('button', { name: /人员分配/ })
+  await user.click(people)
+  expect(screen.getByRole('region', { name: '人员分配情境信息' })).toBeVisible()
+  await user.keyboard('{Escape}')
+  expect(screen.queryByRole('region', { name: '人员分配情境信息' })).not.toBeInTheDocument()
+  expect(people).toHaveAttribute('aria-pressed', 'false')
+  await user.click(screen.getByRole('button', { name: /公司账本/ }))
+  expect(screen.getByRole('region', { name: '公司账本情境信息' })).toBeVisible()
+  await user.keyboard('4')
+  expect(screen.getByRole('region', { name: '发行与市场场景' })).toBeVisible()
+  expect(screen.queryByRole('region', { name: '公司账本情境信息' })).not.toBeInTheDocument()
+})
+
+it('工作室情境卡跟随当前作品与周快照更新', async () => {
+  const user = userEvent.setup()
+  await user.click(within(screen.getByRole('navigation', { name: '场景切换' })).getByRole('button', { name: /工作室/ }))
+  await user.click(screen.getByRole('button', { name: /夜行电车/ }))
+  await user.click(screen.getByRole('button', { name: /当前作品/ }))
+  const projectContext = screen.getByRole('region', { name: '当前作品情境信息' })
+  expect(projectContext).toHaveTextContent('夜行电车')
+  expect(projectContext).toHaveTextContent('第 1 集')
+  expect(screen.getByText('夜行电车', { selector: '.scene-summary span' })).toBeVisible()
+  await user.click(within(projectContext).getByRole('button', { name: '关闭情境信息' }))
+  await user.click(screen.getByRole('button', { name: /本周回执/ }))
+  const receiptContext = screen.getByRole('region', { name: '本周回执情境信息' })
+  expect(receiptContext).toHaveTextContent('《小满》只差完成母版')
+  await user.click(screen.getByRole('button', { name: /W16/ }))
+  expect(receiptContext).toHaveTextContent('限时资金危机')
+  expect(receiptContext).toHaveTextContent('-¥278,000')
+})
+
 it('办公室保持上一版，工作室第二排靠书架墙平移且柜子归位墙角', async () => {
   const user = userEvent.setup()
   const verifyRoom = (name: string, deskCount: number, briefcaseCount: number) => {
@@ -469,6 +516,9 @@ it('全局事务中心可切换四种经营窗口，不改变样本周数据', a
 it('会议室入口保留 M4 功能边界，事件可直接跳入完整确认面板', async () => {
   const user = userEvent.setup()
   await user.click(screen.getByRole('button', { name: /处理异常事件/ }))
+  const eventContext = screen.getByRole('region', { name: '处理异常事件情境信息' })
+  expect(eventContext).toHaveTextContent('第 7 集原画返工：夜戏构图偏离演出构想')
+  await user.click(within(eventContext).getByRole('button', { name: '前往会议室' }))
   expect(screen.getByRole('region', { name: '第 7 集原画返工：夜戏构图偏离演出构想' })).toBeVisible()
   expect(screen.getByText('M4 信息结构预览，不开放真实投资或渠道命令。', { exact: false })).toBeVisible()
   await user.click(screen.getByRole('button', { name: '进入事件确认' }))

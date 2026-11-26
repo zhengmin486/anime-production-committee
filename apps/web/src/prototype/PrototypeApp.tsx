@@ -22,6 +22,7 @@ export default function PrototypeApp() {
   const [week, setWeek] = useState(data.receipts[0].week)
   const [weeklyOpen, setWeeklyOpen] = useState(false)
   const [centerOpen, setCenterOpen] = useState(false)
+  const [selectedHotspotId, setSelectedHotspotId] = useState<string | null>(null)
   const [resolvedEvents, setResolvedEvents] = useState<Set<string>>(() => new Set())
   const previousScene = useRef<Scene>('office')
   const pendingScroll = useRef(0)
@@ -46,7 +47,7 @@ export default function PrototypeApp() {
         event.preventDefault()
         changeScene(scenes[index])
       }
-      if (event.key === 'Escape') { setWeeklyOpen(false); setCenterOpen(false) }
+      if (event.key === 'Escape') { setWeeklyOpen(false); setCenterOpen(false); setSelectedHotspotId(null) }
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
@@ -71,6 +72,7 @@ export default function PrototypeApp() {
     scrollPositions.current[scene] = window.scrollY
     setScene(next)
     setCenterOpen(false)
+    setSelectedHotspotId(null)
   }
 
   const openProject = (id: string) => {
@@ -105,8 +107,8 @@ export default function PrototypeApp() {
 
     <div className="prototype-stage-wrap">
       {scene === 'studio' && <div className="proto-switch studio-switch" aria-label="作品切换">{data.projects.map((item) => <button key={item.id} className={`switch-chip${item.id === project.id ? ' is-active' : ''}`} onClick={() => setProjectId(item.id)}>{item.title}<small>{scaleNames[item.scale]}</small></button>)}</div>}
-      <SceneStage scene={scene} data={data} receipt={activeReceipt} onNavigate={changeScene} onOpenProject={openProject} onOpenWeekly={openWeekly} onSelectWeek={selectWeek} />
-      <SceneSummary scene={scene} data={data} receipt={activeReceipt} />
+      <SceneStage scene={scene} data={data} project={project} receipt={activeReceipt} selectedHotspotId={selectedHotspotId} onSelectHotspot={setSelectedHotspotId} onNavigate={changeScene} onOpenProject={openProject} onOpenWeekly={openWeekly} onSelectWeek={selectWeek} />
+      <SceneSummary scene={scene} data={data} project={project} receipt={activeReceipt} />
     </div>
 
     <main className="scene-content">

@@ -379,6 +379,53 @@ test('原型事件可确认并回显样本结果，切换周次不写入状态',
   } finally { await context.close() }
 })
 
+test('原型场景热点先展示情境卡，再执行动作并支持 Esc 关闭', async () => {
+  const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } })
+  try {
+    const page = await context.newPage()
+    const errors = []
+    page.on('pageerror', (error) => errors.push(error.message))
+    page.on('console', (message) => { if (message.type() === 'error') errors.push(message.text()) })
+    await page.goto(`${baseUrl}/index.html?view=prototype`)
+    const hotspot = page.getByRole('button', { name: /作品看板/ })
+    await hotspot.click()
+    assert.equal(await hotspot.getAttribute('aria-pressed'), 'true')
+    const contextCard = page.getByRole('region', { name: '作品看板情境信息' })
+    assert.match(await contextCard.textContent(), /雾港信使 II/)
+    assert.match(await contextCard.textContent(), /5 \/ 12 集/)
+    await page.screenshot({ path: resolve(screenshots, 'prototype-context-desktop.png'), fullPage: true, animations: 'disabled' })
+    await contextCard.getByRole('button', { name: '查看作品详情' }).click()
+    await page.getByRole('region', { name: '工作室场景' }).waitFor()
+    assert.equal(await page.getByRole('region', { name: '作品看板情境信息' }).count(), 0)
+    await page.getByRole('button', { name: /当前作品/ }).click()
+    await page.keyboard.press('Escape')
+    assert.equal(await page.getByRole('region', { name: '当前作品情境信息' }).count(), 0)
+    assert.deepEqual(errors, [])
+  } finally { await context.close() }
+})
+
+for (const width of [375, 768]) {
+  test(`原型情境卡在 ${width}px 可操作且无横向溢出`, async () => {
+    const context = await browser.newContext({ viewport: { width, height: 1000 } })
+    try {
+      const page = await context.newPage()
+      await page.goto(`${baseUrl}/index.html?view=prototype`)
+      await page.getByRole('button', { name: /作品看板/ }).click()
+      const contextCard = page.getByRole('region', { name: '作品看板情境信息' })
+      await contextCard.waitFor()
+      assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true)
+      await page.screenshot({ path: resolve(screenshots, `prototype-context-${width}.png`), fullPage: true, animations: 'disabled' })
+      await contextCard.getByRole('button', { name: '关闭情境信息' }).click()
+      assert.equal(await page.getByRole('region', { name: '作品看板情境信息' }).count(), 0)
+      await page.getByRole('button', { name: 'W16 限时资金危机' }).click()
+      await page.getByRole('button', { name: '公司账本', exact: true }).click()
+      const financeCard = page.getByRole('region', { name: '公司账本情境信息' })
+      assert.match(await financeCard.textContent(), /当前现金¥96,000/)
+      assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true)
+    } finally { await context.close() }
+  })
+}
+
 test('原型关闭中禁止推进，仅预览达标结清与总结', async () => {
   const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } })
   try {
