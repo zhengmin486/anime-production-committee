@@ -22,6 +22,7 @@ constexpr int kSupervisorSwitchLoss = 100;   // 监督换项目：团队级扣 1
 constexpr int kQualityApproach = 300;        // 质量评级向本周样本靠拢 30%
 constexpr int kCarryOverPermille = 600;      // 质量传递上限：依赖质量的 60%
 constexpr int kCarryOverOffset = 40;         // 质量传递上限：+40
+constexpr int kQualityMax = 105;             // v0.5：质量分上限（展示分仍截顶 100）
 
 int clamp(int value, int low, int high) { return std::max(low, std::min(high, value)); }
 
@@ -138,7 +139,7 @@ int points_from_capacity(int capacity_permille_value) {
 
 namespace {
 
-// 质量样本：能力（0..100）+ 专业适配 ±4 + 独立随机 ±5。
+// 质量样本：能力（0..100）+ 专业适配 ±4 + 独立随机 ±5，v0.5 截顶到 105。
 // 与投入点数无关——同一份工作量，不同的人、不同的周得到不同质量。
 int quality_sample(const Staff& staff, const std::string& ability, std::uint32_t seed, int week,
                    std::uint32_t purpose, int dimension) {
@@ -146,7 +147,7 @@ int quality_sample(const Staff& staff, const std::string& ability, std::uint32_t
     const int fit = staff_specialty(staff) == ability ? 4 : -4;
     const std::uint32_t jitter =
         draw_below(seed, week, Stream::quality, purpose, static_cast<std::uint32_t>(dimension + 1), 11);
-    return clamp(base + fit + static_cast<int>(jitter) - 5, 0, 100);
+    return clamp(base + fit + static_cast<int>(jitter) - 5, 0, kQualityMax);
 }
 
 // 按权重抽取维度：700/300 真的按 7:3，不是"在非零维度里等概率"。
@@ -307,7 +308,7 @@ ProductionResult apply_production(WorkItem& item, const Staff& staff, int points
     int after = before <= 0
                     ? sample
                     : before + (sample - before) * kQualityApproach / 1000;
-    after = clamp(after, 0, std::min(caps[static_cast<std::size_t>(dim)], 100));
+    after = clamp(after, 0, std::min(caps[static_cast<std::size_t>(dim)], kQualityMax));
     item.quality.dims[static_cast<std::size_t>(dim)] = after;
     result.quality_by_dim[static_cast<std::size_t>(dim)] = after - before;
     result.quality_gain = after - before;
@@ -316,13 +317,13 @@ ProductionResult apply_production(WorkItem& item, const Staff& staff, int points
 
 std::array<int, kDimensionCount> quality_caps(const Project& work, const WorkItem& item) {
     std::array<int, kDimensionCount> caps;
-    caps.fill(100);
+    caps.fill(kQualityMax);
     for (const auto& dep_id : item.deps) {
         const WorkItem* dep = find_item(work, dep_id);
         if (dep == nullptr || !dep->delivered()) continue;
         for (int i = 0; i < kDimensionCount; ++i) {
             const int cap = dep->quality.dims[static_cast<std::size_t>(i)] * kCarryOverPermille / 1000 + kCarryOverOffset;
-            caps[static_cast<std::size_t>(i)] = std::min(caps[static_cast<std::size_t>(i)], std::min(cap, 100));
+            caps[static_cast<std::size_t>(i)] = std::min(caps[static_cast<std::size_t>(i)], std::min(cap, kQualityMax));
         }
     }
     return caps;

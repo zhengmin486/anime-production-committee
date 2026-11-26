@@ -23,6 +23,7 @@ constexpr int kMoraleRestGain = 1;
 constexpr int kFatigueWorkGain = 8;
 constexpr int kFatigueRestLoss = 4;
 constexpr int kExperienceThreshold = 20;
+constexpr int kQualityFactorMax = 1040;  // v0.5：质量均值 105 → 1040‰
 
 // DEC-COMM-001/002、DEC-BD-001：六个常规商业窗口。
 // BD/DVD 公司所得固定为毛收入 50%；其余窗口按委员会成员渠道或外部代理开放。
@@ -1018,7 +1019,7 @@ int reputation_factor(std::int64_t reputation) {
     return std::clamp(800 + static_cast<int>(reputation) * 2, 800, 1400);
 }
 
-int quality_factor(int mean) { return std::clamp(200 + mean * 8, 200, 1000); }
+int quality_factor(int mean) { return std::clamp(200 + mean * 8, 200, kQualityFactorMax); }
 
 std::string rating_of(int mean) {
     // M2/V3.5 统一口径：85/75/65/50。
