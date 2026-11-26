@@ -2,8 +2,9 @@
 
 > 状态：**当前主线可执行的契约审计基线**。M0、DECISION_LOG 与领域架构是规范权威；本文展开字段、实现状态和版本边界，不自行新增或改写规则。
 > #53 交付项对应：接口矩阵 = §3/§4/§5；字段所有权与读写权限表 = §10；冲突与缺口清单 = §7/§8/§11.1；端到端 fixture 与验证记录 = §9/§11.2；逐条验收自查 = §11.3。
+> 关联工程契约：#51 Finance 三层金额语义与记账责任 = §3.6/§3.7；#52 多项目编排与隔离 = §10.9；#49 存档信封与字段覆盖 = §3.13；四议题与 M2/M3/M4 的路线索引见 [DEVELOPMENT_ROADMAP.md](DEVELOPMENT_ROADMAP.md)。
 > 上位文档：[M0_CONTRACT_FREEZE.md](M0_CONTRACT_FREEZE.md)（规则与不变式权威）、[DECISION_LOG.md](DECISION_LOG.md)（玩法权威）、[DOMAIN_ARCHITECTURE.md](DOMAIN_ARCHITECTURE.md) §7（字段语义权威）。
-> 证据基线：main `d56bc95`，包含 PR #97 合并 `4870e6193ff36032f3a38a19e6ff2a0feada0e5a`。实测结论来自真实 WASM 构建与 `scripts/audit-v4-contract.mjs`，不是从旧 PR 推断。
+> 文档核对基线：main `a7a3488`（含 PR #95 合并 `49f7d49`）；机器形状基线仍为 `docs/v4-contract-shape.json` 登记的 `d56bc95`。实测结论来自真实 WASM 构建与 `scripts/audit-v4-contract.mjs`，不是从旧 PR 推断。
 
 ---
 
@@ -74,6 +75,8 @@ GameState {
 | `suppliers` `contracts` `partners` `committees` `market` `archive` | Json | 否 | 缺失取默认（数组 `[]`、对象 `{}`），内容零校验 | `待实现`（见 §3.10 与 §3.11） |
 
 `recruitment` 是 M0 §14.13 已冻结的目标根字段，但当前 runtime 尚未实现。审计同时检查文档包含该字段、机器基线将其登记为 `future_contract`，并禁止它悄悄进入当前 `paths`。
+
+`SaveRecord` 位于 `GameState` 之外，是 #49 的存储层信封：`format="anime-production-committee.save"`、`version=4`、`savedAt`、`rules_version`、完整 `state`。信封目标契约已定义，但 v4 存储层尚未实现，详见 §3.13 与 M0 §8。
 
 **不存在的字段**（v3 遗产，禁止复活）与派生值不入存档清单，见 M0 §2。`project_fee` 属于 `historical_fields`，不是 V4 reserved field。
 
@@ -166,6 +169,8 @@ GameState {
 
 **版本边界**：`loans/solvency` 是后续更新预留，不是废弃设计，也不是非法扩展。当前不产生 `Loan` 实体，不启用借款、利息、还款、`arrange_financing`、危机周推进或危机结算。`financing_in/loan_repayment/loan_interest` 属于未来机制候选，不是当前冻结账本类目。未来恢复融资必须作为独立规则变更重新评审。
 
+**#51 三层金额语义**：合同约定金额由 Offer / Project / Committee 等业务事实持有；应收确认是尚未到约定结算时点的义务；实际现金到账只由 Finance 流水持有。首版不实现跨周分期应收，因此不新增 `Finance.receivables` 或应收余额字段；到账时应收确认与现金流水在同一命令内原子完成，应收不会增加 `balance`。未来跨周应收、退款/冲销或分期到账必须先走 M0 §13，不得把合同金额直接写入现金。
+
 ### 3.7 `LedgerEntry.id` 与 `category` 约定
 
 | 来源 | id 模式 | category | work_id | memo |
@@ -180,6 +185,8 @@ GameState {
 - 路径段用单数 `event`，category 用复数 `events`，登记 D-08。
 - DA §7.5 冻结 14 个当前 category；当前 v4 已产出 `salary/operations/production/events/contract_received/investment_paid/commercial_share_received/success_reward_received/penalty/distribution`。BD 公司所得与委员会净池份额均记 `commercial_share_received`，靠 `memo` 区分。
 - 定金锁定与签约抵扣必须继续使用 `investment_paid` 与 `contract_received` 两笔立项账，`deposit_paid` 只是 Market 对账快照，不是第二本账。
+
+**#51 记账责任**：Market/Project/Staff/Vendor/Event/Company 只提交财务请求，Finance 是唯一写入 `balance/entries` 的域。请求携带来源领域、稳定业务事实键、周、`work_id|null`、category、带符号金额、对手方与 memo；同一业务事实只能形成一条唯一 `entry.id`。公开命令仍非幂等，重复提交按新业务动作校验；防重复记账约束作用于财务请求与流水，不新增传输层 `request_id`。完整责任矩阵见 [DOMAIN_ARCHITECTURE.md](DOMAIN_ARCHITECTURE.md) §5.7。
 
 ### 3.8 `EventState`
 
@@ -238,6 +245,30 @@ Offer 新增：expires_week, locked_until, lock_used, deposit_paid, offer_source
 - 普通企划定金 5%、IP 上门企划 10%，按 Offer 生成时固定的 `deposit_basis` 计算；`offer_source_type` 与 `deposit_basis` 必须随 Offer 快照保存，后续预算调整不追溯改变定金。
 - 正式签约时定金 100% 抵扣；Finance 保留 `investment_paid/contract_received` 两笔账，不重复记录定金。
 -  pool 候选不是公司员工，不参与周结算、不计薪；hire 解包后 `expires_week/origin` 不得残留在 Staff。
+
+### 3.13 `SaveRecord` 信封与持久化覆盖（#49）
+
+```text
+SaveRecord {
+  format: "anime-production-committee.save"
+  version: 4
+  savedAt: ISO8601
+  rules_version: string
+  state: GameState
+}
+```
+
+| 字段 | 必填 | 加载语义 |
+| --- | --- | --- |
+| `format` | 是 | 固定值；缺失/错误 → `SAVE_CORRUPT` |
+| `version` | 是 | 当前只接受 4；其他已知旧版或未来版 → `SAVE_VERSION_UNSUPPORTED` |
+| `savedAt` | 是 | 有效 ISO8601；仅展示，不参与规则 |
+| `rules_version` | 是 | 非空；不一致允许加载并提示规则已更新 |
+| `state` | 是 | 完整 GameState；`state.version` 必须为 4，结构/不变式失败 → `SAVE_CORRUPT` |
+
+字段级覆盖以 [DOMAIN_ARCHITECTURE.md](DOMAIN_ARCHITECTURE.md) §12.3 为准：公司、名册、招聘池、活动项目、供应商/合同、伙伴/委员会、市场、事件、Finance、Archive 与 `seed` 全部持久化；读模型、预览、周回执与 UI 草稿不入档。坐标式随机不存计数器，但保底、冷却、锁定等业务状态必须保存。
+
+**实现状态**：当前只有 v4 `GameState` JSON 往返测试，没有 v4 SaveRecord 存储层。不得把 JSON round-trip 写成手动存读档已完成；round-trip、读档不推进、随机不漂移、损坏/不兼容拒绝仍由 #49 验收。
 
 ---
 
@@ -514,6 +545,8 @@ npm run test:v4 && npm run audit:v4
 | `balance/entries` | 立项、周结算、事件与交付/结清，经账本提交器 | 同一写入器族 | 收入与支出均已实现；INV-16/INV-25 |
 | `loans/solvency` | initialize 默认值；运行时只校验 | reserved，不授权写入 | 未来机制必须重新评审 |
 
+其他域不得直接写 `balance/entries`；财务请求经 Finance 提交器统一记账。项目汇总、应收展示和合同金额都是业务事实或派生视图，不是第二本账（#51）。
+
 ### 10.6 EventState
 
 | 字段 | 写入点 | 唯一性 | 备注 |
@@ -547,6 +580,18 @@ npm run test:v4 && npm run audit:v4
 | 金额 | 整数円，带符号流水 | 浮点或千円缩写 |
 | 可空性 | 显式 null | 用缺省掩盖未知 |
 
+### 10.9 跨模块接口矩阵（#53 / #51 / #52 / #49）
+
+| 流程 | 生产者 | 消费者 | 唯一写入权威 | 原子/生命周期边界 | 里程碑与状态 |
+| --- | --- | --- | --- | --- | --- |
+| M2 单项目纵切 | Market / Staff / Project / Event | Application、Finance、Archive | 各域只写自身聚合；Application 只编排 | 立项→制作→事件→交付→Archive 一次命令一提交 | M2；主链已实现，#53 继续审计 |
+| Finance 合同/应收/到账 | Market / Project / Committee / Kernel | Finance、UI 读模型 | 合同事实归业务域；现金归 Finance | 首版结算时点到账原子完成；无跨周应收字段 | #51；语义冻结，流水已实现 |
+| 多项目周结算 | Company / Staff / Project / Vendor / Event | Application、Finance、Archive | 公司级阶段顺序；各项目域写自身事实 | 一个工作副本、一次提交；项目按 `work_id`、员工按 `staff_id` 稳定排序 | #52；M1/M2 隔离与顺序测试已有，M3 完整经营待验收 |
+| M4 委员会/渠道结算 | Committee / Partner / Kernel | Finance、Archive、Partnership | 分账公式归内核；现金归 Finance；履历归 Archive | 交付同一提交内完成入账、委员会关闭与 Archive 追加 | M4 核心已实现；特殊机会/关系玩法待补 |
+| v4 存档恢复 | 存储层 + 完整 GameState | 核心校验、会话恢复 | 存储层只编码信封；核心拥有状态校验 | 格式→版本→结构→不变式→替换会话；失败零副作用 | #49；目标契约已定义，存储层与 fixture 待实现 |
+
+该矩阵不授权跨域直接写字段。Event 效果代写 Staff/Project 仍是已登记的 P1-G2 分歧；在负责人裁决前，不得把“Application 代写”改写成“Event 拥有字段”。
+
 ---
 
 ## 11. 冲突与缺口清单
@@ -557,14 +602,18 @@ npm run test:v4 && npm run audit:v4
 | --- | --- |
 | P0 | initialize 原子范围不足；report/WeekReceipt 边界；未实现命令无 NOT_IMPLEMENTED |
 | P1 | 事件效果代写 Staff/Project/Finance；终局 pending 转移/归档；abort_work 扣罚与履历；事件升级载荷 |
-| P2 | market 刷新/竞争；Archive 中止与扩展履历；前置商业成本输入；非整除净池取整；更多伙伴/关系玩法 |
-| P3 | 供应商/外包；Facility；系列续作；Q3/Q4 运行时实现；其余未冻结载荷 |
+| P2 | market 刷新/竞争；Archive 中止与扩展履历；前置商业成本输入；非整除净池取整；更多伙伴/关系玩法；v4 SaveRecord 存储层与 round-trip/损坏拒绝 fixture（#49） |
+| P3 | 供应商/外包；Facility；系列续作；Q3/Q4 运行时实现；跨周应收/分期到账（未来兼容扩展）；其余未冻结载荷 |
 
 `loans/solvency` 不再列入删除阻塞；其当前约束由 INV-18/INV-25 与 reserved 审计保证。`project_fee` 不再列入 V4 待改名项；历史 v3 字段保留，V4 统一使用 `signing_fee`。
 
 ### 11.2 端到端 fixture 现状
 
 当前可执行链路：`initialize_game → start_work → assign_staff → 多周 advance_week → view_event → resolve_event → deliver_work → end_company/finalize_delivery → finalize_company`。承制与委员会模式均可贯通“交付 → Archive → Finance”；命令 10/19/20/21 已实现。仍有 pending 的破产/第 520 周终局与 `abort_work` 完整闭环按未冻结语义原子拒绝，不伪造通过路径，详见 `M2_M4_PROJECT_LOOP.md`。
+
+多项目工程 fixture 已有真实 WASM 覆盖：项目遍历顺序不改变哈希、两个项目人员归属不串、双项目产出/作者隔离、同周多项目事件互不覆盖、交付一部不影响另一部。它们证明 #52 的当前工程边界，不等于 M3 的完整项目来源、供应商共享产能或 520 周经营验收。
+
+存档方面，当前 `GameState` JSON round-trip 与哈希一致测试仍只是状态序列化证据；#49 的 SaveRecord 信封、存储层、读档不推进、随机复现和损坏/不兼容拒绝尚未实现，不能合并为同一验收结论。
 
 ### 11.3 #53 验收项自查
 
@@ -573,7 +622,7 @@ npm run test:v4 && npm run audit:v4
 | 字段唯一写入权威 | 部分 | §10；事件代写仍待裁决 |
 | 共享 ID/枚举/可空/时间/金额一致 | 部分 | §10.8；D-06/D-08 等例外 |
 | 命令输入/输出/错误码/原子性 | 已实现部分满足 | §4/§5/§9 |
-| 无未解释重复事实源 | 满足 | Finance 唯一现金权威；deposit_paid 仅快照 |
+| 无未解释重复事实源 | 满足 | Finance 唯一现金权威；deposit_paid 仅快照；首版无跨周应收钱包 |
 | 端到端至交付/Archive | 已实现主链满足 | §11.2；中止与终局 pending 除外 |
-| M2 与远期分层 | 满足 | §3.12/§11.1 |
+| M2 与远期分层 | 满足 | §3.12/§3.13/§10.9/§11.1；#49 信封为目标契约，存储层待实现 |
 | 裁决项含证据与边界 | 满足 | §8 |

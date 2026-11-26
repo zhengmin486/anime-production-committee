@@ -1,7 +1,7 @@
 # M2 项目全链路 + M4 商业结算（实现说明）
 
 > 状态：**分支实现，未完成里程碑验收**。M2 主链路（立项 → 制作 → 正常/到期交付 → 公司关闭 → Archive → 财务）与 M4 商业结算核心（委员会、投资、六窗口、分成、伙伴关系）已落地；INV-27 监督岗位、§14.7 八阶段周结算与 INV-29 到期默认分支已接入。中止处罚/履历、终局 pending 转移/归档、事件升级载荷仍待契约裁决；融资、M3 供应商/市场刷新仍是缺口。
-> 契约依据：[M0_CONTRACT_FREEZE.md](M0_CONTRACT_FREEZE.md) 命令 2/10/15/16/20/21/22、§7；[DOMAIN_ARCHITECTURE.md](DOMAIN_ARCHITECTURE.md) §7.3.6/§9.3/§10.1/§10.3/§10.6；[DEVELOPMENT_ROADMAP.md](DEVELOPMENT_ROADMAP.md) M2/M4。
+> 契约依据：[M0_CONTRACT_FREEZE.md](M0_CONTRACT_FREEZE.md) 命令 2/10/15/16/20/21/22、§5/§6/§8；[DOMAIN_ARCHITECTURE.md](DOMAIN_ARCHITECTURE.md) §5.7/§9.1.1/§12；[DATA_DICTIONARY_V4.md](DATA_DICTIONARY_V4.md) §3.6/§3.7/§3.13/§10.9；[DEVELOPMENT_ROADMAP.md](DEVELOPMENT_ROADMAP.md) M2/M4 与工程契约索引。
 
 ## 1. 已实现命令
 
@@ -81,7 +81,9 @@ BD 公司所得 = BD 毛收入 × 50%；另 50% 为综合成本，不进入池�
 
 流水科目：`contract_received`（+）、`investment_paid`（−）、`commercial_share_received`（+，含 BD/DVD 公司所得与委员会净池份额，靠 `memo` 区分）、`success_reward_received`（+）、`penalty`（−）、`distribution`（−，电视服务）；延期费暂记 `production`。
 
-周薪按 DEC-ECON-001 归因：核心与临时员工均按 `weekly_salary` 计入阶段 2 刚性预检和阶段 3 流水；已分配到项目的员工记 `work_id=项目`，闲置员工记 `work_id=null`（公司级成本）。
+#51 的记账边界：合同金额、应收确认与实际现金到账是三层不同事实；Finance 是 `balance` 与 `entries` 的唯一写入权威。首版不新增跨周 `receivables`，在结算命令内原子完成应收确认与现金流水；其他领域只提交带稳定业务事实键的财务请求，由 Finance 生成唯一 `entry.id` 防重复。公开命令本身仍不保证幂等。
+
+周薪按 DEC-ECON-001 归因：核心与临时员工均按 `weekly_salary` 计入阶段 2 刚性预检和阶段 3 流水；已分配到项目的员工记 `work_id=项目`，闲置员工记 `work_id=null`（公司级成本）。项目财务视图按 `work_id` 过滤 Finance 流水得到，不是独立项目钱包。
 
 `Archive.works` 追加一条 `WorkRecord`：作品事实、六维质量、质量分、评级、`end_reason`（`completed` / `deadline` / `company_closed`）、`forced`、`gate_completion_permille`、`commercial_revenue`、`bd_gross`、`bd_revenue`（公司所得）、`committee_pool`、`investor_share`、`company_received`、逐窗口对账 `channel_breakdown`（含毛收入 `revenue`、公司所得 `company_received` 与计算因子）、单集质量摘要、团队快照，以及 `finance_summary`（合同收入、投资本金、商业份额、BD 公司所得、奖励、扣罚、`costs` 分类、`total_costs`、`profit`）与 `rules_status=placeholder`。记录只追加。
 
@@ -89,7 +91,7 @@ BD 公司所得 = BD 毛收入 × 50%；另 50% 为综合成本，不进入池�
 
 `Archive.company_result` 由 `finalize_company` 写入一次：`reason`（voluntary / bankrupt / time_limit）、周数、期末现金、净现金变化、作品数、最佳作品、公司评级（暂复用作品分数线）与 highlights/negatives。
 
-> 文中的“存档 round-trip”仅指 **GameState JSON 序列化往返**（含 pending 事件与哈希一致）；#49 的 SaveRecord envelope 尚未交付，不是完整存档功能。
+> 文中的“存档 round-trip”仅指 **GameState JSON 序列化往返**（含 pending 事件与哈希一致）。#49 已定义 `SaveRecord { format, version, savedAt, rules_version, state }` 目标信封、完整载荷与加载错误语义，但 v4 存储层及 SaveRecord fixture 尚未交付，不能宣称手动存读档可用。详见 [领域架构](DOMAIN_ARCHITECTURE.md) §12 与 [数据字典](DATA_DICTIONARY_V4.md) §3.13。
 
 ## 6. 状态校验（新增）
 
@@ -135,10 +137,10 @@ BD 公司所得 = BD 毛收入 × 50%；另 50% 为综合成本，不进入池�
 
 | 阶段 | 已具备 | 仍缺 |
 | --- | --- | --- |
-| M2 | 立项（含原创草稿准入）、蓝图实例化、制作、正常交付、到期强制交付、公司关闭/结清/结局、Archive、成本归因、事件处理、INV-27 监督岗位、INV-29 到期默认分支 | 中止处罚/履历、终局 pending 归档/转移、事件升级载荷、真实市场来源、12 集完整人工试玩 |
+| M2 | 立项（含原创草稿准入）、蓝图实例化、制作、正常交付、到期强制交付、公司关闭/结清/结局、Archive、成本归因、事件处理、INV-27 监督岗位、INV-29 到期默认分支 | 中止处罚/履历、终局 pending 归档/转移、事件升级载荷、v4 SaveRecord 存储层与验收 fixture、真实市场来源、12 集完整人工试玩 |
 | M2.5 | 预检失败整周回滚并直接破产终局（§14.7，无 pending 场景）、交付结算负余额原子拒绝 | 破产/520 周携带 pending 的合法终局、融资/贷款与终局展开 |
-| M3 | 多项目并存、人员单项目归属、遍历顺序无关 | 企划槽刷新/竞争、供应商目录与外包、520 周长跑 |
-| M4 | 委员会、投资比例、六窗口、BD 归属、净池分成、电视倍率、伙伴关系与 history | 更多伙伴/渠道类型、合作关系玩法、特殊商业机会、完整对账报表 |
+| M3 | 多项目并存、人员单项目归属、遍历顺序无关、项目事件隔离与单部交付互不影响 | 企划槽刷新/竞争、供应商目录与外包、520 周长跑；现有测试不替代完整多项目经营验收 |
+| M4 | 委员会、投资比例、六窗口、BD 归属、净池分成、电视倍率、伙伴关系与 history；Finance 唯一现金权威的接口边界 | 更多伙伴/渠道类型、合作关系玩法、特殊商业机会、完整对账报表 |
 
 **结论：不能宣称 M4 已验收。** 当前是把 M4 的商业结算核心接在 M2 主链路上；M2.5/M3 的缺口不补，M4 的“产业关系”只是一条单项目结算路径。
 

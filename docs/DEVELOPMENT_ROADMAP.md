@@ -68,6 +68,19 @@
 - UI 不是最后阶段的纯接线任务。#39 的 Mock 原型现在继续；M2 结束后以真实读模型做只读静态原型验证，重点检查周回执、174 个工作项的组织与信息层级。
 - M6 才完成完整交互、命令接入和旧运行时切换。
 
+## 工程契约索引（2026-11-26）
+
+本索引只收敛工程语义与文档归属，不代表相关功能已经实现或验收。契约内容优先引用下列权威文档，本路线不重复冻结规则。
+
+| 议题 | 阶段 | 已冻结的工程契约 | 权威文档 | 实现/验收边界 |
+| --- | --- | --- | --- | --- |
+| [#53](https://github.com/zhengmin486/anime-production-committee/issues/53) 跨模块数据契约 | M2；约束 M3/M4 | 聚合所有权、字段覆盖、命令原子提交、Finance/Archive 边界与端到端 fixture | [数据字典](DATA_DICTIONARY_V4.md) §3/§4/§5/§10/§11；[领域架构](DOMAIN_ARCHITECTURE.md) §5/§9/§10；[M3/M4 集成契约](M3_M4_INTEGRATION_CONTRACT.md) | M2 主链已有实现与测试；M2 端到端审计仍由 #53 执行 |
+| [#51](https://github.com/zhengmin486/anime-production-committee/issues/51) Finance 唯一现金权威 | M2 起；M4 对账 | 合同金额、应收确认、实际到账分离；所有现金变化经唯一流水；同业务事实不得重复记账 | [领域架构](DOMAIN_ARCHITECTURE.md) §5.7；[数据字典](DATA_DICTIONARY_V4.md) §3.6/§3.7/§10.5；[M3/M4 集成契约](M3_M4_INTEGRATION_CONTRACT.md) §5（M4-B） | 首版不持久化跨周应收；到账确认与流水同命令原子完成 |
+| [#52](https://github.com/zhengmin486/anime-production-committee/issues/52) 多项目状态隔离 | M1/M2 工程基础；M3 完整经营 | 公司级工作副本、一套八阶段、一次提交；`work_id`/`staff_id` 稳定顺序；交付清理与事件隔离 | [领域架构](DOMAIN_ARCHITECTURE.md) §9.1.1；[数据字典](DATA_DICTIONARY_V4.md) §10.9；[M3/M4 集成契约](M3_M4_INTEGRATION_CONTRACT.md) §2–§4 | M1/M2 测试证明隔离与顺序无关；M3 才验收正常来源、资源竞争和完整多项目经营 |
+| [#49](https://github.com/zhengmin486/anime-production-committee/issues/49) v4 手动存读档 | M2 契约；M6 浏览器接入 | SaveRecord 格式/schema/规则版本、完整状态载荷、固定加载顺序、错误语义、损坏与不兼容拒绝 | [M0 契约](M0_CONTRACT_FREEZE.md) §2/§6/§8/§14.3；[领域架构](DOMAIN_ARCHITECTURE.md) §12；[数据字典](DATA_DICTIONARY_V4.md) §3.13 | 目标信封与字段覆盖已定义；v4 存储层与 SaveRecord fixture 尚未实现；GameState JSON 往返不等于手动存读档 |
+
+#53 的 Event 写入 owner 收敛（P1-G2）及 pending 升级载荷（D-09）仍待裁定，不因本索引提前冻结。自动存档、云存档和旧存档自动迁移不属于 #49 首版。
+
 ## 当前阶段判定（2026-11-26）
 
 **M0、M1 已完成并验收；当前处于 M2 单项目全链路实现与验收阶段。M2.5 保留为独立的财务失败路径里程碑。**
@@ -76,6 +89,8 @@
 - M1：v4 状态骨架、纯规则内核、坐标式随机、正常周结算最小切片与 `state_hash` 已随 PR #66 合入；PR #111 补齐员工 `fatigue`、`morale` 必填校验并合入。M1 出口测试及官方 Emscripten CI 均已通过，详见 [M1 运行时切片](M1_RUNTIME_SLICE.md) 与 [当前进度](PROGRESS.md)。
 - M1 验收仅覆盖路线定义的“能跑一周”能力；交付、事件、Archive、完整存档 round-trip、破产终局和前端切换仍按后续阶段交付，不因 M1 完成而提前视为完成。
 - PR #95 已合入 M2 主要纵向能力，但 M2 尚未正式验收；Issue #53 负责基于当前 main 重新执行端到端契约审计。
+- #51 的唯一现金权威与三层金额语义、#52 的多项目编排和状态隔离、#49 的 SaveRecord 目标信封已写入工程契约；其中 v4 存储层与完整存读档验收仍未交付。
+- #52 的多项目测试只覆盖当前工程边界，不能替代 M3 的正常项目来源、人员竞争、供应商/外包与 520 周经营验收。
 - M2.5 仍按本路线独立保留，专门验收刚性支出预检、整周原子回滚、破产终局和未结项目清算；不因危机周延期而取消或并入 M2。危机周机制继续作为未来更新候选，不属于 M2.5 当前出口。
 - 满足依赖的 M2/M3 模块可并行推进；整体阶段仍按各自出口标准统一验收。
 

@@ -60,8 +60,16 @@ GameState {
   archive: Archive
 }
 
-SaveRecord { version: 4, savedAt: ISO8601, rules_version: string, state: GameState }
+SaveRecord {
+  format: "anime-production-committee.save"
+  version: 4
+  savedAt: ISO8601
+  rules_version: string
+  state: GameState
+}
 ```
+
+`format` 标识存档格式，`version` 是存档 schema 版本，`rules_version` 是玩法规则版本；三者不得混用。`state.version` 必须同为 4。该信封是 #49 的目标工程契约，当前 v4 核心尚未实现存储层，不得据文档宣称已支持手动存读档。
 
 **不存在的字段**（v3 遗产，禁止复活）：`phase`（全局经营阶段）、`project`（单数）、`pending_event`（顶层单槽）、`preview`（派生）、`last_project_id`、`company.finance`、`project.finance`、`StageResult`。
 
@@ -165,7 +173,7 @@ SaveRecord { version: 4, savedAt: ISO8601, rules_version: string, state: GameSta
 
 **通用原子性**：除 `initialize_game` 外，所有命令都是"工作副本 + 一次提交"。任一守卫或内部步骤失败 ⇒ 状态与调用前逐字段一致。
 
-**通用幂等性**：命令不保证幂等；重复提交同一命令按新一次业务动作校验（例如重复 `deliver_work` 因项目已 settled 而失败）。
+**通用幂等性**：公开命令不保证幂等；重复提交同一命令按新一次业务动作校验（例如重复 `deliver_work` 因项目已 settled 而失败）。这不允许同一业务事实在 Finance 中重复记账：记账请求必须带稳定的业务事实键，提交器以该键对应的唯一 `entry.id` 去重；失败命令不产生流水。重复公开命令是否成功仍由业务守卫决定，防重复只保证同一业务事实不新增第二笔流水。传输层请求幂等、`request_id` 持久化或跨周应收字段均不属于当前 v4 契约，新增时须走 §13。
 
 ---
 
@@ -185,7 +193,7 @@ SaveRecord { version: 4, savedAt: ISO8601, rules_version: string, state: GameSta
 | `CRISIS_COMMITMENT_BLOCKED` | **已废弃占位码**；当前没有危机状态或危机期承诺白名单 | — | — | 不由现行命令产生，保留字符串只用于兼容诊断 |
 | `COMPANY_ENDED` | 公司已结束 | 关闭后调非结清命令 | 否 | 只留结清与总结 |
 | `SAVE_VERSION_UNSUPPORTED` | 存档版本不支持 | 读到 v1/v2/v3 或未来版本 | 否 | 提示新开，不覆盖原档 |
-| `SAVE_CORRUPT` | 存档结构损坏 | JSON 非法、必填缺失、含派生字段 | 否 | 提示保留原档 |
+| `SAVE_CORRUPT` | 存档结构损坏 | JSON 非法、格式标识错误、元信息缺失/非法、`state.version` 与信封不一致、必填缺失、含派生字段或状态不变式被破坏 | 否 | 提示保留原档 |
 | `NOT_IMPLEMENTED` | 契约已冻结、行为未实现 | M0 阶段的占位命令 | 是（换版本后） | 明确"尚未开放" |
 | `INTERNAL_ERROR` | 内部异常 | 未预期 | 是（一次） | 记录上下文 |
 | `STAGE_LOCKED` | **已废弃**，v4 不再产生 | — | — | 保留字符串占位，禁止复用 |
@@ -229,30 +237,51 @@ SaveRecord { version: 4, savedAt: ISO8601, rules_version: string, state: GameSta
 ### 8.1 信封
 
 ```text
-SaveRecord { version: 4, savedAt: ISO8601, rules_version: string, state: GameState }
+SaveRecord {
+  format: "anime-production-committee.save"
+  version: 4
+  savedAt: ISO8601
+  rules_version: string
+  state: GameState
+}
 ```
+
+| 字段 | 必填 | 语义 |
+| --- | --- | --- |
+| `format` | 是 | 固定格式标识；缺失或不匹配即 `SAVE_CORRUPT` |
+| `version` | 是 | 存档 schema 版本；当前只接受 4 |
+| `savedAt` | 是 | 有效 ISO8601 字符串，仅用于展示 |
+| `rules_version` | 是 | 非空规则版本标识；不一致不拒绝，但加载后必须提示规则已更新 |
+| `state` | 是 | 完整 `GameState`；`state.version` 必须为 4 |
 
 - IndexedDB：库 `anime-production-committee`、schema 1、仓库 `saves`、键 `current`（沿用，不改库版本）。
 - 单槽；覆盖需显式确认，读取-判断-写入在同一事务内完成。
+- 信封与存储层是 #49 的**目标契约**；当前代码仍只有 v3 存取与 v4 `GameState` JSON 往返，不得标为已实现。
 
-### 8.2 版本矩阵
+### 8.2 版本矩阵与加载顺序
 
 | 读到 | 行为 | 文案要点 |
 | --- | --- | --- |
-| `version=4` 且结构合法 | 正常加载，重算派生值 | — |
-| `version=4` 但结构非法 / 含派生字段 | 拒绝，`SAVE_CORRUPT` | 保留原档，提示损坏 |
+| 无存档 | 返回 null，不报错 | — |
+| JSON 非法、根非对象、`format` 缺失/错误、元信息非法 | 拒绝，`SAVE_CORRUPT` | 保留原档，提示损坏 |
 | `version=1/2/3` | 拒绝，`SAVE_VERSION_UNSUPPORTED` | "旧版存档不兼容多项目 v4，请新开游戏；原存档未被覆盖。" |
 | 未知更高版本 | 拒绝，`SAVE_VERSION_UNSUPPORTED` | 提示客户端过旧 |
-| 无存档 | 返回 null，不报错 | — |
+| `version=4` 但 `state.version≠4` | 拒绝，`SAVE_CORRUPT` | 信封与状态版本不一致 |
+| `version=4` 且结构合法 | 正常加载，重算派生值 | — |
+| `version=4` 但结构非法 / 含派生字段 / 不变式被破坏 | 拒绝，`SAVE_CORRUPT` | 保留原档，提示损坏 |
+
+加载按“格式与元信息 → 版本 → 状态结构 → 状态不变式”的顺序校验；任一失败都不得进入会话替换阶段。存储层调用核心校验后，将结构或不变式失败统一映射为 `SAVE_CORRUPT`，不把核心的 `INVALID_INPUT/INVALID_STATE` 当成可继续游戏的成功回执。
 
 ### 8.3 硬性规则
 
-1. **不做任何迁移**：v1–v3 一律拒绝，不转换、不修复、不删除。
+1. **不做任何迁移**：v1–v3 一律拒绝，不转换、不修复、不删除；未来版本也不得静默降级读取。
 2. **失败不破坏**：任何读取失败都不得覆盖或删除原记录，不得改动当前会话。
 3. `rules_version` 不一致：**允许加载**并标记"规则已更新，数值可能与存档时不同"，不拒绝（避免每次调参废档）。
 4. 存档不含派生值；加载后由核心重算 `risk`、`preview` 与读模型。
 5. `savedAt` 只用于展示，不参与规则。
-6. 必须完整保存并恢复 `events.pending[]`、员工 `signing_fee/weekly_salary/temporary_contract/assignment_work_id`、财务流水与随机状态；读取不推进周、不结算、不补字段。
+6. 必须完整保存并恢复 `events.pending[]`、员工 `signing_fee/weekly_salary/temporary_contract/assignment_work_id`、财务流水与全部影响未来结果的业务状态；读取不推进周、不结算、不补字段。
+7. 坐标式随机不保存计数器；`seed` 与坐标参数完整恢复即可复现。`recruitment.pity/last_scout_week/pool` 等业务状态仍须持久化，不能以“随机无状态”为理由省略。
+8. 字段级覆盖、派生/重建判据与验收 fixture 见 [DOMAIN_ARCHITECTURE.md](DOMAIN_ARCHITECTURE.md) §12.3；该清单是 #49 的持久化验收依据。
 
 ---
 
@@ -443,7 +472,7 @@ v3 的单项目、五阶段、全局 phase、单事件槽、双份财务汇总�
 
 ### 14.3 版本与实现状态
 
-本次修订不把文档契约等同于已实现功能。M1 已将 v4 runtime 基础切片合入 main；事件完整闭环、跨项目事件数组校验、原创草稿/正式开工分段、`signing_fee + weekly_salary` 员工账务及 v4 完整存档恢复仍须按 M2/工程契约任务实现并验收。不得继续以旧版“全局单事件槽”或 `project_fee` 作为目标行为。
+本次修订不把文档契约等同于已实现功能。M1 已将 v4 runtime 基础切片合入 main；事件完整闭环、跨项目事件数组校验、原创草稿/正式开工分段、`signing_fee + weekly_salary` 员工账务已由后续 PR 推进，v4 完整存档恢复仍须按 M2/工程契约任务实现并验收。SaveRecord 信封、字段覆盖与错误语义已在 §8 定义（#49），但当前存储层尚未实现。不得继续以旧版“全局单事件槽”或 `project_fee` 作为目标行为。
 
 ### 14.4 核心员工招聘即时入职时序（DEC-PLAY-003 补充）
 
