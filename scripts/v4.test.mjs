@@ -90,8 +90,8 @@ test('首周产出与独立手算逐项一致', () => {
 
   // 手算（产能按主专业；跨专业按 800‰ 折算并四舍五入；分配期按未被占用的剩余量扣减）：
   // staff_anim 80 点 → 公共项 80→64（余 20）
-  // staff_dir  82 点 → 公共项 20→16（余 0），脚本 62→50（余 38）
-  // staff_ka   85 点 → 脚本 38→30（余 0）
+  // staff_dir 任监督，82 点打 5 折为 41 → 公共项 20→16（余 21），脚本 21→17（余 79）
+  // staff_ka 85 点 → 脚本 79→63（余 0）
   const common = findItem(advanced.state, 'work_01', 'common.series_comp')
   const script = findItem(advanced.state, 'work_01', 'ep01.script')
   assert.equal(common.work_done, 80)
@@ -134,6 +134,31 @@ test('首周产出与独立手算逐项一致', () => {
     assert.equal(morale[id], 78)
   }
   assert.equal(advanced.state.company.week, 1)
+})
+
+test('v0.5 监督执行产能：5 折跟随在任监督而非职业', () => {
+  let state = setupTiny(42)
+  state = addIdleSupervisor(state, 'staff_pm')
+  for (const item of allItems(state, 'work_01')) item.work_total = 1000
+  const staffIds = state.staff.map((member) => member.id)
+  for (const staffId of staffIds) {
+    state = ok('assign_staff', { state, staff_id: staffId, work_id: 'work_01' }).state
+  }
+
+  const switched = JSON.parse(JSON.stringify(state))
+  switched.works[0].supervisor_staff_id = 'staff_pm'
+  const produced = (result) => Object.fromEntries(
+    result.report.staff.map((member) => [member.staff_id, member.produced]))
+  const initial = ok('advance_week', { state })
+  const reassigned = ok('advance_week', { state: switched })
+  const initialProduced = produced(initial)
+  const reassignedProduced = produced(reassigned)
+
+  assert.equal(initialProduced.staff_dir, 33)
+  assert.equal(initialProduced.staff_pm, 66)
+  assert.equal(reassignedProduced.staff_dir, 66)
+  assert.equal(reassignedProduced.staff_pm, 33)
+  assert.equal(initial.report.works[0].total_points, reassigned.report.works[0].total_points)
 })
 
 test('阶段 2-3：临时员工周薪同样进入刚性预检与唯一账本', () => {

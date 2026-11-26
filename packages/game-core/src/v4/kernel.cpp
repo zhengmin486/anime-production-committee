@@ -19,6 +19,7 @@ constexpr int kFitMismatch = 800;
 constexpr int kPointsPerStaffWeek = 100;     // 1 人周 = 100 工作点
 constexpr int kHandoverLoss = 250;           // 接手磨合：该员工在该项产出扣 25%
 constexpr int kSupervisorSwitchLoss = 100;   // 监督换项目：团队级扣 10%
+constexpr int kSupervisorExecutionPermille = 500; // v0.5：在任监督本人的执行产能打 5 折
 constexpr int kQualityApproach = 300;        // 质量评级向本周样本靠拢 30%
 constexpr int kCarryOverPermille = 600;      // 质量传递上限：依赖质量的 60%
 constexpr int kCarryOverOffset = 40;         // 质量传递上限：+40
@@ -227,6 +228,9 @@ std::vector<ItemAssignment> allocate(const Project& work, const std::vector<cons
     for (const Staff* member : ordered) {
         // 周产能按主专业计算（fit=1000），跨专业时在逐项投入上打折，避免双重折扣。
         int budget = points_from_capacity(capacity_permille(*member, staff_specialty(*member)));
+        if (work.supervisor_staff_id && *work.supervisor_staff_id == member->id) {
+            budget = budget * kSupervisorExecutionPermille / 1000;
+        }
         budget = budget * team_permille / 1000;
         for (const auto& candidate : candidates) {
             if (budget <= 0) break;
