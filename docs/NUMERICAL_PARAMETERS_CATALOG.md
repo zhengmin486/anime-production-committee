@@ -53,9 +53,9 @@
 | 不同作品规模的集数 | TV、短篇、OVA、剧场版等集数范围 | **已确认**：TV 12–13、短篇 1–4、OVA/剧场版 1 | [蓝图规范](BLUEPRINT_SPEC.md)、[TV 蓝图样例](blueprints/tv_standard.blueprint.json)、[#63 工期](https://github.com/zhengmin486/anime-production-committee/issues/63) |
 | 公共制作工作项数量 | 不同蓝图的公共制作项数量和拆分粒度 | **待细化 / 临时样例** | [蓝图规范](BLUEPRINT_SPEC.md)、[TV 蓝图样例](blueprints/tv_standard.blueprint.json)、[DOMAIN_ARCHITECTURE](DOMAIN_ARCHITECTURE.md) |
 | 单集工作项数量 | 六阶段下各工作项数量及拆分粒度 | **待细化 / 临时样例** | [蓝图规范](BLUEPRINT_SPEC.md)、[TV 蓝图样例](blueprints/tv_standard.blueprint.json) |
-| 核心员工编制上限 | 不同公司成长里程碑允许的核心员工人数 | **待标定**；里程碑达成时立即解锁，只统计核心员工、不含临时工；已解锁名额永久保留、只增不减；不绑定设施等级/槽位/作画工作室，开放编制不收扩容费 | [DECISION_LOG](DECISION_LOG.md)、[DOMAIN_ARCHITECTURE](DOMAIN_ARCHITECTURE.md)、[#61 公司](https://github.com/zhengmin486/anime-production-committee/issues/61) |
+| 核心员工编制上限 | 设施扩建等级允许的核心员工人数 | **部分确认**：开局 4 人；首部作品后暂定免费升至 8 人，后续 8→12→16→20→24→30；只统计核心员工、不含临时工。升级费用、维护费与精确触发时点待标定 | [DECISION_LOG](DECISION_LOG.md)、[DOMAIN_ARCHITECTURE](DOMAIN_ARCHITECTURE.md)、[#63 产能](https://github.com/zhengmin486/anime-production-committee/issues/63) |
 | 同时经营项目数 | 是否存在项目槽位硬上限 | **已确认**：不设置固定项目数上限 | [DECISION_LOG](DECISION_LOG.md)、[M0 契约](M0_CONTRACT_FREEZE.md) |
-| 市场企划槽位 | 初始槽位和最大槽位 | **已确认**：初始 4、上限 10 | [DECISION_LOG](DECISION_LOG.md)、[#59 市场](https://github.com/zhengmin486/anime-production-committee/issues/59) |
+| 市场企划槽位 | 初始槽位和最大槽位 | **冲突待收口**：M0 现行初始 4、上限 10；#59 2026-11-27 最新归档改为固定 4 槽（3 循环＋1 外援），槽位身份与刷新语义尚未冻结 | [DECISION_LOG](DECISION_LOG.md)、[#59 市场](https://github.com/zhengmin486/anime-production-committee/issues/59) |
 | 市场每周刷新数量 | 每周补充数量、旧企划保留和替换数量 | **待标定** | [DECISION_LOG](DECISION_LOG.md)、[DESIGN_BACKLOG](DESIGN_BACKLOG_2026-11-25.md)、[#59 市场](https://github.com/zhengmin486/anime-production-committee/issues/59) |
 | 招聘候选池容量 | 普通候选池人数、每周轮换人数 | **待标定** | [DECISION_LOG](DECISION_LOG.md)、[#59 市场](https://github.com/zhengmin486/anime-production-committee/issues/59) |
 | 外派机会容量 | 每次市场刷新出现的外派机会数 | **待标定** | [DECISION_LOG](DECISION_LOG.md)、[#59 市场](https://github.com/zhengmin486/anime-production-committee/issues/59) |
@@ -380,7 +380,7 @@
 - IP 上门企划出现概率。
 - 市场候选的重复率和题材多样性。
 
-**已确认边界：** 市场初始 4 个企划槽、上限 10 个；市场按周自然滚动；锁定企划不因正常刷新而被替换。普通企划有效期等细节应以最新正式决策与 Market 契约为准，不直接照搬历史提案。
+**已确认边界与冲突：** 市场按周自然滚动；锁定企划不因正常刷新而被替换。槽位数量存在待收口冲突：M0 现行“初始 4、上限 10”，#59 2026-11-27 最新归档为固定 4（3 循环＋1 外援）；槽位身份、刷新周期与外援进度缩放尚未冻结，暂不得按 cap10 实现。普通企划有效期等细节应以最新正式决策与 Market 契约为准，不直接照搬历史提案。
 
 **决定前应查阅：** [DECISION_LOG.md](DECISION_LOG.md)、[M0 契约](M0_CONTRACT_FREEZE.md)、[DOMAIN_ARCHITECTURE](DOMAIN_ARCHITECTURE.md)、[DESIGN_BACKLOG](DESIGN_BACKLOG_2026-11-25.md)、[#59 市场](https://github.com/zhengmin486/anime-production-committee/issues/59)。
 

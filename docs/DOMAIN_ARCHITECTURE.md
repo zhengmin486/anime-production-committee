@@ -512,7 +512,7 @@ Company {
   office_tier: small | medium | large  // 玩家主动扩容后的当前办公场地规模；可跨级直达已解锁目标规模
   base_weekly_rent: >=0                // 当前办公场地规模对应的每周基础房租；扩容新增增量从确认后的下一次周结算起计提
   facilities: []                       // 已建造设施；可用槽位由 office_tier 推导
-  // core_staff_capacity 由已达成的公司成长里程碑推导；只统计 core 员工名册，临时员工不占用；解锁后永久保留、只增不减，不依赖 office_tier / facilities
+  // core_staff_capacity 由设施扩建等级派生；只统计 core 员工名册，临时员工不占用；开局 4 人，后续等级 8→12→16→20→24→30
 }
 
 Staff {
@@ -835,7 +835,7 @@ Committee { id, work_id, members[{partner_id, channel}], formed_week, status: ac
 
 MarketState {
   heat: {genre: {level: boom|high|mid|low, changed_week}}
-  slots: Offer[4]                  // 初始 4 槽，后续扩展上限 10
+  slots: Offer[4]                  // 初始 4 槽；#59 最新归档为固定 4（3 循环＋1 外援），与旧“扩展上限 10”冲突，槽位语义待 #53 收口
   custom_offer: Offer|null, proposal: Offer|null
   refresh_week, last_competition_round
   competitors: Competitor[]        // 由 seed 派生，见 §12.3
@@ -1084,7 +1084,7 @@ UI 不计算规则。核心在每次命令后输出读模型；读模型**不持
 
 **办公场地扩容：** 不再设置声望硬门槛；玩家主动确认并支付对应一次性搬迁费后立即完成 2→4 或 4→6 槽扩容，同时每周基础房租上调。扩容成本与租金增量待标定。
 
-**容量隔离：** Company 的办公场地规模（office_tier）决定设施槽位，初期/中型/大型分别为 2/4/6 槽；核心员工名册上限（core_staff_capacity）由独立的公司成长里程碑推导，不依赖 office_tier、设施槽位或作画工作室。开放编制不收扩容费，实际招聘受现金流与人才供给约束。编制成长曲线待标定。
+**容量隔离：** Company 的办公场地规模（office_tier）决定设施槽位，初期/中型/大型分别为 2/4/6 槽；核心员工名册上限（core_staff_capacity）改由设施扩建等级派生，开局 4 人，首部作品后暂定免费升至 8 人，后续为 12/16/20/24/30。设施扩建完全自愿，8 人核心团队加临时员工应足以支撑高质量路线；升级费用、维护费与精确触发时点待标定。开局 4 人编制守卫待招聘运行时合入，设施升级派生尚未实现。
 
 ---
 

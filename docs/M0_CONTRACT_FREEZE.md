@@ -75,7 +75,7 @@ SaveRecord { version: 4, savedAt: ISO8601, rules_version: string, state: GameSta
 
 | 对象 | 必填 | 可空 | 关键约束 |
 | --- | --- | --- | --- |
-| `Company` | id, name, founded_week, week, status, reputation, reputation_log | end_reason（仅 running 为 null）, facilities（可空数组） | week ∈ [0,520]；status=running ⇒ week<520；core_staff_capacity 由成长里程碑单调推导，仅统计核心员工名册，不含临时员工 |
+| `Company` | id, name, founded_week, week, status, reputation, reputation_log | end_reason（仅 running 为 null）, facilities（可空数组） | week ∈ [0,520]；status=running ⇒ week<520；core_staff_capacity 由设施扩建等级派生，仅统计核心员工名册，不含临时员工 |
 | `Staff` | id, name, role, employment, abilities, experience, potential, revealed_potential, talent_type, signing_fee, weekly_salary, fatigue, morale, departure_warning, assignment_work_id | last_participation, temporary_contract | core/temp 均使用一次性 signing_fee + weekly_salary>0；不再使用 project_fee；core 的 temporary_contract=null；temp 的 assignment_work_id = 合同项目；公司至少保留 1 名 core |
 | `Project` | id, offer, mode, investment, channels, opened_week, deadline_week, extension, status, supervisor_staff_id, common, episodes, plan | ip_id, committee_id, tv_service, delivery | committee 模式才可有 committee_id；episodes 长度 = offer.episode_count |
 | `CommonProduction` | id, items | — | items 非空 |
@@ -499,12 +499,15 @@ v3 的单项目、五阶段、全局 phase、单事件槽、双份财务汇总�
 
 
 
-### 14.9 核心编制成长与办公场地扩容时序（DEC-COMPANY-003 / DEC-COMPANY-002 补充）
+### 14.9 核心编制、设施扩建与办公场地扩容时序（DEC-COMPANY-003 / #63 2026-11-27 归档）
 
-- 公司成长里程碑达成时，新增核心员工名额立即解锁；`core_staff_capacity` 只统计核心员工，不包含临时员工。
-- 已解锁核心员工名额永久保留、只增不减；声望或其他成长指标回落不得回收已解锁名额。容量由公司成长进度单调推导，不绑定设施或办公场地等级。
-- 办公场地扩容允许跨级；不以声望作为硬性门槛，玩家满足目标规模的资金与槽位条件即可直接扩至目标规模，不要求逐级经过中间规模。
-- 扩容确认时即时扣除一次性搬迁费并立即开放目标规模槽位；新增基础房租增量从确认后的下一次 `advance_week` 周结算起计提，不追溯确认当周。
+- 开局正式编制上限为 4 人；`core_staff_capacity` 只统计核心员工，不包含项目临时员工。
+- 核心编制由设施扩建等级派生，取代旧“公司成长里程碑独立解锁编制”规则；后续扩建完全自愿，不是所有经营路线的必经门槛。
+- 完成第一个作品后暂定赠送第一级设施升级，正式编制上限提升至 8 人；精确触发时点与异常路径尚未冻结。后续阶梯为 8 → 12 → 16 → 20 → 24 → 30 人。
+- 8 人核心团队加项目临时员工应足以支撑高质量路线；玩家可长期停留在 8 人，继续扩建主要服务更大规模、更多项目并行的路线。
+- 设施升级费用、每周固定维护费与弹性工位数值尚未冻结；开局 4 人编制守卫待招聘运行时合入，设施升级派生尚未实现。
+- 办公场地扩容允许跨级，不以声望作为硬性门槛；玩家满足目标规模的资金与槽位条件即可直接扩至目标规模，不要求逐级经过中间规模。
+- 办公场地扩容确认时即时扣除一次性搬迁费并立即开放目标规模槽位；新增基础房租增量从确认后的下一次 `advance_week` 周结算起计提，不追溯确认当周。
 
 ### 14.10 红灯强制休养期间的归属与回归（DEC-STAFF-009）
 
@@ -534,6 +537,8 @@ v3 的单项目、五阶段、全局 phase、单事件槽、双份财务汇总�
 ### 14.13 Q3 招聘池与 Q4 定金锁定的字段契约（2026-11-25，依 #53 裁决）
 
 本节把 DECISION_LOG §17 Q3/Q4 已确认语义落成 v4 目标字段与命令契约。市场初始 4 槽/上限 10 槽、Scout 每周至多一次、锁定两周、同一企划终身仅锁定一次、到期定金不退、正式签约 100% 抵扣均为已确认规则；定金比例与计算基数已冻结：普通企划 5%、IP 上门企划 10%，统一按企划生成时固定的基础立项费用计算。池容量、轮换比例、候选窗口周数、保底阈值等仍为 `[PLACEHOLDER]`，由 #59/#58 标定。**本节不宣称任何运行时行为已经实现**；对应命令实现与参数标定验收前不得宣称已开放。本节不依赖危机状态，也不授权 `solvency.state="crisis"`、危机周推进或融资命令。
+
+> **2026-11-27 槽位规则冲突（暂停对应修改）：** #59 最新归档要求固定 4 槽（3 个独立循环槽＋1 个短期外援槽），覆盖上段及 INV-24 的“初始 4、上限 10”。槽位身份、刷新周期、外援进度缩放与持久化表达尚未冻结；#53 收口前不得按 cap10 合并市场运行时，也不得自行新增槽位字段。
 
 #### 14.13.1 Recruitment 聚合（Staff 域唯一持有）
 
@@ -591,7 +596,7 @@ PoolCandidate {
 7. 定金锁定与签约抵扣后 `balance = opening + Σentries` 仍成立；定金不被计两次支出。
 8. 锁定到期未接单：定金不退、无自动退款流水，`lock_used` 仍为 true。
 9. 当前状态 `loans=[]`、`solvency.state="normal"`；非空 loans、`solvency.state="crisis"` 或负余额均被拒绝，任何命令不得借此绕过现金预检或破产规则。
-10. 市场槽初始 4、上限 10；同一企划 id 终身唯一，市场/自定/提案槽不得重复。
+10. 市场槽初始 4、上限 10；同一企划 id 终身唯一，市场/自定/提案槽不得重复。**2026-11-27 #59 已归档固定 4 槽方向，槽位上限冲突待 #53 收口，暂不得按 cap10 实现。**
 
 ---
 
