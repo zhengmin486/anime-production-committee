@@ -231,3 +231,16 @@ npm run test:v4      # 构建 v4 模块 + 跑 25 条契约测试
 3. 用新分支开正式 PR（base = `main`），#42 关闭或标记 superseded。
 4. #45 以新 head 为 base 重放；它只加 `event.hpp/.cpp` 与三处钩子，差异范围保持纯事件域。
 5. 集成前在有 emsdk 的环境跑 `npm run test:v4`，把输出贴到 PR；本轮的 MSVC 结果只作为本机可复现证据。
+
+
+## 13. 输入契约补丁（2026-11-26）
+
+员工的 `fatigue` 与 `morale` 是周结算产能计算的直接输入。虽然反序列化结构为它们提供默认值，但存档缺少字段时不得静默按 0 继续运行。
+
+- `decode_state` 在统一入口要求每名员工同时提供 `fatigue`、`morale`；缺失返回 `INVALID_INPUT`。
+- 回归测试分别删除两个字段，并验证 `assign_staff`、`advance_week`、`hash_state` 均拒绝输入。
+- 测试同时验证原始合法状态的 `state_hash` 不变。
+- 不迁移旧分支中的 `project_fee` 检查：当前主线字段为 `signing_fee`，且已在入口要求。
+- 不重复迁移 `finance.solvency` 检查：当前主线已经要求该对象及其状态字段。
+
+本补丁仅补齐员工状态必填校验，不改变员工数值规则、周结算公式或 M2 生命周期。官方 Emscripten 环境下的 `npm run test:v4` 仍需执行后才能记录正式通过。
