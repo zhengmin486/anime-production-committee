@@ -1283,6 +1283,32 @@ test('事件结算：选项 cost 与 funds 效果同周入账时账本 id 不冲
   assert.equal(resolved.events.pending.length, 1)
 })
 
+test('事件现金不足：手动选项预检返回 INSUFFICIENT_FUNDS 且原子不变', () => {
+  let state = twoProjectsNearDeadline()
+  state = ok('advance_week', { state }).state
+  const event = state.events.pending.find((entry) => entry.work_id === 'work_a')
+  const option = event.options.find((entry) => entry.id === 'accept')
+
+  option.cost = state.finance.balance + 1
+  const beforeCost = ok('hash_state', { state: JSON.parse(JSON.stringify(state)) }).hash
+  const costFailure = call('resolve_event', {
+    state: JSON.parse(JSON.stringify(state)), work_id: 'work_a', event_id: 'schedule_slip', option_id: 'accept'
+  })
+  assert.equal(costFailure.error.code, 'INSUFFICIENT_FUNDS')
+  assert.equal('state' in costFailure, false)
+  assert.equal(ok('hash_state', { state }).hash, beforeCost)
+
+  option.cost = state.finance.balance - 100
+  option.effects.push({ scope: 'instant', target: 'funds', stage: '', value: -200 })
+  const beforeCombined = ok('hash_state', { state: JSON.parse(JSON.stringify(state)) }).hash
+  const combinedFailure = call('resolve_event', {
+    state: JSON.parse(JSON.stringify(state)), work_id: 'work_a', event_id: 'schedule_slip', option_id: 'accept'
+  })
+  assert.equal(combinedFailure.error.code, 'INSUFFICIENT_FUNDS')
+  assert.equal('state' in combinedFailure, false)
+  assert.equal(ok('hash_state', { state }).hash, beforeCombined)
+})
+
 // ---- M2 项目全链路 + M4 委员会/渠道结算 ----
 
 function completeWork(state, workId, quality = 80, gatesOnly = false) {

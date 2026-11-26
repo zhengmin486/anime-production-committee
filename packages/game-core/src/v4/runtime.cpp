@@ -2803,6 +2803,13 @@ std::string resolve_event(const std::string& input) {
         const std::string message = resolution.pending->name.empty() ? event_id : resolution.pending->name;
 
         const int week = state.company.week;
+        std::int64_t required_cash = std::max<std::int64_t>(resolution.option->cost, 0);
+        for (const auto& effect : resolution.option->effects) {
+            if (effect.target == "funds" && effect.value < 0) required_cash -= effect.value;
+        }
+        if (required_cash > state.finance.balance) {
+            return encode(error_body("INSUFFICIENT_FUNDS", "处理事件所需现金不足"));
+        }
         if (!apply_event_option(state, *resolution.pending, *resolution.option, week, false)) {
             return encode(error_body("NOT_FOUND", "事件归属项目不存在"));
         }
