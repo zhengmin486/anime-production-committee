@@ -16,7 +16,7 @@
 
 ## 当前权威入口
 
-- [2026-11-25 当前进度与决策落地状态](PROGRESS.md)：M1 已合入、M2 推进基线及集中裁决索引。
+- [2026-11-26 当前进度与决策落地状态](PROGRESS.md)：M0/M1 已完成、M2 推进基线及集中裁决索引。
 - [2026-11-25 设计建议总清单](DESIGN_BACKLOG_2026-11-25.md)：已确认、待讨论、优化储备与工程缺口的分类追踪。
 - [数值参数总清单与标定查阅索引](NUMERICAL_PARAMETERS_CATALOG.md)：盘点全系统需要确定的数值、参数类型、当前状态，以及每类参数决策前应查阅的规则、架构、契约、实现和标定议题。
 
@@ -25,6 +25,7 @@
 
 - [M0 契约冻结](M0_CONTRACT_FREEZE.md)
 - [M0–M7 开发路线与里程碑](DEVELOPMENT_ROADMAP.md)
+- [M1 运行时切片与验收记录](M1_RUNTIME_SLICE.md)
 - [制作蓝图规范](BLUEPRINT_SPEC.md)
 - [权威决策登记册](DECISION_LOG.md)
 - [决定索引与 ADR 记录](decisions/INDEX.md)：流程、治理与契约级决定单独建档，`accepted` 后不就地改写。
