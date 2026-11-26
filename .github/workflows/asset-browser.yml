@@ -1,0 +1,72 @@
+name: asset browser verification
+
+# 素材/前端资源的真实浏览器验收：在有 Emscripten 的 CI 上跑完整构建、
+# dist 产物校验与 Playwright 浏览器用例。对应 Issue #9 的未执行项。
+
+on:
+  push:
+    paths:
+      - "apps/web/public/assets/**"
+      - "apps/web/src/**"
+      - "scripts/browser.test.mjs"
+      - "scripts/verify-dist.mjs"
+      - "scripts/build-core.mjs"
+      - ".github/workflows/asset-browser.yml"
+  pull_request:
+    paths:
+      - "apps/web/public/assets/**"
+      - "apps/web/src/**"
+      - "scripts/browser.test.mjs"
+      - "scripts/verify-dist.mjs"
+      - "scripts/build-core.mjs"
+      - ".github/workflows/asset-browser.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  browser-verification:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Emscripten SDK
+        run: |
+          git clone --depth 1 https://github.com/emscripten-core/emsdk.git "$HOME/emsdk"
+          "$HOME/emsdk/emsdk" install latest
+          "$HOME/emsdk/emsdk" activate latest
+          source "$HOME/emsdk/emsdk_env.sh"
+          echo "$PATH" >> "$GITHUB_PATH"
+          em++ --version
+
+      - name: Install Chromium for playwright-core
+        run: npx --yes playwright@1.65.1 install --with-deps chromium
+
+      - name: Full build (WASM + web)
+        run: npm run build
+
+      - name: Verify dist artifacts
+        run: npm run verify:dist
+
+      - name: Browser contract tests
+        run: npm run test:browser
+
+      - name: Upload browser screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-verification-screenshots
+          path: build/browser-tests/
+          if-no-files-found: ignore
