@@ -119,7 +119,7 @@ export function CompanyOverview({ data, onOpen, selection, onSelect, focus, onNa
           </li>)}</ul>
         </Panel>
 
-        <Panel eyebrow="CAPACITY / 共享产能" title="并行经营的真实约束" marks={['confirmed', 'sample']}
+        <Panel eyebrow="CAPACITY / 共享产能" title="并行经营的真实约束" marks={['confirmed', 'sample']}>
           <dl className="proto-stats proto-stats-tight">
             <Stat label="在制作品 / 单集" value={`${projects.length} 部 · ${projects.reduce((sum, project) => sum + project.episodeCount, 0)} 集`} hint="不设固定项目槽位与数量上限" />
             <Stat label="本周需要重新分配" value={`${switched.length} 人已切换`} hint="重新分配属于玩家决定，系统不静默挪人" />

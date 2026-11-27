@@ -346,7 +346,7 @@ kbd { min-width: 20px; padding: 2px 5px; border: 1px solid var(--site-border); b
 .chair-south-west { left: 38%; transform: translateX(-50%) perspective(360px) rotateX(4deg) rotateZ(5deg); }
 .chair-south-east { left: 62%; transform: translateX(-50%) perspective(360px) rotateX(4deg) rotateZ(-5deg); }
 .chair-west { top: 8%; left: calc(50% - 64.8cqh - var(--chair-gap)); z-index: 1; width: 18%; transform: translateX(-100%) scaleX(-1) perspective(360px) rotateX(10deg); }
-.chair-east { top: 8%; left: calc(50% + 64.8cqh + var(--chair-gap)); width: 18%; transform: perspective(360px) rotateX(10deg); }
+.chair-east { top: 8%; left: calc(50% + 64.8cqh + var(--chair-gap)); z-index: 1; width: 18%; transform: perspective(360px) rotateX(10deg); }
 .meeting-nameplate { position: absolute; z-index: 4; padding: 5px 9px; transform: translateX(-50%); border: 1px solid rgb(255 255 255 / 24%); border-radius: 3px; background: rgb(40 57 62 / 88%); color: rgb(255 250 242 / 88%); font-size: 9px; white-space: nowrap; }
 .nameplate-north { top: calc(-34% - 24px); }
 .nameplate-north-west { left: 38%; }
