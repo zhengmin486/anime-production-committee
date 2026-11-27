@@ -35,7 +35,9 @@
 | `trigger` | 是 | `{metric, op, threshold}` | 见下表 |
 | `random_weight` | 是 | 0–100 | 0 表示只靠表现触发；>0 才进随机池 |
 | `expires_weeks` | 是 | 0–8 | 处理期限；正面机会必须 0 |
-| `escalation` | 否 | 仅允许 `null` 占位 | 一次升级载荷尚未冻结（#121 / #13 / #53）；写非空值会被内容校验与运行时同时拒绝 |
+| `escalation` | 否 | `null` 或 `{description, expires_weeks: 2, options[], timeout_option_id}` | 一次升级载荷；仅 `expires_weeks>0` 的 `major` 事件可配，详见 [限时升级语义](EVENT_ESCALATION.md) |
+| `timeout_option_id` | 升级时必填 | 指向本卡 `options[]` 中 `kind=abandon/decline` 的一项 | 首次超时的轻罚分支 |
+| `escalation_note` | 否 | `string \| null` | 超时后果的定性描述，不写数值 |
 | `options` | 是 | 1–4 项 | 负面必须有 `abandon`；正面必须有 `accept` 和 `decline` |
 
 ### 可用指标

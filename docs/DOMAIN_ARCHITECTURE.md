@@ -912,7 +912,9 @@ Entry { id, week, work_id: null|work_id, category, amount: signed, counterparty:
 EventState {
   pending: [{ event_id, work_id, episode_id: null|episode_id, stage: null|stage_key,
              item_id: null|item_id, triggered_week, viewed,
-             options[{id,label,cost,risk_hint}], expires_week, escalation }]
+             options[{id,label,cost,risk_hint}], expires_week,
+             timeout_option_id, escalated,
+             escalation: null | {description, expires_weeks: 2, triggered_week, options[], timeout_option_id}}]
   last_event_week
   per_work: { work_id: { cooldowns{event_id: week}, major_seen[] } }
 }

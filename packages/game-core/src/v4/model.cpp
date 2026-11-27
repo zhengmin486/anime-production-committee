@@ -346,24 +346,38 @@ void from_json(const Json& j, Finance& value) {
 }
 
 // ---------------- EventState ----------------
+// #121：pending 选项与升级快照选项共用同一序列化，保证 JSON 往返与哈希稳定。
+static Json options_to_json(const std::vector<EventOptionView>& options) {
+    Json out = Json::array();
+    for (const auto& option : options) {
+        Json effects = Json::array();
+        for (const auto& effect : option.effects) {
+            effects.push_back(Json{{"scope", effect.scope},
+                                   {"target", effect.target},
+                                   {"stage", effect.stage},
+                                   {"value", effect.value}});
+        }
+        out.push_back(Json{{"id", option.id},
+                           {"label", option.label},
+                           {"kind", option.kind},
+                           {"risk_hint", option.risk_hint},
+                           {"cost", option.cost},
+                           {"effects", effects}});
+    }
+    return out;
+}
+
 void to_json(Json& j, const EventState& value) {
     Json pending = Json::array();
     for (const auto& event : value.pending) {
-        Json options = Json::array();
-        for (const auto& option : event.options) {
-            Json effects = Json::array();
-            for (const auto& effect : option.effects) {
-                effects.push_back(Json{{"scope", effect.scope},
-                                       {"target", effect.target},
-                                       {"stage", effect.stage},
-                                       {"value", effect.value}});
-            }
-            options.push_back(Json{{"id", option.id},
-                                   {"label", option.label},
-                                   {"kind", option.kind},
-                                   {"risk_hint", option.risk_hint},
-                                   {"cost", option.cost},
-                                   {"effects", effects}});
+        Json options = options_to_json(event.options);
+        Json escalation = Json(nullptr);
+        if (event.escalation.has_value()) {
+            escalation = Json{{"description", event.escalation->description},
+                              {"expires_weeks", event.escalation->expires_weeks},
+                              {"triggered_week", event.escalation->triggered_week},
+                              {"options", options_to_json(event.escalation->options)},
+                              {"timeout_option_id", event.escalation->timeout_option_id}};
         }
         pending.push_back(Json{{"event_id", event.event_id},
                                {"name", event.name},
@@ -373,7 +387,10 @@ void to_json(Json& j, const EventState& value) {
                                {"cooldown_weeks", event.cooldown_weeks},
                                {"once_per_project", event.once_per_project},
                                {"viewed", event.viewed},
-                               {"options", options}});
+                               {"options", options},
+                               {"timeout_option_id", event.timeout_option_id},
+                               {"escalated", event.escalated},
+                               {"escalation", escalation}});
     }
     Json per_work = Json::object();
     for (const auto& [work_id, entry] : value.per_work) {
@@ -384,6 +401,32 @@ void to_json(Json& j, const EventState& value) {
     j = Json{{"pending", pending},
              {"last_event_week", value.last_event_week ? Json(*value.last_event_week) : Json(nullptr)},
              {"per_work", per_work}};
+}
+
+static std::vector<EventOptionView> options_from_json(const Json& raw) {
+    std::vector<EventOptionView> out;
+    if (!raw.contains("options") || !raw.at("options").is_array()) return out;
+    for (const auto& option : raw.at("options")) {
+        if (!option.is_object()) continue;
+        EventOptionView view;
+        view.id = option.value("id", std::string{});
+        view.label = option.value("label", std::string{});
+        view.kind = option.value("kind", std::string{});
+        view.risk_hint = option.value("risk_hint", std::string{});
+        view.cost = option.value("cost", 0);
+        if (option.contains("effects") && option.at("effects").is_array()) {
+            for (const auto& effect : option.at("effects")) {
+                if (!effect.is_object()) continue;
+                view.effects.push_back(EffectView{
+                    effect.value("scope", std::string{}),
+                    effect.value("target", std::string{}),
+                    effect.value("stage", std::string{}),
+                    effect.value("value", 0)});
+            }
+        }
+        out.push_back(std::move(view));
+    }
+    return out;
 }
 
 void from_json(const Json& j, EventState& value) {
@@ -402,27 +445,19 @@ void from_json(const Json& j, EventState& value) {
             if (raw.contains("expires_week") && raw.at("expires_week").is_number_integer()) {
                 event.expires_week = raw.at("expires_week").get<int>();
             }
-            if (raw.contains("options") && raw.at("options").is_array()) {
-                for (const auto& option : raw.at("options")) {
-                    if (!option.is_object()) continue;
-                    EventOptionView view;
-                    view.id = option.value("id", std::string{});
-                    view.label = option.value("label", std::string{});
-                    view.kind = option.value("kind", std::string{});
-                    view.risk_hint = option.value("risk_hint", std::string{});
-                    view.cost = option.value("cost", 0);
-                    if (option.contains("effects") && option.at("effects").is_array()) {
-                        for (const auto& effect : option.at("effects")) {
-                            if (!effect.is_object()) continue;
-                            view.effects.push_back(EffectView{
-                                effect.value("scope", std::string{}),
-                                effect.value("target", std::string{}),
-                                effect.value("stage", std::string{}),
-                                effect.value("value", 0)});
-                        }
-                    }
-                    event.options.push_back(std::move(view));
-                }
+            event.options = options_from_json(raw);
+            event.timeout_option_id = raw.value("timeout_option_id", std::string{});
+            event.escalated = raw.value("escalated", false);
+            // 旧存档缺 escalation：按“未升级”处理，不修改其他字段、不推进周数。
+            if (raw.contains("escalation") && raw.at("escalation").is_object()) {
+                const auto& esc = raw.at("escalation");
+                EscalationView view;
+                view.description = esc.value("description", std::string{});
+                view.expires_weeks = esc.value("expires_weeks", 0);
+                view.triggered_week = esc.value("triggered_week", 0);
+                view.options = options_from_json(esc);
+                view.timeout_option_id = esc.value("timeout_option_id", std::string{});
+                event.escalation = std::move(view);
             }
             value.pending.push_back(std::move(event));
         }

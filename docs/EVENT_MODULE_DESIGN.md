@@ -2,6 +2,7 @@
 
 - 模块负责人：@pyxz0；内容协作者：@Muchbv（见 [#13](https://github.com/zhengmin486/anime-production-committee/issues/13)）
 - 跟踪议题：[#11](https://github.com/zhengmin486/anime-production-committee/issues/11)
+- 限时升级与二次超时的现行实现语义见 [EVENT_ESCALATION.md](EVENT_ESCALATION.md)（#121 / DEC-EVENT-003）
 - 终局语义：[Event 终局 pending 的结清语义（#120）](EVENT_TERMINAL_SETTLEMENT.md)——破产与第 520 周如何结清 pending、扣罚上限与对账口径
 - 依据：`docs/TEAM_DELIVERABLES/EVENT_MODULE.md` 的 15 条已确认规则、`docs/GAME_RULES.md` V3.2 第 7 步与第 8 节
 - 状态：**期限与放弃机制已由 zm 确认，待按本文档实现与验收**。本文档不修改其他已冻结规则；标「契约扩展」的条目仍需批注后才能进核心。
