@@ -534,7 +534,7 @@ v3 的单项目、五阶段、全局 phase、单事件槽、双份财务汇总�
 - 命令 17（`advance_week`）的推进守卫只统计 `viewed=false` 的条目，`INVALID_PHASE` 消息给出未查看条数；已查看未处理事件原样保留在 `events.pending[]` 并可随周推进继续存在。
 - `events.pending[]` 每条必须带 `work_id/event_id/triggered_week/viewed`（INV-23）。`viewed` 缺失按非法输入拒绝，不静默当作未查看，避免旧形状存档被默认值放行推进。
 - 同一事件选项的 `cost` 与 `funds` 效果在同周产生多条流水时，账本条目 id 必须互不相同（INV-02）；事件强制支出以当前余额封顶，不得让现金转负。
-- 本条登记已实现语义：内容卡 `expires_weeks` 允许 0..8；非 0 卡必须为负面事件并带 `abandon`，运行时以该冻结快照作为默认消极/保守分支。触发周计入期限，`expires_week = triggered_week + expires_weeks - 1`；仅已查看事件在阶段 7 到期处理，自动支出按当前现金封顶，只移除目标 `(work_id,event_id)`。§14.11 的升级规则已由 DEC-EVENT-003 冻结：首次超时执行轻罚并升级一次，沿用原事件身份替换 pending，标记已升级，升级后期限固定2周；二次超时自动执行升级事件预设的强制处理/硬罚并移除 pending，不采用双倍处罚。内容字段、PendingEvent快照和存档契约仍待 #13/#53/#49 对齐并实现；在运行时实现合入前，非空升级配置仍由当前校验器拒绝加载。
+- 本条登记已实现语义：内容卡 `expires_weeks` 允许 0..8；非 0 卡必须为负面事件并带 `abandon`，运行时以该冻结快照作为默认消极/保守分支。触发周计入期限，`expires_week = triggered_week + expires_weeks - 1`；仅已查看事件在阶段 7 到期处理，自动支出按当前现金封顶，只移除目标 `(work_id,event_id)`。§14.11 的升级规则已由 DEC-EVENT-003 冻结：首次超时执行轻罚并升级一次，沿用原事件身份替换 pending，标记已升级，升级后期限固定2周；二次超时自动执行升级事件预设的强制处理/硬罚并移除 pending，不采用双倍处罚。内容字段与 PendingEvent 快照已按 #13/#53/#49 对齐并落地：`timeout_option_id` / `escalated` / `escalation` 三字段随 pending 持久化，旧存档缺字段按「无升级」处理；合法升级配置在加载期放行，非法配置整卡拒绝。运行时语义与对账见 `docs/EVENT_ESCALATION.md`。
 
 ### 14.13 Q3 招聘池与 Q4 定金锁定的字段契约（2026-11-25，依 #53 裁决）
 

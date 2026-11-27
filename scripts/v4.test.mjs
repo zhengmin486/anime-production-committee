@@ -975,27 +975,46 @@ test('事件内容：非法卡被拒绝并定位到卡片与字段', () => {
   }])
   assert.ok(noDefault.issues.some((issue) => issue.field === 'options' && issue.message.includes('默认分支')))
 
-  // #121：§14.11 一次升级字段未冻结，非空配置必须拒绝加载，不能静默忽略。
-  const unfrozenFields = [
-    ['escalation', { description: '升级', expires_weeks: 1, options: [], timeout_option_id: 'accept' }],
-    ['timeout_option_id', 'accept'],
-    ['escalation_note', '需要二次处理']
+  // #121 / DEC-EVENT-003：升级字段已冻结；合法配置可加载，非法配置整卡拒绝。
+  const escalationCard = {
+    ...card,
+    expires_weeks: 2,
+    tier: 'major',
+    once_per_project: true,
+    cooldown_weeks: 0,
+    timeout_option_id: 'accept',
+    escalation: {
+      description: '升级：供应商催款',
+      expires_weeks: 2,
+      options: [
+        { id: 'soft', kind: 'abandon', label: '轻罚', cost: 10, effects: [] },
+        { id: 'hard', kind: 'abandon', label: '硬罚', cost: 20,
+          effects: [{ scope: 'instant', target: 'quality', value: -5 }] }
+      ],
+      timeout_option_id: 'hard'
+    },
+    escalation_note: '二次超时强制执行'
+  }
+  assert.equal(validate([escalationCard]).ok, true)
+  assert.deepEqual(validateCard(escalationCard, 'fixture.json'), [])
+
+  const badEscalations = [
+    [{ ...escalationCard, escalation: { ...escalationCard.escalation, expires_weeks: 3 } }, 'escalation.expires_weeks'],
+    [{ ...escalationCard, timeout_option_id: 'missing' }, 'timeout_option_id'],
+    [{ ...escalationCard, escalation: { ...escalationCard.escalation, timeout_option_id: 'missing' } }, 'escalation.timeout_option_id'],
+    [{ ...escalationCard, escalation: { ...escalationCard.escalation, escalation: {} } }, 'escalation.escalation'],
+    [{ ...escalationCard, tier: 'normal', once_per_project: false }, 'escalation'],
+    [{ ...escalationCard, expires_weeks: 0 }, 'escalation']
   ]
-  for (const [field, value] of unfrozenFields) {
-    const candidate = { ...card, [field]: value }
-    const runtime = validate([candidate])
-    assert.ok(runtime.issues.some(
-      (issue) => issue.field === field && issue.message.includes('未冻结')))
-    const content = validateCard(candidate, 'fixture.json')
-    assert.ok(content.some(
-      (issue) => issue.field === field && issue.message.includes('未冻结')))
+  for (const [candidate, field] of badEscalations) {
+    assert.ok(validate([candidate]).issues.some((issue) => issue.field === field), field)
+    assert.ok(validateCard(candidate, 'fixture.json').some((issue) => issue.field === field), field)
   }
   const nullPlaceholders = {
     ...card, escalation: null, timeout_option_id: null, escalation_note: null
   }
   assert.equal(validate([nullPlaceholders]).ok, true)
   assert.deepEqual(validateCard(nullPlaceholders, 'fixture.json'), [])
-
   const empty = ok('validate_event_catalog', { source: 'empty', catalog: { schema_version: 1, cards: [] } })
   assert.equal(empty.ok, false)
   assert.equal(empty.issues[0].field, 'cards')
@@ -2633,6 +2652,122 @@ test('#120 结清/未结清状态都能 JSON 往返：不补字段、不推进�
   assert.equal(settledRoundTrip.events.pending.length, settledState.events.pending.length)
 })
 
+// #121：把限时事件改造成「合法升级配置」的夹具。轻罚 100、硬罚 200，
+// 数值完全来自预设，运行时不得乘倍。
+function escalationReady(state, workId = null) {
+  const event = workId === null
+    ? state.events.pending[0]
+    : state.events.pending.find((item) => item.work_id === workId)
+  event.options = [
+    { id: 'soft', label: '轻罚', kind: 'abandon', cost: 100, risk_hint: '', effects: [] },
+    { id: 'take', label: '接受', kind: 'accept', cost: 0, risk_hint: '', effects: [] }
+  ]
+  event.timeout_option_id = 'soft'
+  event.escalated = false
+  // 避免第 2 周阶段 6 强制交付抢在阶段 7 之前；升级用例只考察超时路径。
+  for (const work of state.works) work.deadline_week = 20
+  event.escalation = {
+    description: '供应商升级催款',
+    expires_weeks: 2,
+    triggered_week: 0,
+    options: [
+      { id: 'soft2', label: '轻罚', kind: 'abandon', cost: 0, risk_hint: '', effects: [] },
+      { id: 'hard', label: '硬罚', kind: 'abandon', cost: 200, risk_hint: '', effects: [] }
+    ],
+    timeout_option_id: 'hard'
+  }
+  return state
+}
+test('#121 首次超时：执行预设轻罚并原地升级，固定 2 周新期限且身份不变', () => {
+  const state = forceCash(escalationReady(timedEventState()), 2000000)
+  const week = state.company.week
+  const triggered = state.events.pending[0].triggered_week
+  const result = ok('advance_week', { state })
+  const pending = result.state.events.pending.find((item) => item.event_id === 'schedule_slip')
+  assert.ok(pending, '升级不移除 pending')
+  assert.equal(pending.escalated, true)
+  assert.equal(pending.expires_week, week + 1)
+  assert.equal(pending.viewed, true)
+  assert.equal(pending.triggered_week, triggered)
+  assert.equal(pending.work_id, 'work_01')
+  assert.deepEqual(pending.options.map((item) => item.id), ['soft2', 'hard'])
+  assert.deepEqual(result.report.events.expired.map((item) => item.option_id), ['soft'])
+  assert.equal(result.state.finance.entries.filter((entry) => entry.memo === 'schedule_slip' && entry.amount === -100).length, 1)
+  assert.equal(result.state.company.week, week + 1)
+})
+
+test('#121 二次超时：自动执行升级预设硬罚并移除 pending，不乘倍', () => {
+  const first = ok('advance_week', { state: forceCash(escalationReady(timedEventState()), 2000000) }).state
+  assert.equal(first.events.pending.length, 1)
+  const second = ok('advance_week', { state: first })
+  assert.equal(second.state.events.pending.length, 0)
+  assert.deepEqual(second.report.events.expired.map((item) => item.option_id), ['hard'])
+  const penalties = second.state.finance.entries.filter((entry) => entry.memo === 'schedule_slip')
+  assert.equal(penalties.filter((entry) => entry.amount === -200).length, 1)
+  assert.equal(penalties.filter((entry) => entry.amount === -400).length, 0, '不得自行按双倍扣款')
+  assert.equal(second.state.company.status, 'running')
+})
+
+test('#121：升级只处理目标事件，同周其他项目 pending 原样保留', () => {
+  const drawn = ok('advance_week', { state: twoProjectsNearDeadline() }).state
+  for (const event of drawn.events.pending) event.viewed = true
+  const state = escalationReady(drawn, 'work_a')
+  const target = state.events.pending.find((item) => item.work_id === 'work_a')
+  target.expires_week = state.company.week
+  const other = state.events.pending.find((item) => item.work_id === 'work_b')
+  other.expires_week = state.company.week + 3
+  const result = ok('advance_week', { state })
+  const kept = result.state.events.pending.find((item) => item.work_id === 'work_b')
+  assert.deepEqual(kept, other)
+  assert.equal(result.report.events.expired.filter((item) => item.work_id === 'work_b').length, 0)
+})
+
+test('#121 升级快照 JSON 往返：字段不丢、哈希稳定、不推进周数', () => {
+  const escalated = ok('advance_week', { state: forceCash(escalationReady(timedEventState()), 2000000) }).state
+  const roundTrip = JSON.parse(JSON.stringify(escalated))
+  assert.equal(ok('hash_state', { state: roundTrip }).hash, ok('hash_state', { state: escalated }).hash)
+  assert.equal(roundTrip.company.week, escalated.company.week)
+  assert.deepEqual(roundTrip.events.pending, escalated.events.pending)
+  assert.equal(roundTrip.events.pending[0].escalated, true)
+  assert.equal(roundTrip.events.pending[0].escalation.timeout_option_id, 'hard')
+})
+
+test('#121 同样输入重放：升级与二次超时结果逐位一致', () => {
+  const run = () => {
+    const first = ok('advance_week', { state: forceCash(escalationReady(timedEventState()), 2000000) }).state
+    const second = ok('advance_week', { state: first })
+    return ok('hash_state', { state: second.state }).hash
+  }
+  assert.equal(run(), run())
+})
+
+test('#121 二次硬罚沿用现金封顶：预设金额大于现金时不产生负余额', () => {
+  const state = forceCash(escalationReady(timedEventState()), 250000)
+  const event = state.events.pending[0]
+  event.escalation.triggered_week = state.company.week - 1
+  event.escalation.options[1].cost = 500000
+  event.escalated = true
+  event.options = event.escalation.options
+  event.expires_week = state.company.week
+  const result = ok('advance_week', { state })
+  assert.equal(result.state.events.pending.some((item) => item.event_id === 'schedule_slip'), false)
+  assert.equal(result.state.finance.balance, 0)
+  const entries = result.state.finance.entries.filter((entry) => entry.memo === 'schedule_slip')
+  assert.equal(entries.length, 1)
+  assert.ok(entries[0].amount < 0 && entries[0].amount > -500000, '只扣可支付现金，不按预设 500000 记欠款')
+})
+
+test('#121 非法升级快照原子拒绝：不推进、不扣款、哈希不变', () => {
+  const state = forceCash(escalationReady(timedEventState()), 2000000)
+  state.events.pending[0].escalated = true
+  state.events.pending[0].escalation = null
+  const before = ok('hash_state', { state }).hash
+  const failed = call('advance_week', { state })
+  assert.ok(failed.error)
+  assert.match(failed.error.message, /升级快照/)
+  assert.equal('state' in failed, false)
+  assert.equal(ok('hash_state', { state }).hash, before)
+})
 // ---------------- INV-27 监督岗位 ----------------
 
 function startedContract(offerId = 'offer_01', seed = 7) {

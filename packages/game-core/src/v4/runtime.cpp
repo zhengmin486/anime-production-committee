@@ -1895,11 +1895,36 @@ std::vector<std::string> validate(const GameState& state) {
         if (event.triggered_week < 0 || event.triggered_week > state.company.week) {
             error("INV-23 triggered_week 越界: " + event.event_id);
         }
-        if (event.expires_week && *event.expires_week < event.triggered_week) {
-            error("INV-23 expires_week 早于触发周: " + event.event_id);
+        // #121：升级后的期限以升级周为基准（固定 2 周窗口），原触发周保持不变。
+        const int deadline_base = (event.escalated && event.escalation.has_value())
+                                      ? event.escalation->triggered_week : event.triggered_week;
+        if (event.expires_week && *event.expires_week < deadline_base) {
+            error("INV-23 expires_week 早于期限基准周: " + event.event_id);
         }
-        if (event.expires_week && *event.expires_week > event.triggered_week + 7) {
+        if (event.expires_week && *event.expires_week > deadline_base + 7) {
             error("INV-29 expires_week 超出八周处理上限: " + event.event_id);
+        }
+        if (event.escalated && !event.escalation.has_value()) {
+            error("INV-29 已升级事件缺少升级快照: " + event.event_id);
+        }
+        if (event.escalation.has_value()) {
+            const auto& esc = *event.escalation;
+            if (esc.expires_weeks != 2) error("INV-29 升级窗口必须固定为 2 周: " + event.event_id);
+            if (esc.options.empty()) error("INV-29 升级快照缺少替换选项: " + event.event_id);
+            if (std::none_of(esc.options.begin(), esc.options.end(),
+                             [](const EventOptionView& option) { return option.kind == "abandon"; })) {
+                error("INV-29 升级选项缺少 abandon 分支: " + event.event_id);
+            }
+            const bool hard_branch = std::any_of(esc.options.begin(), esc.options.end(),
+                [&esc](const EventOptionView& option) {
+                    return option.id == esc.timeout_option_id &&
+                           (option.kind == "abandon" || option.kind == "decline");
+                });
+            if (!hard_branch) error("INV-29 二次硬罚分支引用无效: " + event.event_id);
+            if (event.escalated && event.expires_week &&
+                *event.expires_week != esc.triggered_week + 1) {
+                error("INV-29 升级期限不是固定 2 周窗口: " + event.event_id);
+            }
         }
         if (event.expires_week &&
             std::none_of(event.options.begin(), event.options.end(),
@@ -2740,6 +2765,15 @@ const EventOptionView* default_event_option(const PendingEvent& pending) {
     return nullptr;
 }
 
+// #121：按选项 id 查找冻结快照中的分支；只认保守类型，避免误把玩家正向选项当超时惩罚。
+const EventOptionView* find_timeout_option(const PendingEvent& pending, const std::string& option_id) {
+    for (const auto& option : pending.options) {
+        if (option.id != option_id) continue;
+        return (option.kind == "abandon" || option.kind == "decline") ? &option : nullptr;
+    }
+    return nullptr;
+}
+
 // #120：强制终局的 pending 结清。破产与第 520 周已经没有玩家决策机会，但事件不能丢弃、
 // 也不能留下指向已关闭项目的悬空条目，因此逐条执行冻结快照里的默认保守分支：
 //   1. 顺序固定为 (work_id, event_id) 排序，与数组顺序、项目遍历顺序无关；
@@ -3468,8 +3502,30 @@ std::string advance_week(const std::string& input) {
         });
         Json expired = Json::array();
         for (const auto& pending : due_events) {
-            const EventOptionView* option = default_event_option(pending);
-            if (option == nullptr) return fail_stage(7, "INVALID_STATE", "限期事件缺少 abandon 默认分支");
+            // #121 / DEC-EVENT-003：升级事件二次超时 → 执行预设硬罚，不乘倍，移除 pending。
+            if (pending.escalated) {
+                if (!pending.escalation.has_value()) {
+                    return fail_stage(7, "INVALID_STATE", "已升级事件缺少升级快照");
+                }
+                const EventOptionView* hard = find_timeout_option(pending, pending.escalation->timeout_option_id);
+                if (hard == nullptr) return fail_stage(7, "INVALID_STATE", "二次硬罚分支引用无效");
+                if (!apply_event_option(state, pending, *hard, week, true)) {
+                    return fail_stage(7, "INVALID_STATE", "到期事件归属项目不存在");
+                }
+                auto& events = state.events.pending;
+                const auto hit = std::find_if(events.begin(), events.end(), [&pending](const PendingEvent& item) {
+                    return item.work_id == pending.work_id && item.event_id == pending.event_id;
+                });
+                if (hit == events.end()) return fail_stage(7, "INVALID_STATE", "到期事件重复处理");
+                events.erase(hit);
+                expired.push_back(Json{{"work_id", pending.work_id}, {"event_id", pending.event_id},
+                                       {"option_id", hard->id}, {"automatic", true}});
+                continue;
+            }
+            const EventOptionView* option = pending.timeout_option_id.empty()
+                                                ? default_event_option(pending)
+                                                : find_timeout_option(pending, pending.timeout_option_id);
+            if (option == nullptr) return fail_stage(7, "INVALID_STATE", "限期事件缺少可用的保守超时分支");
             if (!apply_event_option(state, pending, *option, week, true)) {
                 return fail_stage(7, "INVALID_STATE", "到期事件归属项目不存在");
             }
@@ -3478,7 +3534,15 @@ std::string advance_week(const std::string& input) {
                 return item.work_id == pending.work_id && item.event_id == pending.event_id;
             });
             if (hit == events.end()) return fail_stage(7, "INVALID_STATE", "到期事件重复处理");
-            events.erase(hit);
+            if (pending.escalation.has_value()) {
+                // 首次超时：轻罚已入账，原地替换内容快照并设置固定 2 周新期限；身份与 viewed 不变。
+                hit->options = pending.escalation->options;
+                hit->expires_week = week + 1;
+                hit->escalation->triggered_week = week;
+                hit->escalated = true;
+            } else {
+                events.erase(hit);
+            }
             expired.push_back(Json{{"work_id", pending.work_id}, {"event_id", pending.event_id},
                                    {"option_id", option->id}, {"automatic", true}});
         }
