@@ -123,6 +123,15 @@ struct AggregatedQuality {
 AggregatedQuality aggregate_episode(const Episode& episode);
 AggregatedQuality aggregate_work(const Project& work);
 
+// ---- 全片最终质量（DEC-STAFF-008）----
+// 基础分 = Σ(全片质量权重 × Q_item)；核心审美奖励按核心审美权重加权平均后相加。
+// Q_item 取该工作项「已形成维度」的均值（Q_base/Q_sup/Q_cap/Q_ext_cap 尚未实现，见 DEC 状态）。
+// supervisor 为项目在任监督，null 时 S_sup 记 0（不产生奖励）。
+// 返回千分之一分精度；上限 105000（105 分），对接 quality_factor(105)=1040‰。
+int final_quality_milli(const Project& work, const Staff* supervisor);
+// 监督能力 S_sup（百分之一分精度）：天然监督系 70/30，转任系 50/25/25。
+int supervisor_ability_centi(const Staff& staff);
+
 // ---- 费用（周结算的强制成本，[PLACEHOLDER] 数值）----
 int64_t weekly_operations_cost();
 int64_t weekly_production_cost(const std::string& intensity);

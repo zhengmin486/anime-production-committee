@@ -187,6 +187,7 @@ bool instantiate(const Json& blueprint, const std::string& work_id, int opened_w
         item.deliver_at = raw.value("deliver_at", 1000);
         item.outsourceable = raw.value("outsourceable", false);
         item.quality_weight_permille = raw.value("quality_weight_permille", 0);
+        item.core_aesthetic = raw.value("core_aesthetic", false);
         for (const auto& dep : raw.value("deps", Json::array())) {
             if (dep.is_string()) item.deps.push_back(map_dep(dep.get<std::string>(), std::string{}));
         }
@@ -225,6 +226,7 @@ bool instantiate(const Json& blueprint, const std::string& work_id, int opened_w
             item.is_gate = raw.value("is_gate", false);
             item.outsourceable = raw.value("outsourceable", false);
             item.quality_weight_permille = raw.value("quality_weight_permille", 0);
+            item.core_aesthetic = raw.value("core_aesthetic", false);
             for (const auto& dep : raw.value("deps", Json::array())) {
                 if (dep.is_string()) item.deps.push_back(map_dep(dep.get<std::string>(), prefix));
             }
@@ -376,7 +378,7 @@ GameState decode_state(const Json& request) {
     }
     const auto require_item = [&require](const Json& item) {
         for (const char* key : {"id", "key", "ability", "work_total", "work_done", "deliver_at", "deps",
-                                "is_gate", "outsourceable", "quality_weight_permille", "quality", "contributors"}) {
+                                "is_gate", "outsourceable", "quality_weight_permille", "core_aesthetic", "quality", "contributors"}) {
             require(item, key, "item");
         }
         for (const char* key : {"id", "key", "ability"}) {
@@ -386,6 +388,7 @@ GameState decode_state(const Json& request) {
             if (!item.at(key).is_number_integer()) throw Json::type_error::create(302, "item." + std::string(key) + " 必须是整数", nullptr);
         }
         if (!item.at("is_gate").is_boolean() || !item.at("outsourceable").is_boolean() ||
+            !item.at("core_aesthetic").is_boolean() ||
             !item.at("quality").is_object() || !item.at("deps").is_array() || !item.at("contributors").is_array()) {
             throw Json::type_error::create(302, "item 门槛、外包资格、质量、依赖或贡献者类型无效", nullptr);
         }
@@ -1185,7 +1188,7 @@ bool archive_work_record(const Json& record, std::int64_t company_week,
         if (!archive_text(channel.at("window")) || !one_of_text(channel.at("window").get<std::string>(),
             {"domestic_streaming", "overseas", "merchandise", "music", "tv", "bd_dvd"})
             || !windows.insert(channel.at("window").get<std::string>()).second || !archive_integer(channel.at("potential"), 0)
-            || !archive_integer(channel.at("quality_factor"), 0, 1000) || !archive_integer(channel.at("heat_factor"), 0, 2000)
+            || !archive_integer(channel.at("quality_factor"), 0, kQualityFactorMax) || !archive_integer(channel.at("heat_factor"), 0, 2000)
             || !archive_integer(channel.at("reputation_factor"), 0, 2000) || !archive_integer(channel.at("tv_multiplier"), 0, 2000)
             || !archive_integer(channel.at("agency_fee_permille"), 0, 1000) || !archive_integer(channel.at("gross"), 0)
             || !archive_integer(channel.at("net"), 0, channel.at("gross").get<std::int64_t>())
@@ -2854,7 +2857,15 @@ SettlementOutcome settle_project(GameState& state, Project& work, const std::str
     const int gcp = forced || aborted ? gate_completion_permille(work) : 1000;
 
     const auto quality = kernel::aggregate_work(work);
-    const int raw_score = quality.mean;
+    // DEC-STAFF-008：Q_final = 权重加权基础分 + 核心审美奖励（按核心审美权重归一）。
+    const Staff* supervisor = nullptr;
+    if (work.supervisor_staff_id) {
+        for (const auto& member : state.staff) {
+            if (member.id == *work.supervisor_staff_id) supervisor = &member;
+        }
+    }
+    const int q_final = kernel::final_quality_milli(work, supervisor) / 1000;
+    const int raw_score = q_final;
     const int correction = forced ? std::min(kForcedScorePenaltyMax, (1000 - gcp) / 100) : 0;
     const int score = clamp_int(raw_score - correction, 0, 100);
     const std::string rating = rating_of(score);
@@ -2960,8 +2971,8 @@ SettlementOutcome settle_project(GameState& state, Project& work, const std::str
     // DEC-QUALITY-001：Q_min 合同验收。达标线取企划快照的 target_quality（0 = 未声明，不判违约）；
     // Q_final 目前用 aggregate mean——核心审美奖励尚未实现，这是已登记的近似口径。
     const int q_min = offer.value("target_quality", 0);
-    const bool quality_miss = !aborted && q_min > 0 && score < q_min;
-    const int quality_gap = quality_miss ? q_min - score : 0;
+    const bool quality_miss = !aborted && q_min > 0 && q_final < q_min;
+    const int quality_gap = quality_miss ? q_min - q_final : 0;
     std::int64_t quality_penalty = 0;
     if (quality_miss) {
         // 每低 1 分扣制作费 2%，上限 30%（千分比 20×gap，封顶 300）。
@@ -3173,7 +3184,8 @@ SettlementOutcome settle_project(GameState& state, Project& work, const std::str
                        {"gate_completion_permille", gcp},
                        {"aborted_week", aborted ? Json(week) : Json(nullptr)},
                        {"penalty_paid", penalty},
-                       {"quality", Json{{"dims", dims}, {"mean", raw_score}}},
+                       // 归档 quality 保留六维聚合（展示用），评级与 Q_min 走 quality_score / Q_final
+                       {"quality", Json{{"dims", dims}, {"mean", quality.mean}}},
                        {"quality_score", score},
                        {"rating", rating},
                        {"commercial_revenue", gross_total},
@@ -3240,6 +3252,7 @@ SettlementOutcome settle_project(GameState& state, Project& work, const std::str
                           {"success_reward", reward},
                           {"contract_refund", contract_refund},
                           {"q_min", q_min},
+                          {"q_final", q_final},
                           {"quality_gap", quality_gap},
                           {"quality_penalty", quality_penalty},
                           {"penalty", penalty},

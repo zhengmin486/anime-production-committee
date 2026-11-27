@@ -149,6 +149,7 @@ GameState {
 实测键与 M0 §3 必填逐一对应：`id, key, ability, work_total, work_done, deliver_at, deps, is_gate, outsourceable, quality, contributors`。
 
 - `quality` 是对象，固定 6 键 `story/direction/drawing/animation/art/sound`。
+- `core_aesthetic` 标记该工作项是否为核心审美工序（DEC-STAFF-008）。只有标记为 true 且 `S_sup>70、Q_item>70` 的工作项参与核心审美奖励，奖励按核心审美权重加权平均后加到基础分，最高 +5 分。
 - `quality_weight_permille` 是全片质量权重（INV-30）。作品分 = 公共层 × Σcommon + 单集均分 × Σepisode，两层各自归一后再合成；v0.5 为 200‰ / 800‰，与 DEC-STAFF-008 的 20 / 20 / 22 / 10 / 13 / 5 / 10 对应。
 - 质量写入语义：**首次接触**把整项基准铺满六维（样本以能力或供应商 quality 为准，逐维受依赖上限约束），之后每次投入只精修一个维度（700/300 加权抽取、30% 靠拢）。外包交付同样写质量，样本取 `Supplier.quality`，不写会让"多数工作量由协力完成"在作品分里消失。
 - `contributors` 是员工 id 字符串数组；`deps` 是工作项 id 字符串数组。

@@ -103,6 +103,8 @@ struct WorkItem {
     // 全片质量权重（千分比）。公共层与单集各自成组：Σcommon + Σepisode = 1000，
     // 每个单集的权重和必须相同（DEC-STAFF-008 的 20/20/22/10/13/5/10）。
     int quality_weight_permille = 0;
+    // DEC-STAFF-008：核心审美工序才参与「核心审美奖励」（要求 S_sup>70 且 Q_item>70）。
+    bool core_aesthetic = false;
     Quality quality;
     std::vector<std::string> contributors;
 

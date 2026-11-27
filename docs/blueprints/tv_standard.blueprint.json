@@ -15,7 +15,8 @@
       "deliver_at": 850,
       "deps": [],
       "outsourceable": false,
-      "quality_weight_permille": 63
+      "quality_weight_permille": 63,
+      "core_aesthetic": true
     },
     {
       "key": "character_design",
@@ -25,7 +26,8 @@
       "deliver_at": 900,
       "deps": [],
       "outsourceable": false,
-      "quality_weight_permille": 42
+      "quality_weight_permille": 42,
+      "core_aesthetic": true
     },
     {
       "key": "art_setting",
@@ -35,7 +37,8 @@
       "deliver_at": 850,
       "deps": ["common:character_design"],
       "outsourceable": false,
-      "quality_weight_permille": 21
+      "quality_weight_permille": 21,
+      "core_aesthetic": true
     },
     {
       "key": "op_ed",
@@ -45,7 +48,8 @@
       "deliver_at": 800,
       "deps": [],
       "outsourceable": false,
-      "quality_weight_permille": 37
+      "quality_weight_permille": 37,
+      "core_aesthetic": false
     },
     {
       "key": "music",
@@ -55,7 +59,8 @@
       "deliver_at": 800,
       "deps": [],
       "outsourceable": false,
-      "quality_weight_permille": 37
+      "quality_weight_permille": 37,
+      "core_aesthetic": false
     }
   ],
   "episode": [
@@ -68,7 +73,8 @@
       "deliver_at": 900,
       "deps": ["common:series_composition"],
       "outsourceable": false,
-      "quality_weight_permille": 100
+      "quality_weight_permille": 100,
+      "core_aesthetic": true
     },
     {
       "key": "episode_direction_plan",
@@ -79,7 +85,8 @@
       "deliver_at": 850,
       "deps": ["script"],
       "outsourceable": false,
-      "quality_weight_permille": 100
+      "quality_weight_permille": 100,
+      "core_aesthetic": true
     },
     {
       "key": "layout",
@@ -90,7 +97,8 @@
       "deliver_at": 850,
       "deps": ["episode_direction_plan", "common:character_design"],
       "outsourceable": false,
-      "quality_weight_permille": 119
+      "quality_weight_permille": 119,
+      "core_aesthetic": true
     },
     {
       "key": "key_animation",
@@ -101,7 +109,8 @@
       "deliver_at": 900,
       "deps": ["layout"],
       "outsourceable": true,
-      "quality_weight_permille": 101
+      "quality_weight_permille": 101,
+      "core_aesthetic": true
     },
     {
       "key": "inbetween",
@@ -112,7 +121,8 @@
       "deliver_at": 900,
       "deps": ["key_animation"],
       "outsourceable": true,
-      "quality_weight_permille": 100
+      "quality_weight_permille": 100,
+      "core_aesthetic": false
     },
     {
       "key": "background",
@@ -123,7 +133,8 @@
       "deliver_at": 850,
       "deps": ["layout", "common:art_setting"],
       "outsourceable": true,
-      "quality_weight_permille": 130
+      "quality_weight_permille": 130,
+      "core_aesthetic": true
     },
     {
       "key": "coloring",
@@ -134,7 +145,8 @@
       "deliver_at": 900,
       "deps": ["inbetween", "background"],
       "outsourceable": true,
-      "quality_weight_permille": 50
+      "quality_weight_permille": 50,
+      "core_aesthetic": false
     },
     {
       "key": "composite",
@@ -145,7 +157,8 @@
       "deliver_at": 900,
       "deps": ["coloring"],
       "outsourceable": false,
-      "quality_weight_permille": 34
+      "quality_weight_permille": 34,
+      "core_aesthetic": false
     },
     {
       "key": "sound_mix",
@@ -156,7 +169,8 @@
       "deliver_at": 900,
       "deps": ["composite"],
       "outsourceable": false,
-      "quality_weight_permille": 8
+      "quality_weight_permille": 8,
+      "core_aesthetic": false
     },
     {
       "key": "editing",
@@ -167,7 +181,8 @@
       "deliver_at": 900,
       "deps": ["composite"],
       "outsourceable": true,
-      "quality_weight_permille": 8
+      "quality_weight_permille": 8,
+      "core_aesthetic": false
     },
     {
       "key": "sound_control",
@@ -178,7 +193,8 @@
       "deliver_at": 900,
       "deps": ["editing", "sound_mix", "common:music"],
       "outsourceable": true,
-      "quality_weight_permille": 42
+      "quality_weight_permille": 42,
+      "core_aesthetic": false
     },
     {
       "key": "delivery_master",
@@ -190,7 +206,8 @@
       "deps": ["sound_control", "sound_mix", "common:op_ed"],
       "is_gate": true,
       "outsourceable": false,
-      "quality_weight_permille": 8
+      "quality_weight_permille": 8,
+      "core_aesthetic": false
     }
   ]
 }

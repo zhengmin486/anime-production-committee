@@ -1805,6 +1805,40 @@ test('INV-01：临时员工周薪与签约费必须按 DEC-STAFF-009 公式推�
   assert.equal(call('advance_week', { state: badRole }).error?.code, 'INVALID_STATE', '临时员工职业必须是八职业之一')
 })
 
+test('DEC-STAFF-008：核心审美奖励按 min(S_sup,Q_item) 计算，Q_final 上限 105', () => {
+  const deliver = ({ markCore, supervisor }) => {
+    let state = funded(ok('initialize', { seed: 7 }).state)
+    state = ok('start_work', { state, offer_id: 'offer_01', mode: 'contract' }).state
+    if (supervisor) {
+      const director = state.staff.find((member) => member.id === 'staff_dir')
+      director.abilities.direction = supervisor
+      director.abilities.management = supervisor
+    }
+    for (const item of allItems(state, 'work_01')) item.core_aesthetic = markCore
+    state = completeWork(state, 'work_01', 100)
+    const firstCommon = state.works[0].common.items[0]
+    firstCommon.work_done = firstCommon.work_total
+    firstCommon.contributors = ['staff_dir']
+    return ok('deliver_work', { state, work_id: 'work_01' })
+  }
+
+  // 监督 S_sup=100、Q_item=100 → bonus = 5×(100−70)/30 封顶 5 分 → Q_final 105
+  const strong = deliver({ markCore: true, supervisor: 100 })
+  assert.equal(strong.report.q_final, 105)
+  assert.equal(strong.report.quality_score, 100, '展示分仍截顶 100')
+  // Q_final=105 对接 quality_factor(105)=1040‰，并已在归档校验里放行
+  assert.ok(strong.state.archive.works[0].channel_breakdown
+    .some((line) => line.quality_factor === 1040), JSON.stringify(strong.state.archive.works[0].channel_breakdown))
+
+  // 监督 S_sup=60 ≤ 70 → 不触发奖励
+  const weak = deliver({ markCore: true, supervisor: 60 })
+  assert.equal(weak.report.q_final, 100)
+
+  // 没有核心审美工序标记 → 即使监督很强也不加成
+  const noCore = deliver({ markCore: false, supervisor: 100 })
+  assert.equal(noCore.report.q_final, 100)
+})
+
 test('DEC-QUALITY-001：Q_min 未达标按 2%/分扣罚、扣声望与委员会好感', () => {
   let state = funded(ok('initialize', { seed: 7 }).state)
   state = ok('start_work', {
@@ -2663,7 +2697,8 @@ test('sign_outsourcing：产能是供应商级共享池，排满后拒绝', () =
   art.items.push({
     id: 'work_01.ep01.background_b', key: 'background_b', ability: 'drawing', work_total: 100, work_done: 0,
     deliver_at: 1000, deps: ['work_01.ep01.storyboard'], is_gate: false, outsourceable: true,
-    quality_weight_permille: 0, quality: { story: 0, direction: 0, drawing: 0, animation: 0, art: 0, sound: 0 },
+    quality_weight_permille: 0, core_aesthetic: false,
+    quality: { story: 0, direction: 0, drawing: 0, animation: 0, art: 0, sound: 0 },
     contributors: []
   })
   const first = ok('sign_outsourcing', {
@@ -4577,8 +4612,8 @@ test('M2 v0.5：固定 seed 真实推进十集、事件、外包、交付、Fina
 
   const record = first.state.archive.works[0]
   // v0.5 基线质量：权重制 + 外包质量的首次可复现锚点（全外包、四人混合派工）
-  assert.equal(first.diagnostics.quality_mean, 56, detail)
-  assert.equal(first.diagnostics.quality_score, 56, detail)
+  assert.equal(first.diagnostics.quality_mean, 56, detail)     // 六维聚合（展示口径）
+  assert.equal(first.diagnostics.quality_score, 58, detail)    // Q_final：权重加权 + 核心审美奖励折算后
   assert.equal(first.diagnostics.rating, 'C', detail)
   assert.equal(record.episodes.length, 10)
   assert.equal(record.start_week, 0)

@@ -80,7 +80,7 @@ SaveRecord { version: 4, savedAt: ISO8601, rules_version: string, state: GameSta
 | `Project` | id, offer, mode, investment, channels, opened_week, deadline_week, extension, status, supervisor_staff_id, common, episodes, plan | ip_id, committee_id, tv_service, delivery | committee 模式才可有 committee_id；episodes 长度 = offer.episode_count |
 | `CommonProduction` | id, items | — | items 非空 |
 | `EpisodeProduction` | id, index, stages | — | stages 恰 6 个，顺序固定；实现为 6 元素数组，每元素带 `key`（非 JSON 对象键），见数据字典 §3.4 |
-| `WorkItem` | id, key, ability, work_total, work_done, deliver_at, deps, is_gate, outsourceable, quality_weight_permille, quality, contributors | — | 0 ≤ work_done ≤ work_total；deliver_at ∈ [1,1000]；outsourceable 为布尔值，公共制作与门槛项不得外包；quality_weight_permille ∈ [0,1000] 且满足 INV-30 |
+| `WorkItem` | id, key, ability, work_total, work_done, deliver_at, deps, is_gate, outsourceable, quality_weight_permille, core_aesthetic, quality, contributors | — | 0 ≤ work_done ≤ work_total；deliver_at ∈ [1,1000]；outsourceable 为布尔值，公共制作与门槛项不得外包；quality_weight_permille ∈ [0,1000] 且满足 INV-30 |
 | `WorkPlan` | intensity, focus, outsourcing, overtime, target | — | target 至多一个，引用本项目单集/阶段 |
 | `Supplier` | id, name, specialties, capacity_per_week, quality, speed, price_per_unit, reliability, unlocked_week | — | 目录只增不改 |
 | `OutsourceContract` | id, supplier_id, work_id, episode_id, item_id, ability, mode, work_total, work_done, weekly_cap, fee_total, fee_paid, signed_week, due_week, status | — | item 属于同一 work，且只能是 `outsourceable=true` 的 episode 非 gate 项；Σactive weekly_cap ≤ supplier 容量 |

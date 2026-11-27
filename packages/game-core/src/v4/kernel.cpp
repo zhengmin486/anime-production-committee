@@ -421,6 +421,106 @@ int mean_of(const std::array<int, kDimensionCount>& dims) {
 }  // namespace
 
 
+namespace {
+
+// 工作项自身水准：只取已经形成质量的维度做均值（未接触维度不参与，否则被 6 除）。
+int item_level_of(const WorkItem& item) {
+    int sum = 0;
+    int count = 0;
+    for (int i = 0; i < kDimensionCount; ++i) {
+        const int value = item.quality.dims[static_cast<std::size_t>(i)];
+        if (value <= 0) continue;
+        sum += value;
+        ++count;
+    }
+    return count == 0 ? 0 : (sum + count / 2) / count;
+}
+
+}  // namespace
+
+int supervisor_ability_centi(const Staff& staff) {
+    const auto ability = [&staff](const std::string& name) {
+        const int index = ability_index(name);
+        return index < 0 ? 0 : staff.abilities[static_cast<std::size_t>(index)];
+    };
+    const int direction = ability("direction");
+    const int management = ability("management");
+    const std::string role = staff.role;
+    // 天然监督系（监督/演出/导演）：直接看统筹与演出
+    if (role == "监督" || role == "演出" || role == "director") {
+        return 70 * direction + 30 * management;   // 已是百分之一分精度
+    }
+    // 转任系（作画/脚本/美术及其英文岗位）：补上本职业主能力
+    const int primary = role == "作画" || role == "key_animator" || role == "animator" ||
+                                role == "animation_director"
+                            ? ability("drawing")
+                            : role == "脚本" || role == "scriptwriter" ? ability("planning")
+                                                                       : ability("drawing");
+    return 50 * direction + 25 * management + 25 * primary;
+}
+
+int final_quality_milli(const Project& work, const Staff* supervisor) {
+    const std::int64_t s_sup_milli = supervisor == nullptr ? 0 : supervisor_ability_centi(*supervisor) * 10;
+    std::int64_t weighted = 0;
+    std::int64_t weight_sum = 0;
+    std::int64_t bonus_num = 0;
+    std::int64_t bonus_weight = 0;
+
+    const auto accumulate = [&](const WorkItem& item) {
+        const int weight = std::max(item.quality_weight_permille, 0);
+        if (weight == 0) return;
+        const std::int64_t q_milli = static_cast<std::int64_t>(item_level_of(item)) * 1000;
+        weighted += weight * q_milli;
+        weight_sum += weight;
+        if (!item.core_aesthetic) return;
+        bonus_weight += weight;
+        // bonus_milli = floor(5 × max(0, min(S_sup, Q_item) − 70) / 30)，上限 5 分（5000 milli）
+        if (s_sup_milli > 70000 && q_milli > 70000) {
+            const std::int64_t limit = std::min(s_sup_milli, q_milli);
+            bonus_num += static_cast<std::int64_t>(weight) * (5 * (limit - 70000) / 30);
+        }
+    };
+    for (const auto& item : work.common.items) accumulate(item);
+    for (const auto& episode : work.episodes) {
+        for (const auto& stage : episode.stages) {
+            for (const auto& item : stage.items) accumulate(item);
+        }
+    }
+    if (weight_sum <= 0) return 0;
+    // 基础分按层合成：公共层（Σcommon）与单集层（每集 Σepisode）各自归一后加权。
+    // 不能直接 weighted/1000——单集权重是"每集 800‰"，直接相加会随集数放大。
+    std::int64_t common_weighted = 0;
+    std::int64_t common_weight = 0;
+    std::int64_t episode_weighted = 0;
+    std::int64_t episode_weight = 0;
+    const auto accumulate_layer = [&](const WorkItem& item, bool common) {
+        const int weight = std::max(item.quality_weight_permille, 0);
+        if (weight == 0) return;
+        const std::int64_t q_milli = static_cast<std::int64_t>(item_level_of(item)) * 1000;
+        if (common) {
+            common_weighted += weight * q_milli;
+            common_weight += weight;
+        } else {
+            episode_weighted += weight * q_milli;
+            episode_weight += weight;
+        }
+    };
+    for (const auto& item : work.common.items) accumulate_layer(item, true);
+    for (const auto& episode : work.episodes) {
+        for (const auto& stage : episode.stages) {
+            for (const auto& item : stage.items) accumulate_layer(item, false);
+        }
+    }
+    const std::int64_t common_avg = common_weight > 0 ? common_weighted / common_weight : 0;
+    const std::int64_t episode_avg = episode_weight > 0 ? episode_weighted / episode_weight : 0;
+    const std::int64_t layer_weight = common_weight + episode_weight;
+    const std::int64_t base_milli =
+        layer_weight > 0 ? (common_avg * common_weight + episode_avg * episode_weight) / layer_weight : 0;
+    const std::int64_t bonus_milli = bonus_weight > 0 ? bonus_num / bonus_weight : 0;
+    const std::int64_t total = base_milli + bonus_milli;
+    return static_cast<int>(std::clamp<std::int64_t>(total, 0, 105000));
+}
+
 AggregatedQuality aggregate_episode(const Episode& episode) {
     AggregatedQuality result;
     // DEC-STAFF-008：单集内按工作项的 quality_weight_permille 加权，不再按阶段等权。

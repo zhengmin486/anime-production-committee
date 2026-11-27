@@ -59,6 +59,7 @@
 | `is_gate` | 仅单集项 | 是否为作品交付门槛项；至少一个，且建议 `deliver_at=1000` |
 | `outsourceable` | 全部，必填布尔 | 公共制作与 gate 必须为 false；只有 episode 非 gate 项可外包 |
 | `quality_weight_permille` | 全部，必填整数 | 全片质量权重，0–1000‰；`Σcommon + Σepisode = 1000‰`，且每个单集的权重和必须相同（DEC-STAFF-008） |
+| `core_aesthetic` | 全部，必填布尔 | 是否为核心审美工序；只有 true 且 `S_sup>70、Q_item>70` 才获得核心审美奖励（DEC-STAFF-008） |
 
 `WorkItem.outsourceable` 在实例化时写入 Project，并随存档序列化；不能用阶段名或 gate 状态在运行时临时替代该字段。
 

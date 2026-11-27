@@ -626,6 +626,7 @@
       "penalty",
       "penalty_paid",
       "penalty_waived",
+      "q_final",
       "q_min",
       "quality_gap",
       "quality_penalty",
@@ -1275,6 +1276,7 @@
     "state.works[].common.items[]": [
       "ability",
       "contributors",
+      "core_aesthetic",
       "deliver_at",
       "deps",
       "id",
@@ -1306,6 +1308,7 @@
     "state.works[].episodes[].stages[].items[]": [
       "ability",
       "contributors",
+      "core_aesthetic",
       "deliver_at",
       "deps",
       "id",

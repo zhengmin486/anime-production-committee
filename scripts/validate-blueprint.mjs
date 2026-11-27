@@ -72,6 +72,9 @@ for (const [i, item] of doc.common.entries()) {
   if (!isInt(item.quality_weight_permille) || item.quality_weight_permille < 0 || item.quality_weight_permille > 1000) {
     fail(where, 'quality_weight_permille 必须是 0–1000 的整数（全片质量权重，DEC-STAFF-008）')
   }
+  if (typeof item.core_aesthetic !== 'boolean') {
+    fail(where, 'core_aesthetic 必须是布尔值（DEC-STAFF-008 核心审美工序）')
+  }
   common.set(item.key, item)
 }
 
@@ -91,6 +94,9 @@ for (const [i, item] of doc.episode.entries()) {
   if (typeof item.outsourceable !== 'boolean') fail(where, 'outsourceable 必须是布尔值')
   if (!isInt(item.quality_weight_permille) || item.quality_weight_permille < 0 || item.quality_weight_permille > 1000) {
     fail(where, 'quality_weight_permille 必须是 0–1000 的整数（全片质量权重，DEC-STAFF-008）')
+  }
+  if (typeof item.core_aesthetic !== 'boolean') {
+    fail(where, 'core_aesthetic 必须是布尔值（DEC-STAFF-008 核心审美工序）')
   }
   if (item.is_gate === true && item.outsourceable === true) fail(where, '交付门槛不可外包')
   if (item.is_gate === true && item.deliver_at !== 1000) {
