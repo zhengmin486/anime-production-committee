@@ -20,7 +20,6 @@
 - [2026-11-25 设计建议总清单](DESIGN_BACKLOG_2026-11-25.md)：已确认、待讨论、优化储备与工程缺口的分类追踪。
 - [数值参数总清单与标定查阅索引](NUMERICAL_PARAMETERS_CATALOG.md)：盘点全系统需要确定的数值、参数类型、当前状态，以及每类参数决策前应查阅的规则、架构、契约、实现和标定议题。
 
-
 - [架构评审记录（2026-11-24）](ARCHITECTURE_REVIEW_2026-11-24.md)：架构评审结论、整改状态与 M0 契约核验。
 
 - [M0 契约冻结](M0_CONTRACT_FREEZE.md)
@@ -29,6 +28,8 @@
 - [制作蓝图规范](BLUEPRINT_SPEC.md)
 - [权威决策登记册](DECISION_LOG.md)
 - [决定索引与 ADR 记录](decisions/INDEX.md)：流程、治理与契约级决定单独建档，`accepted` 后不就地改写。
+- [ADR-0004：Agent 默认决策权与局部阻塞](decisions/ADR-0004-agent-decision-authority-and-local-blocking.md)：未冻结细节的处理、模块自主权与局部阻塞。
+- [ADR-0005：文档权威与冲突处理](decisions/ADR-0005-document-conflict-resolution.md)：权威来源、过期副本、正式决策冲突及冲刺期闭环。
 - [游戏愿景与产品方向](GAME_VISION.md)：产品定位、核心体验、设计支柱、复杂度预算与成品成功标准；具体规则以决策登记册为准。
 - [研究与审计成果目录](RESEARCH_CATALOG.md)
 - [领域架构设计](DOMAIN_ARCHITECTURE.md)
@@ -45,6 +46,7 @@
 - [开放式增量开发与提前实现原则](OPEN_INCREMENTAL_DEVELOPMENT_POLICY.md)：明确首版范围是最低交付目标而非功能禁区，并规定未冻结细节的默认决策权、临时假设和局部阻塞。
 - [工程变更治理](ENGINEERING_CHANGE_GOVERNANCE.md)：区分内部修补、兼容扩展、契约修订与破坏性重构，明确何时需要升级裁决。
 - [2026-11 重构复盘与协作约定](REBUILD_RETROSPECTIVE_AND_WORKING_RULES_2026-11-25.md)：记录本次架构纠偏暴露的问题、分支迁移原则、智能体协作要求和 PR 合并检查。
+- [团队异步协作约定](TEAM_ASYNC_COLLABORATION.md)：团队执行摘要；Agent 决策权限与文档冲突分类以 ADR-0004/0005 为准。
 
 ## 研究资料与外部证据
 
@@ -94,7 +96,7 @@
 - [重构审查与合并登记](REBUILD_REVIEW_AND_MERGE_REGISTER_2026-11-24.md)
 - [统一重构审查清单](UNIFIED_REBUILD_REVIEW_CHECKLIST_2026-11-24.md)
 - [集数规模、工作量与开局路线初稿（2026-11-26）](PRODUCTION_SCALE_AND_OPENING_ROUTES_DRAFT_2026-11-26.md)：独立设计初稿，记录短篇/10集/12集/14集以上规格、标准 TV 等效产量、4 人开局及单线/多线平衡方向；具体参数尚未冻结。
-- [经济系统核心数值基线与阶段边界（2026-11-26）](ECONOMY_NUMERICAL_BASELINE_AND_STAGE_GATES_2026-11-26.md)：标准 TV 货币尺度、57/62 周双方案、人日成本边界及 M2/M3/M7 阶段分工。\n
+- [经济系统核心数值基线与阶段边界（2026-11-26）](ECONOMY_NUMERICAL_BASELINE_AND_STAGE_GATES_2026-11-26.md)：标准 TV 货币尺度、57/62 周双方案、人日成本边界及 M2/M3/M7 阶段分工。
 
 以上文件的存在不代表其中所有提案均已生效；当前玩法以 DECISION_LOG.md、当前架构以 DOMAIN_ARCHITECTURE.md v1.4 为准，工作分工以 GitHub Issues 实时状态为准。
 
@@ -142,3 +144,9 @@
 4. 提交前运行 `npm run check:docs`，检查决定字段、ADR 编号、`canonical_for` 唯一性和本地链接；CI 会在改动 `docs/` 时自动执行。
 
 这套流程的取舍见 [ADR-0001](decisions/ADR-0001-decision-record-process.md)。
+
+## 文档冲突与 Agent 决策
+
+- 具体规则/契约/流程分别遵循 DECISION_LOG、DOMAIN_ARCHITECTURE、M0_CONTRACT_FREEZE 与 accepted ADR，不按文件更新时间简单排序。
+- 表述差异由执行者自行统一；明确过期副本按规范来源修正；两个现行正式决定实质冲突时才局部升级裁决。
+- 模块负责人负责本模块文档同步；总负责人只处理冻结规则、公共契约和跨模块实质冲突。执行细则见 [ADR-0004](decisions/ADR-0004-agent-decision-authority-and-local-blocking.md) 与 [ADR-0005](decisions/ADR-0005-document-conflict-resolution.md)。
