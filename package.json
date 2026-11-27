@@ -27,7 +27,18 @@
     "verify:dist": "node scripts/verify-dist.mjs",
     "validate:events": "node scripts/validate-event-catalog.mjs && node scripts/validate-event-fixtures.mjs",
     "validate:blueprint": "node scripts/validate-blueprint.mjs docs/blueprints/tv_standard.blueprint.json",
-    "validate:handover": "node scripts/check-handover-cases.mjs docs/fixtures/handover_cases.json"
+    "validate:handover": "node scripts/check-handover-cases.mjs docs/fixtures/handover_cases.json",
+    "build:v4": "node scripts/build-event-catalog.mjs && node scripts/build-blueprint-catalog.mjs && node scripts/build-v4.mjs",
+    "test:v4": "node scripts/build-event-catalog.mjs && node scripts/build-blueprint-catalog.mjs && node scripts/build-v4.mjs && node --test scripts/v4.test.mjs",
+    "build:events": "node scripts/build-event-catalog.mjs",
+    "validate:content": "node scripts/validate-event-content.mjs",
+    "build:blueprints": "node scripts/build-blueprint-catalog.mjs",
+    "audit:v4": "node scripts/audit-v4-contract.mjs",
+    "check:docs": "python scripts/check_docs.py",
+    "validate:market": "node scripts/check-market-cases.mjs docs/fixtures/market_cases.json",
+    "test:market": "node --test scripts/lib/coordinate-random.test.mjs scripts/market.test.mjs",
+    "validate:recruit": "node scripts/check-recruit-cases.mjs docs/fixtures/recruit_cases.json",
+    "test:recruit": "node --test scripts/recruit.test.mjs"
   },
   "devDependencies": {
     "playwright-core": "1.65.1"

@@ -25,6 +25,25 @@ else()
     target_compile_options(game_core PRIVATE -Wall -Wextra -Wpedantic)
 endif()
 
+# v3 与 v4 独立编译，浏览器端同时产出两套模块。
+add_library(game_core_v4 STATIC
+    src/v4/model.cpp
+    src/v4/kernel.cpp
+    src/v4/runtime.cpp
+    src/v4/event.cpp
+    src/v4/event_catalog_generated.cpp
+    src/v4/blueprint.cpp
+    src/v4/blueprint_catalog_generated.cpp
+)
+target_include_directories(game_core_v4 PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
+target_link_libraries(game_core_v4 PUBLIC nlohmann_json::nlohmann_json)
+if(MSVC)
+    target_compile_options(game_core_v4 PUBLIC /utf-8 /EHsc)
+    target_compile_options(game_core_v4 PRIVATE /W4)
+else()
+    target_compile_options(game_core_v4 PRIVATE -Wall -Wextra -Wpedantic)
+endif()
+
 if(EMSCRIPTEN)
     # GoogleTest is deliberately excluded from the cross-compiled build.
     set(BUILD_TESTING OFF CACHE BOOL "Build native tests" FORCE)
@@ -44,6 +63,24 @@ if(EMSCRIPTEN)
     get_filename_component(APC_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../.." ABSOLUTE)
     set_target_properties(game_core_wasm PROPERTIES
         OUTPUT_NAME "game-core"
+        SUFFIX ".mjs"
+        RUNTIME_OUTPUT_DIRECTORY "${APC_ROOT}/apps/web/public/wasm"
+    )
+    target_compile_options(game_core_v4 PUBLIC -fexceptions)
+    add_executable(game_core_v4_wasm bindings/v4_bindings.cpp)
+    target_link_libraries(game_core_v4_wasm PRIVATE game_core_v4)
+    target_link_options(game_core_v4_wasm PRIVATE
+        --bind --no-entry -fexceptions
+        -sDISABLE_EXCEPTION_CATCHING=0
+        -sMODULARIZE=1
+        -sEXPORT_ES6=1
+        -sEXPORT_NAME=createGameCoreV4
+        -sENVIRONMENT=web,node
+        -sALLOW_MEMORY_GROWTH=1
+        -sFILESYSTEM=0
+    )
+    set_target_properties(game_core_v4_wasm PROPERTIES
+        OUTPUT_NAME "game-core-v4"
         SUFFIX ".mjs"
         RUNTIME_OUTPUT_DIRECTORY "${APC_ROOT}/apps/web/public/wasm"
     )

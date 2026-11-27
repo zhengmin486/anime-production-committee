@@ -78,7 +78,7 @@
     },
     {
       "id": "HO-09",
-      "desc": "经历资金危机（数周不生产）后恢复，继续做自己参与过的工作项，不扣",
+      "desc": "经历数周未生产后恢复，继续做自己参与过的工作项，不扣",
       "staff": { "id": "s_b", "role": "animator", "employment": "core" },
       "item": { "work_done": 70, "work_total": 100, "contributors": ["s_b"] },
       "last_participation": { "work_id": "w1", "item_id": "inbetween", "week": 6 },

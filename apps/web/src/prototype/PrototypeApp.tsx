@@ -6,14 +6,14 @@ import { CompanyOverview } from './CompanyOverview'
 import type { CompanyFocus, CompanySelection } from './CompanyOverview'
 import { FinanceArchive } from './FinanceArchive'
 import { MarketArchive, MarketOffers, MarketPerformance, ReleaseStatus } from './MarketBusiness'
-import { prototypeData } from './mockData'
 import { episodeStageShortNames, EPISODE_STAGES, heatNames, scaleNames, weekStateNames } from './model'
 import type { Project, PrototypeData, WeeklyReceipt } from './model'
 import { Bar, yuan } from './bits'
 import { WeeklyOperations, WeeklyReceiptPreview } from './WeeklyOperations'
-import type { DecisionRecords, EventResolution, WeekFocus } from './WeeklyOperations'
+import type { WeekFocus } from './WeeklyOperations'
 import { WorkDetail } from './WorkDetail'
 import type { WorkFocus } from './WorkDetail'
+import { useV4Game } from './useV4Game'
 import './prototype.css'
 
 const sceneOrder: MainScene[] = ['office', 'studio', 'meeting', 'market']
@@ -57,7 +57,7 @@ const sceneActions: Record<MainScene, SceneActionOption[]> = {
     { action: 'week', label: '打开周经营', description: '从制作现场进入周经营', icon: CalendarDays, focus: 'receipt' },
   ],
   meeting: [
-    { action: 'week', label: '处理待决议题', description: '选择合法选项并记录原型决定', icon: CalendarDays, primary: true, focus: 'decisions' },
+    { action: 'week', label: '处理待决议题', description: '查看核心事件并选择合法选项', icon: CalendarDays, primary: true, focus: 'decisions' },
     { action: 'week', label: '查看决策文件', description: '查看事件代价、可能收益与风险', icon: FileCheck2, focus: 'event' },
     { action: 'week', label: '打开周经营', description: '查看周报、回滚与关闭快照', icon: FolderKanban, focus: 'receipt' },
   ],
@@ -75,23 +75,23 @@ function CashCard({ data, label = '公司现金' }: { data: PrototypeData; label
   return <div className="scene-cash-card">
     <span>{label}</span>
     <strong>{yuan(data.company.cash)}</strong>
-    <small>唯一现金池 · 可支撑 {data.company.runwayWeeks} 周</small>
+    <small>唯一现金池 · {data.company.runwayWeeks === null ? '预检由核心判定' : `可支撑 ${data.company.runwayWeeks} 周`}</small>
   </div>
 }
 
 function ProjectRow({ project, active, onClick }: { project: Project; active: boolean; onClick: () => void }) {
   return <button className={`scene-project-row${active ? ' is-active' : ''}`} onClick={onClick} aria-pressed={active}>
     <span className="project-row-top"><strong>{project.title}</strong><small>{scaleNames[project.scale]}</small></span>
-    <span className="project-row-meta"><span>{project.deliveredEpisodeCount} / {project.episodeCount} 集已交付</span><b>{project.completion}%</b></span>
-    <Bar value={project.completion} tone={project.completion < project.plannedCompletion ? 'behind' : 'lead'} />
+    <span className="project-row-meta"><span>{project.episodeCount} 集 · 整部交付</span><b>{project.completion}%</b></span>
+    <Bar value={project.completion} tone="neutral" />
   </button>
 }
 
 function SceneSidebar({ scene, data, project, episodeIndex, receipt, onSelectProject, onSelectEpisode, onAction }: {
   scene: MainScene
   data: PrototypeData
-  project: Project
-  episodeIndex: number
+  project?: Project
+  episodeIndex?: number
   receipt: WeeklyReceipt
   onSelectProject: (id: string) => void
   onSelectEpisode: (index: number) => void
@@ -120,15 +120,15 @@ function SceneSidebar({ scene, data, project, episodeIndex, receipt, onSelectPro
         <div><dt>在制作品</dt><dd>{data.projects.length} 部</dd></div>
       </dl>
       <div className="scene-side-section"><div className="scene-section-title"><h3>在制作品</h3><span>快捷进入</span></div>
-        <div className="scene-project-list">{data.projects.map((item) => <ProjectRow key={item.id} project={item} active={item.id === project.id} onClick={() => { onSelectProject(item.id); onAction({ action: 'work', label: '', description: '', icon: FolderKanban, focus: 'overview' }) }} />)}</div>
+        <div className="scene-project-list">{data.projects.length === 0 && <p className="proto-inline-note">尚无在制作品，请前往发行与市场承接企划。</p>}{data.projects.map((item) => <ProjectRow key={item.id} project={item} active={item.id === project?.id} onClick={() => { onSelectProject(item.id); onAction({ action: 'work', label: '', description: '', icon: FolderKanban, focus: 'overview' }) }} />)}</div>
       </div>
     </>}
 
-    {scene === 'studio' && (() => {
+    {scene === 'studio' && (project && episodeIndex !== undefined ? (() => {
       const focusEpisode = project.episodes.find((episode) => episode.index === episodeIndex) ?? project.episodes[0]
       return <>
         <div className="scene-project-switch" role="group" aria-label="作品切换">{data.projects.map((item) => <button key={item.id} className={item.id === project.id ? 'is-active' : ''} aria-pressed={item.id === project.id} onClick={() => onSelectProject(item.id)}>{item.title}</button>)}</div>
-        <div className="scene-focus-project"><span>{scaleNames[project.scale]} · {project.mode === 'committee' ? '制作委员会' : '承制'}</span><h3>{project.title}</h3><div><strong>{project.completion}%</strong><small>计划 {project.plannedCompletion}%</small></div><Bar value={project.completion} tone={project.completion < project.plannedCompletion ? 'behind' : 'lead'} /></div>
+        <div className="scene-focus-project"><span>{scaleNames[project.scale]} · {project.mode === 'committee' ? '制作委员会' : '承制'}</span><h3>{project.title}</h3><div><strong>{project.completion}%</strong><small>{project.episodeCount} 集 · 整部交付</small></div><Bar value={project.completion} tone="neutral" /></div>
         <div className="scene-side-section"><div className="scene-section-title"><h3>第 {focusEpisode.index} 集《{focusEpisode.title}》</h3><span>六阶段</span></div>
           <div className="scene-stage-grid" aria-label="当前单集六阶段">{EPISODE_STAGES.map((stage) => {
             const work = focusEpisode.stages[stage]
@@ -138,14 +138,14 @@ function SceneSidebar({ scene, data, project, episodeIndex, receipt, onSelectPro
         </div>
         <div className="scene-common-work"><div><span>公共制作</span><strong>{project.commonWork.done} / {project.commonWork.total} 点</strong></div><Bar value={project.commonWork.percent} tone="neutral" /></div>
       </>
-    })()}
+    })() : <div className="scene-side-section"><p className="proto-inline-note">尚无在制作品。请前往发行与市场明确承接企划。</p><button className="button primary" onClick={() => onAction(sceneActions.market[0])}>前往企划承接</button></div>)}
 
     {scene === 'meeting' && <>
-      <div className={`meeting-agenda-card${receipt.event ? ' is-active' : ''}`}><span className="agenda-state">{receipt.event ? `待处理 · 第 ${receipt.event.deadlineWeek} 周前` : '本期无待决议题'}</span><h3>{receipt.event?.title ?? '桌案已准备好'}</h3><p>{receipt.event?.description ?? '有待处理事件时，议题会出现在这里并可直接进入处理。'}</p><button className="button secondary" onClick={() => onAction(sceneActions.meeting[receipt.event ? 1 : 2])}>{receipt.event ? '查看决策文件' : '查看本周回执'}</button></div>
+      <div className={`meeting-agenda-card${receipt.event ? ' is-active' : ''}`}><span className="agenda-state">{receipt.event ? `待处理 · ${receipt.event.deadlineWeek === null ? '无期限' : `第 ${receipt.event.deadlineWeek} 周前`}` : '本期无待决议题'}</span><h3>{receipt.event?.title ?? '桌案已准备好'}</h3><p>{receipt.event?.description ?? '有待处理事件时，议题会出现在这里并可直接进入处理。'}</p><button className="button secondary" onClick={() => onAction(sceneActions.meeting[receipt.event ? 1 : 2])}>{receipt.event ? '查看决策文件' : '查看本周回执'}</button></div>
       <div className="scene-side-section"><div className="scene-section-title"><h3>会议结构</h3><span>只读预览</span></div>
         <ul className="meeting-structure"><li><span>01</span><div><strong>待决议题</strong><small>来自事件卡与合法选项</small></div></li><li><span>02</span><div><strong>参会方</strong><small>产业关系尚未开放</small></div></li><li><span>03</span><div><strong>决策文件</strong><small>确定代价、可能收益与风险</small></div></li></ul>
       </div>
-      <p className="scene-boundary-note">M4 产业关系落地前，委员会与合作区块只做结构展示，不宣称可玩。</p>
+      <p className="scene-boundary-note">待处理事件由 v4 核心按项目维护。未查看会阻塞推进；查看后未处理仍会继续计时。</p>
     </>}
 
     {scene === 'market' && <>
@@ -158,31 +158,35 @@ function SceneSidebar({ scene, data, project, episodeIndex, receipt, onSelectPro
   </aside>
 }
 
+function PanelLikeStatus({ busy, error }: { busy: boolean; error: string | null }) {
+  return <><p className="eyebrow">ANIME PRODUCTION COMMITTEE / V4 CORE</p><h1>{busy ? '正在载入规则核心…' : '规则核心未能启动'}</h1>{error && <p className="disabled-reason" role="alert">{error}</p>}<p>确认 WASM 构建产物已生成并可通过本地服务器访问；核心失败时不会使用 Mock 状态替代。</p></>
+}
+
 export default function PrototypeApp() {
-  const data = prototypeData
+  const { state, data, busy, error, notice, execute, clearError, dismissNotice } = useV4Game()
   const [scene, setScene] = useState<MainScene>('office')
   const [panel, setPanel] = useState<PanelName | null>(null)
-  const [sceneProjectIds, setSceneProjectIds] = useState<Record<MainScene, string>>({ office: 'p1', studio: 'p1', meeting: 'p1', market: 'p1' })
-  const [sceneEpisodes, setSceneEpisodes] = useState<Record<MainScene, number>>({ office: 7, studio: 7, meeting: 7, market: 7 })
+  const [sceneProjectIds, setSceneProjectIds] = useState<Record<MainScene, string>>({ office: '', studio: '', meeting: '', market: '' })
+  const [sceneEpisodes, setSceneEpisodes] = useState<Record<MainScene, number>>({ office: 1, studio: 1, meeting: 1, market: 1 })
   const [companySelection, setCompanySelection] = useState<CompanySelection>(null)
   const [companyFocus, setCompanyFocus] = useState<CompanyFocus>('people')
   const [workFocus, setWorkFocus] = useState<WorkFocus>('overview')
   const [weekFocus, setWeekFocus] = useState<WeekFocus>('receipt')
-  const [receiptWeek, setReceiptWeek] = useState(data.receipts[0].week)
-  const [selectedOfferId, setSelectedOfferId] = useState(data.marketOffers[0].id)
+  const [receiptWeek, setReceiptWeek] = useState(0)
+  const [selectedOfferId, setSelectedOfferId] = useState('')
   const [transactionExpanded, setTransactionExpanded] = useState(false)
-  const [resolvedEvents, setResolvedEvents] = useState<Record<string, EventResolution>>({})
-  const [decisionRecords, setDecisionRecords] = useState<DecisionRecords>({})
   const drawerRef = useRef<HTMLElement>(null)
   const lastTriggerRef = useRef<HTMLElement | null>(null)
-  const project = data.projects.find((item) => item.id === sceneProjectIds[scene]) ?? data.projects[0]
-  const episodeIndex = project.episodes.some((episode) => episode.index === sceneEpisodes[scene]) ? sceneEpisodes[scene] : (project.episodes.find((episode) => episode.isFocus) ?? project.episodes[0]).index
-  const receipt = data.receipts.find((item) => item.week === receiptWeek) ?? data.receipts[0]
-  const currentReceipt = data.receipts.find((item) => item.week === data.company.week) ?? data.receipts[0]
+  const project = data?.projects.find((item) => item.id === sceneProjectIds[scene]) ?? data?.projects[0]
+  const episodeIndex = project ? (project.episodes.some((episode) => episode.index === sceneEpisodes[scene]) ? sceneEpisodes[scene] : (project.episodes.find((episode) => episode.isFocus) ?? project.episodes[0]).index) : undefined
+  const receipt = data?.receipts.find((item) => item.week === receiptWeek) ?? data?.receipts.at(-1)
+  const currentEvent = data?.pendingEvents[0]
+  const currentReceipt = data?.receipts.find((item) => item.week === data.company.week) ?? data?.receipts.at(-1)
 
   const selectScene = (next: MainScene) => { setScene(next); setPanel(null) }
   const selectProject = (id: string) => {
-    const next = data.projects.find((item) => item.id === id) ?? data.projects[0]
+    const next = data?.projects.find((item) => item.id === id)
+    if (!next) return
     setSceneProjectIds((current) => ({ ...current, [scene]: next.id }))
     setSceneEpisodes((current) => ({ ...current, [scene]: (next.episodes.find((episode) => episode.isFocus) ?? next.episodes[0]).index }))
   }
@@ -190,12 +194,14 @@ export default function PrototypeApp() {
   const openProject = (id: string) => {
     selectProject(id)
     setWorkFocus('overview')
-    setPanel('work')
+    if (data?.projects.some((item) => item.id === id)) setPanel('work')
+    else { setScene('market'); setPanel('market') }
   }
   const openWeek = (focus: WeekFocus = 'receipt') => { setWeekFocus(focus); setPanel('week') }
   const handleAction = (option: SceneActionOption) => {
     if (option.offerId) setSelectedOfferId(option.offerId)
     if (option.action === 'company') setCompanyFocus((option.focus as CompanyFocus | undefined) ?? 'people')
+    if (option.action === 'work' && !project) { setScene('market'); setPanel('market'); return }
     if (option.action === 'work') setWorkFocus((option.focus as WorkFocus | undefined) ?? 'overview')
     if (option.action === 'week') setWeekFocus((option.focus as WeekFocus | undefined) ?? 'receipt')
     setPanel(option.action)
@@ -235,6 +241,8 @@ export default function PrototypeApp() {
     }
   }, [panel])
 
+  if (!data || !state || !receipt || !currentReceipt) return <div className="proto-root"><main className="prototype-main"><section className="proto-screen"><PanelLikeStatus busy={busy} error={error} /></section></main></div>
+
   return <div className="proto-root prototype-shell" onClickCapture={(event) => {
     if (panel !== null || !(event.target instanceof Element)) return
     const trigger = event.target.closest<HTMLElement>('button')
@@ -242,20 +250,20 @@ export default function PrototypeApp() {
   }}>
     <header className="prototype-header">
       <div className="prototype-brand-row">
-        <div className="prototype-brand"><p className="eyebrow">ANIME PRODUCTION COMMITTEE / 静态原型</p><h1>{data.company.name}<span className="title-period">。</span></h1></div>
+        <div className="prototype-brand"><p className="eyebrow">ANIME PRODUCTION COMMITTEE / V4 规则核心</p><h1>{data.company.name}<span className="title-period">。</span></h1></div>
         <div className="prototype-company-stats" aria-label="公司状态">
           <button onClick={() => openWeek('receipt')} aria-label="查看经营周"><span>经营周</span><strong>{data.company.week}<small> / {data.company.totalWeeks}</small></strong></button>
           <button onClick={() => setPanel('finance')} aria-label="查看公司现金"><span>现金</span><strong>{yuan(data.company.cash)}</strong></button>
           <button onClick={() => { setCompanyFocus('company'); setPanel('company') }} aria-label="查看公司声望"><span>声望</span><strong>{data.company.reputation}</strong></button>
           <button onClick={() => selectScene('studio')} aria-label="查看在制作品"><span>在制</span><strong>{data.projects.length}<small> 部</small></strong></button>
-          <button onClick={() => { setTransactionExpanded(true); setWeekFocus('decisions') }} aria-label="查看待处理事项"><span>待处理</span><strong>{currentReceipt.mustDecide.length}<small> 项</small></strong></button>
-          <button onClick={() => openWeek(currentReceipt.state === 'settlement_rejected' ? 'receipt' : 'next')} aria-label="查看经营状态"><span>经营状态</span><strong>{currentReceipt.state === 'settlement_rejected' ? '预检回滚' : '正常'}</strong></button>
+          <button onClick={() => { setWeekFocus('decisions'); setPanel('week') }} aria-label="查看待处理事项"><span>待处理</span><strong>{data.pendingEvents.length}<small> 项</small></strong></button>
+          <button onClick={() => openWeek(currentReceipt.state === 'settlement_rejected' ? 'receipt' : 'next')} aria-label="查看经营状态"><span>经营状态</span><strong>{state.company.status === 'running' ? (currentReceipt.state === 'settlement_rejected' ? '预检回滚' : '正常') : '关闭中'}</strong></button>
         </div>
       </div>
       <nav className="scene-nav" aria-label="场景切换">{sceneOrder.map((item, index) => {
         const Icon = sceneMeta[item].icon
         return <button key={item} className={scene === item ? 'is-active' : ''} onClick={() => selectScene(item)} aria-current={scene === item ? 'page' : undefined}>
-          <span className="scene-nav-index">0{index + 1}</span><Icon size={18} aria-hidden="true" /><span>{sceneMeta[item].title}</span>{item === 'meeting' && currentReceipt.event && <i className="nav-alert">1</i>}
+          <span className="scene-nav-index">0{index + 1}</span><Icon size={18} aria-hidden="true" /><span>{sceneMeta[item].title}</span>{item === 'meeting' && currentEvent && <i className="nav-alert">{data.pendingEvents.length}</i>}
         </button>
       })}</nav>
     </header>
@@ -269,24 +277,25 @@ export default function PrototypeApp() {
       <section className="transaction-bar" aria-label="事务中心">
         <div className="transaction-title"><p className="eyebrow">WEEKLY DESK</p><div><h3>事务中心</h3><span className={`transaction-state state-${receipt.state}`}>{weekStateNames[receipt.state]}</span></div></div>
         <div className="transaction-weeks" role="group" aria-label="周次快照">{data.receipts.map((item) => <button key={item.week} className={item.week === receipt.week ? 'is-active' : ''} onClick={() => { setReceiptWeek(item.week); setTransactionExpanded(false) }} aria-label={`第 ${item.week} 周${item.event ? '，有待处理事件' : ''}`} aria-pressed={item.week === receipt.week}>W{item.week}{item.event && <i />}</button>)}</div>
-        <p className="transaction-summary">{receipt.event ? `${receipt.event.title} · ${receipt.mustDecide.length} 项必须决定` : receipt.nextFocus[0]}</p>
+        <p className="transaction-summary">{currentEvent ? `${currentEvent.title} · ${currentEvent.viewed ? '已查看，待处理' : '未查看，阻塞推进'}` : receipt.nextFocus[0]}</p>
         <button className="button secondary transaction-toggle" aria-expanded={transactionExpanded} aria-controls="weekly-receipt-preview" onClick={() => setTransactionExpanded((current) => !current)}>{transactionExpanded ? '收起周回执' : '展开周回执'}<ArrowUpRight size={16} aria-hidden="true" /></button>
         {transactionExpanded && <div id="weekly-receipt-preview" className="transaction-detail"><WeeklyReceiptPreview receipt={receipt} onOpen={() => openWeek('receipt')} /></div>}
       </section>
     </main>
 
-    <footer className="prototype-footer"><p>本页面只展示模拟数据与信息层级，不读取后端、不触发真实周推进或存档。场景素材：2dPig Pixel Office（CC0）· Antea（Free Furniture Office Equipment Set，作者署名）· 项目既有工作室、制作人立绘与动画单帧。</p><span>{project.work.done} / {project.work.total} 工作点 · Mock fixture</span></footer>
+    <footer className="prototype-footer"><p>经营状态、流水、企划、生产与事件均由 v4 C++ WASM 核心提供；核心成功后才提交状态。场景素材：2dPig Pixel Office（CC0）· Antea（Free Furniture Office Equipment Set，作者署名）· 项目既有工作室、制作人立绘与动画单帧。</p><span>{project ? `${project.work.done} / ${project.work.total} 工作点 · 核心会话` : '尚无立项 · 核心会话'}{busy ? ' · 核心处理中' : ''}</span></footer>
 
     {panel !== null && <div className="drawer-layer">
       <div className="drawer-backdrop" onClick={() => setPanel(null)} aria-hidden="true" />
       <aside className="drawer-panel" role="dialog" aria-modal="true" aria-label={panelNames[panel]} ref={drawerRef}>
         <header className="drawer-header"><div><p className="eyebrow">SCENE DETAIL / {sceneMeta[scene].english}</p><h2>{panelNames[panel]}</h2></div><button className="drawer-close" onClick={() => setPanel(null)} aria-label="关闭详情" autoFocus><X size={20} aria-hidden="true" /></button></header>
         <div className="drawer-content">
-          {panel === 'company' && <CompanyOverview data={data} onOpen={openProject} selection={companySelection} onSelect={setCompanySelection} focus={companyFocus} onNavigate={selectScene} />}
-          {panel === 'work' && <WorkDetail project={project} data={data} onBack={() => setPanel(null)} focus={workFocus} episodeIndex={episodeIndex} onEpisodeChange={selectEpisode} />}
-          {panel === 'week' && <WeeklyOperations data={data} initialWeek={receipt.week} onWeekChange={setReceiptWeek} onOpenProject={openProject} focus={weekFocus} resolvedEvents={resolvedEvents} onResolveEvent={(eventId, resolution) => setResolvedEvents((current) => ({ ...current, [eventId]: resolution }))} decisionRecords={decisionRecords} onRecordDecision={(decisionId, option) => setDecisionRecords((current) => ({ ...current, [decisionId]: { option } }))} />}
+          {(error || notice) && <div className={error ? 'disabled-reason' : 'proto-inline-note'} role={error ? 'alert' : 'status'}><span>{error ?? notice}</span><button className="link-button" onClick={error ? clearError : dismissNotice}>关闭提示</button></div>}
+          {panel === 'company' && <CompanyOverview data={data} state={state} busy={busy} execute={execute} onOpen={openProject} selection={companySelection} onSelect={setCompanySelection} focus={companyFocus} onNavigate={selectScene} />}
+          {panel === 'work' && project && <WorkDetail project={project} data={data} state={state} busy={busy} execute={execute} onBack={() => setPanel(null)} focus={workFocus} episodeIndex={episodeIndex!} onEpisodeChange={selectEpisode} />}
+          {panel === 'week' && <WeeklyOperations data={data} state={state} busy={busy} error={error} execute={execute} initialWeek={receipt.week} onWeekChange={setReceiptWeek} onOpenProject={openProject} focus={weekFocus} />}
           {panel === 'finance' && <FinanceArchive data={data} />}
-          {panel === 'market' && <MarketOffers data={data} selectedId={selectedOfferId} onSelect={setSelectedOfferId} />}
+          {panel === 'market' && <MarketOffers data={data} state={state} busy={busy} execute={execute} selectedId={selectedOfferId || data.marketOffers[0]?.id || ''} onSelect={setSelectedOfferId} />}
           {panel === 'release' && <ReleaseStatus data={data} onOpen={openProject} />}
           {panel === 'archive' && <MarketArchive data={data} />}
           {panel === 'performance' && <MarketPerformance data={data} />}

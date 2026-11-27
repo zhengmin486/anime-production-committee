@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react'
 import { ArrowLeft } from 'lucide-react'
-import { abilityNames, channelNames, effortNames, episodeStageNames, episodeStatusNames, EPISODE_STAGES, itemsByStage, ledgerNames, modeNames, outsourceNames, priorityNames, roleNames, scaleNames, sourceNames } from './model'
+import { abilityNames, channelNames, episodeStageNames, episodeStatusNames, EPISODE_STAGES, itemsByStage, ledgerNames, modeNames, outsourceNames, roleNames, scaleNames, sourceNames } from './model'
 import type { Episode, Project, PrototypeData, WorkState } from './model'
 import { Bar, Panel, RiskTag, signedYuan, Stat, yuan } from './bits'
+import type { V4GameState } from './v4Types'
+import { setWorkPlanV4, workActionV4 } from '../services/gameV4'
 
 const projectStatusNames = { producing: '制作中', ready_to_deliver: '待交付', wrapping: '收尾中' } as const
 const outsourceStatusNames = { active: '在制', delivered: '已交付', at_risk: '排期风险' } as const
@@ -13,9 +15,12 @@ const workStateNames: Record<WorkState, string> = {
 
 export type WorkFocus = 'overview' | 'common' | 'episodes' | 'pipeline' | 'resources'
 
-export function WorkDetail({ project, data, onBack, focus, episodeIndex, onEpisodeChange }: {
+export function WorkDetail({ project, data, state, busy, execute, onBack, focus, episodeIndex, onEpisodeChange }: {
   project: Project
   data: PrototypeData
+  state: V4GameState
+  busy: boolean
+  execute: (command: () => Promise<{ state: V4GameState }>) => Promise<boolean>
   onBack: () => void
   focus: WorkFocus
   episodeIndex: number
@@ -29,8 +34,9 @@ export function WorkDetail({ project, data, onBack, focus, episodeIndex, onEpiso
   const people = staff.filter((person) => allocations.find((item) => item.staffId === person.id)?.projectId === project.id)
   const tasks = outsourcing.filter((task) => task.projectId === project.id)
   const entries = ledger.filter((entry) => entry.projectId === project.id)
-  const gap = project.completion - project.plannedCompletion
   const weeksLeft = project.deadlineWeek - company.week
+  const coreProject = state.works.find((work) => work.id === project.id)!
+  const deliverable = [...coreProject.common.items, ...coreProject.episodes.flatMap((episode) => episode.stages.flatMap((stage) => stage.items))].filter((item) => item.is_gate).every((item) => BigInt(item.work_done) * 1000n >= BigInt(item.deliver_at) * BigInt(item.work_total))
   const gateItems = episode.workItems.filter((item) => item.isGate)
 
   useEffect(() => {
@@ -48,12 +54,14 @@ export function WorkDetail({ project, data, onBack, focus, episodeIndex, onEpiso
         aside={<button className="text-button" onClick={onBack}><ArrowLeft size={16} aria-hidden="true" />返回场景</button>}
         note={`${sourceNames[project.source]} · ${projectStatusNames[project.status]} · 第 ${project.startWeek} 周开工，第 ${project.deadlineWeek} 周交付，剩余 ${weeksLeft} 周 · ${project.episodeCount} 集`}>
         <dl className="proto-stats">
-          <Stat strong label="完成度" value={`${project.completion}%`} hint={`计划 ${project.plannedCompletion}%，${gap < 0 ? `落后 ${Math.abs(gap)}` : `领先 ${gap}`} 个百分点 · ${project.work.done} / ${project.work.total} 工作点`} />
-          <Stat label="单集交付" value={`${project.deliveredEpisodeCount} / ${project.episodeCount} 集`} hint="每集各自推进六阶段，不是整部作品共用一条进度" />
+          <Stat strong label="完成度" value={`${project.completion}%`} hint={`${project.work.done} / ${project.work.total} 工作点 · 核心不提供计划完成度`} />
+          <Stat label="单集制作" value={`${project.episodeCount} 集`} hint="每集各自推进六阶段；v4 仅支持整部作品交付" />
           <Stat label="公共制作" value={`${project.commonWork.done} / ${project.commonWork.total} 工作点`} hint="服务整部作品或多集共用" />
-          <Stat label="作品质量 / 受众期待 / 商业潜力" value={`${project.quality} / ${project.audienceExpectation} / ${project.commercialPotential}`} hint="制作质量与商业成绩分开计算" />
+          <Stat label="质量均值 / 商业潜力" value={`${project.quality} / ${project.commercialPotential}`} hint="质量由核心工作项汇总；商业在交付时结算" />
         </dl>
-        <Bar value={project.completion} tone={gap < 0 ? 'behind' : 'lead'} />
+        <Bar value={project.completion} tone="lead" />
+        <div className="closing-actions"><button className="button primary" disabled={busy || !deliverable || coreProject.status !== 'producing' || state.company.status !== 'running'} onClick={() => execute(() => workActionV4('deliver_work', state, project.id))}>{busy ? '核心处理中…' : '交付整部作品'}</button><span>{deliverable ? '全部门槛已达标，可执行核心交付。' : '不可用：尚有交付门槛未达标，核心会拒绝交付。'}</span></div>
+        {project.mode === 'committee' && <div className="closing-actions"><button className="button secondary" disabled={busy || !!coreProject.tv_service || state.company.status !== 'running'} onClick={() => execute(() => workActionV4('buy_tv_service', state, project.id))}>购买电视服务</button><button className="button secondary" disabled={busy || !!coreProject.extension.used || state.company.status !== 'running'} onClick={() => execute(() => workActionV4('request_extension', state, project.id))}>申请延期（4 周）</button><button className="button secondary" disabled title="核心尚未冻结中止扣罚与履历结构">中止作品（未实现）</button></div>}
         {project.focusLabel && <p className="proto-inline-note">项目内定向：{project.focusLabel}——每个在制项目至多一个定向目标，不额外花钱，代价是其他单集/阶段的机会成本；不提供逐工作项指派。</p>}
         {project.series && <p className="proto-inline-note">系列关系：{project.series.parentTitle} · {project.series.relation}——{project.series.carried}。</p>}
       </Panel>
@@ -73,12 +81,12 @@ export function WorkDetail({ project, data, onBack, focus, episodeIndex, onEpiso
             <td className={`state-${item.state}`}>{workStateNames[item.state]}</td>
           </tr>)}</tbody>
         </table>
-        <p className="proto-footnote">1 工作点 = 1/100 人周，deliver_at 是占 work_total 的千分比门槛。工作项状态由 Mock 数据直接提供，界面不重新推导交付或依赖结果。</p>
+        <p className="proto-footnote">1 工作点 = 1/100 人周，deliver_at 是占 work_total 的千分比门槛。工作项状态由 v4 核心事实与依赖关系映射，界面不自行推进生产。</p>
       </Panel>
     </section>
 
     <section className="proto-focus-target" data-work-focus="episodes" tabIndex={-1} aria-label="单集列表定位">
-      <Panel eyebrow="EPISODES / 单集列表" title={`${project.episodeCount} 集各自的制作进度`} marks={['confirmed', 'sample']}
+      <Panel eyebrow="EPISODES / 单集列表" title={`${project.episodeCount} 集各自的制作进度`} marks={['confirmed']}
         note="点开任意一集查看它的六阶段；同一项目内各集进度不同步，也不要求整部作品完成一个阶段才统一进入下一阶段。">
         <div className="episode-list" role="group" aria-label="单集选择">
           {project.episodes.map((item) => <button key={item.index} className={`episode-row${item.index === episode.index ? ' is-active' : ''}`} onClick={() => onEpisodeChange(item.index)} aria-pressed={item.index === episode.index}>
@@ -90,7 +98,7 @@ export function WorkDetail({ project, data, onBack, focus, episodeIndex, onEpiso
             {item.isFocus && <span className="focus-tag">定向中</span>}
           </button>)}
         </div>
-        <p className="proto-footnote">单集优先级（P5）尚未裁决，本页只保留列表扩展接缝，不实现优先级控制。</p>
+        <p className="proto-footnote">v4 没有单集独立交付命令；列表中不提供单集交付按钮，交付以整部作品为单位。</p>
       </Panel>
     </section>
 
@@ -124,33 +132,28 @@ export function WorkDetail({ project, data, onBack, focus, episodeIndex, onEpiso
         })}</div>
         <div className="gate-summary">
           <p>门槛项状态：{gateItems.length === 0 ? '本集模板未设门槛项' : gateItems.map((item) => `${item.name} ${item.workDone} / ${item.workTotal}（需 ${item.deliverAt}‰）${item.state === 'delivered' || item.state === 'completed' ? '已达标' : '未达标'}`).join('；')}</p>
-          <p className="proto-footnote">门槛达标后由玩家主动执行交付，交付即停止生产；也可以继续打磨，期限届满强制交付并按完成度结算扣罚。界面不自动交付。</p>
+          <p className="proto-footnote">全部门槛达标后可主动交付整部作品；期限届满由核心自动强制交付并按完成度结算。</p>
         </div>
         <p className="proto-footnote">本集合计 {episode.work.done} / {episode.work.total} 工作点。阶段之间可并行：背景只依赖 Layout 与美术设定，不等原画完成。</p>
       </Panel>
     </section>
 
     <div className="proto-two-col">
-      <Panel eyebrow="PLAN / 计划与执行" title="持续方针与实际差距" marks={['confirmed', 'pending']}
+      <Panel eyebrow="PLAN / 计划与执行" title="持续制作计划" marks={['confirmed', 'pending']}
         aside={<p className="proto-since">自第 {project.plan.sinceWeek} 周起生效</p>}
-        note="方针默认沿用，不需要每周重设；下表只展示计划与实际执行的偏离及其原因。">
+        note="计划由玩家明确修改，之后按周冻结快照执行；核心不提供虚构的计划完成度。">
         <dl className="plan-setting">
-          <div><dt>投入强度</dt><dd>{effortNames[project.plan.effort]}</dd></div>
-          <div><dt>优先级</dt><dd>{priorityNames[project.plan.priority]}</dd></div>
-          <div><dt>外包策略</dt><dd>{outsourceNames[project.plan.outsource]}</dd></div>
-          <div><dt>赶工</dt><dd>{rushNames[project.plan.rush]}</dd></div>
+          <div><dt>投入强度</dt><dd><select aria-label="投入强度" value={coreProject.plan.intensity} disabled={busy || coreProject.status !== 'producing'} onChange={(event) => execute(() => setWorkPlanV4(state, project.id, { intensity: event.target.value }))}><option value="low">保守</option><option value="standard">标准</option><option value="high">集中</option></select></dd></div>
+          <div><dt>工作重点</dt><dd><select aria-label="工作重点" value={coreProject.plan.focus} disabled={busy || coreProject.status !== 'producing'} onChange={(event) => execute(() => setWorkPlanV4(state, project.id, { focus: event.target.value }))}><option value="quality">质量</option><option value="schedule">进度</option><option value="cost">成本</option></select></dd></div>
+          <div><dt>定向目标</dt><dd><select aria-label="定向目标" value={coreProject.plan.target ? `${coreProject.plan.target.kind}:${coreProject.plan.target.id}` : ''} disabled={busy || coreProject.status !== 'producing'} onChange={(event) => { const [kind, id] = event.target.value.split(':'); execute(() => setWorkPlanV4(state, project.id, { target: kind ? { kind, id } : null })) }}><option value="">无定向</option>{coreProject.episodes.map((episode) => <option key={episode.id} value={`episode:${episode.id}`}>第 {episode.index} 集</option>)}{EPISODE_STAGES.map((stage) => <option key={stage} value={`stage:${stage}`}>{episodeStageNames[stage]}</option>)}</select></dd></div>
+          <div><dt>外包策略</dt><dd>{outsourceNames[project.plan.outsource]}（核心仅保存，尚未生效）</dd></div>
+          <div><dt>加班</dt><dd>{rushNames[project.plan.rush]}（核心仅保存，尚未生效）</dd></div>
         </dl>
-        <table className="proto-table">
-          <thead><tr><th>环节</th><th>计划</th><th>实际</th><th>原因</th></tr></thead>
-          <tbody>{project.planGaps.map((line) => <tr key={line.label}>
-            <th scope="row">{line.label}</th><td>{line.planned}</td><td className={line.planned === line.actual ? undefined : 'cell-behind'}>{line.actual}</td><td>{line.reason}</td>
-          </tr>)}</tbody>
-        </table>
-        <p className="proto-footnote">计划不凭空创造员工或产能；多项目争夺同一员工时由玩家明确归属，系统不静默复制员工。本页只验证信息能否被读懂。</p>
+        <p className="proto-footnote">计划变更调用核心 set_work_plan；失败时不会采用界面选择。外包与加班已由核心明确标记为仅保存。</p>
       </Panel>
 
       <section className="proto-focus-target" data-work-focus="resources" tabIndex={-1} aria-label="资源占用定位">
-        <Panel eyebrow="RESOURCES / 资源占用" title="这个项目本周占了谁" marks={['confirmed', 'sample']}
+        <Panel eyebrow="RESOURCES / 资源占用" title="这个项目本周占了谁" marks={['confirmed']}
           note="核心员工每周严格归属一个项目：不存在同周支援、借调或拆分工时；周结算后可重新分配，不受制作阶段边界限制。">
           <ul className="people-list">{people.map((person) => {
             const allocation = allocations.find((item) => item.staffId === person.id)
@@ -177,12 +180,14 @@ export function WorkDetail({ project, data, onBack, focus, episodeIndex, onEpiso
               </tr>
             })}</tbody>
           </table>
-          <p className="proto-footnote">切换项目的人员要承担一次性磨合损失，只影响工作量产出效率、不直接影响质量；临时员工与供应商的跨项目调度属于另一套规则。</p>
+          <p className="proto-footnote">核心员工每周严格归属一个项目；调配请在办公室员工详情中明确操作。外包当前仅保存计划，尚未生成任务或费用。</p>
         </Panel>
       </section>
     </div>
 
-    <Panel eyebrow="RISK / 风险与预兆" title="风险从哪来" marks={['proposal']}>
+    <Panel eyebrow="RISK / 风险与预兆" title="风险从哪来" marks={['confirmed']}
+      note="v4 当前没有独立风险预测字段；界面不编造风险信号。">
+      {project.risks.length === 0 && <p className="proto-inline-note">核心未提供额外风险预测；请以工作项依赖、期限和待处理事件为准。</p>}
       <ul className="risk-list">{project.risks.map((risk) => <li key={risk.label}>
         <RiskTag level={risk.level} />
         <div><strong>{risk.label}</strong><p>{risk.signal}</p><span className="risk-meta">自第 {risk.sinceWeek} 周起累积</span></div>
@@ -206,9 +211,9 @@ export function WorkDetail({ project, data, onBack, focus, episodeIndex, onEpiso
             </tr>)}</tbody>
           </table>
           {project.mode === 'committee' ? <table className="proto-table">
-            <thead><tr><th>委员会成员</th><th>提供渠道</th><th>投资比例</th><th>合作始于</th></tr></thead>
+            <thead><tr><th>委员会成员</th><th>提供渠道</th><th>出资说明</th><th>合作始于</th></tr></thead>
             <tbody>{project.committee.map((member) => <tr key={member.id}>
-              <th scope="row">{member.name}</th><td>{channelNames[member.channel]}</td><td>{member.investPercent}%</td><td>第 {member.since} 周</td>
+              <th scope="row">{member.name}</th><td>{channelNames[member.channel]}</td><td>{member.investPercent === null ? '共同补足剩余份额' : `${member.investPercent}%`}</td><td>第 {member.since} 周</td>
             </tr>)}</tbody>
           </table> : <p className="proto-inline-note">承制路线：合同预算即制作预算，不承担投资本金；可取得合同结余、BD 收益与委托方成功奖励，不参与委员会成员开放的非 BD 渠道分成。</p>}
           <p className="proto-footnote">{project.mode === 'committee' ? '委员会随本作成立，结算后停止活动，成员关系转入公司长期关系。' : '承制模式不通过委员会成员拓展渠道。'}</p>

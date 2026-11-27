@@ -1,0 +1,192 @@
+{
+  "description": "v4 市场契约用例（M0_CONTRACT_FREEZE §14.13.2 / DECISION_LOG DEC-MARKET-001 / DATA_DICTIONARY_V4 §3.12）。oracle: scripts/lib/market-oracle.mjs。生成参数为 [PLACEHOLDER] 测试参数；固定四槽、每周只补空槽、至少两个可承接、定金档位 5%/10%、锁定两周为已冻结语义。",
+  "cases": [
+    {
+      "id": "MC-01",
+      "desc": "初始市场恰 4 个企划（STATUS-49/51）",
+      "op": "initial",
+      "input": { "seed": 42 },
+      "expect": { "count": 4 }
+    },
+    {
+      "id": "MC-02",
+      "desc": "每周自然补充：存活企划逐字段不变，不清空重抽",
+      "op": "topup",
+      "input": {
+        "seed": 42, "week": 1,
+        "slots": [
+          { "id": "o0", "expires_week": 5, "locked_until": null, "lock_used": false, "deposit_paid": 0, "contract_budget": 10000000 },
+          { "id": "o1", "expires_week": 6, "locked_until": null, "lock_used": false, "deposit_paid": 0, "contract_budget": 20000000 }
+        ]
+      },
+      "expect": { "kept_identical": true, "added_count": 2, "total": 4 }
+    },
+    {
+      "id": "MC-03",
+      "desc": "固定四槽满员不补充",
+      "op": "topup",
+      "input": {
+        "seed": 42, "week": 1,
+        "slots": [
+          { "id": "a0", "expires_week": 9, "locked_until": null, "lock_used": false, "deposit_paid": 0 },
+          { "id": "a1", "expires_week": 9, "locked_until": null, "lock_used": false, "deposit_paid": 0 },
+          { "id": "a2", "expires_week": 9, "locked_until": null, "lock_used": false, "deposit_paid": 0 },
+          { "id": "a3", "expires_week": 9, "locked_until": null, "lock_used": false, "deposit_paid": 0 }
+        ]
+      },
+      "expect": { "added_count": 0, "total": 4 }
+    },
+    {
+      "id": "MC-04",
+      "desc": "自然过期：expires_week 是失效周，该周开局移除未锁定企划",
+      "op": "expire",
+      "input": {
+        "week": 5,
+        "slots": [
+          { "id": "e0", "expires_week": 4, "locked_until": null },
+          { "id": "e1", "expires_week": 5, "locked_until": null },
+          { "id": "e2", "expires_week": 6, "locked_until": null }
+        ]
+      },
+      "expect": { "remaining_ids": ["e2"] }
+    },
+    {
+      "id": "MC-05",
+      "desc": "锁定保护：锁定期内超过 expires_week 仍保留（STATUS-49/51）",
+      "op": "expire",
+      "input": {
+        "week": 6,
+        "slots": [
+          { "id": "L0", "expires_week": 4, "locked_until": 7 },
+          { "id": "L1", "expires_week": 4, "locked_until": null }
+        ]
+      },
+      "expect": { "remaining_ids": ["L0"] }
+    },
+    {
+      "id": "MC-06",
+      "desc": "锁定到期未接单：W+2 开局（week >= locked_until）释放槽位，即使自然有效期未到",
+      "op": "release_locks",
+      "input": {
+        "week": 8,
+        "slots": [
+          { "id": "L0", "expires_week": 20, "locked_until": 7 },
+          { "id": "L1", "expires_week": 20, "locked_until": 8 },
+          { "id": "N0", "expires_week": 20, "locked_until": null }
+        ]
+      },
+      "expect": { "remaining_ids": ["N0"] }
+    },
+    {
+      "id": "MC-07",
+      "desc": "lock_offer 成功：locked_until=week+2、lock_used=true、deposit_paid 记录",
+      "op": "lock",
+      "input": {
+        "week": 5, "deposit": 800000,
+        "offer": { "id": "o", "expires_week": 8, "locked_until": null, "lock_used": false, "deposit_paid": 0 }
+      },
+      "expect": { "error": null, "locked_until": 7, "lock_used": true, "deposit_paid": 800000 }
+    },
+    {
+      "id": "MC-08",
+      "desc": "终身一次：lock_used=true 的企划再次锁定被拒",
+      "op": "lock",
+      "input": {
+        "week": 10, "deposit": 800000,
+        "offer": { "id": "o", "expires_week": 30, "locked_until": null, "lock_used": true, "deposit_paid": 800000 }
+      },
+      "expect": { "error": "INVALID_INPUT" }
+    },
+    {
+      "id": "MC-09",
+      "desc": "已过期企划不可锁定",
+      "op": "lock",
+      "input": {
+        "week": 9, "deposit": 800000,
+        "offer": { "id": "o", "expires_week": 8, "locked_until": null, "lock_used": false, "deposit_paid": 0 }
+      },
+      "expect": { "error": "NOT_FOUND" }
+    },
+    {
+      "id": "MC-10",
+      "desc": "定金 100% 抵扣（锁定期内）：cash_due = 应付款 − 定金，不重复计成本",
+      "op": "deduct",
+      "input": {
+        "week": 5,
+        "totalPayable": 10000000,
+        "offer": { "id": "o", "deposit_paid": 800000, "locked_until": 7 }
+      },
+      "expect": { "cash_due": 9200000, "deposit_applied": 800000 }
+    },
+    {
+      "id": "MC-11",
+      "desc": "企划 id 终身唯一：历史 id 复用被拒（防删除再生成绕过）",
+      "op": "id_reuse",
+      "input": { "id": "offer_x_3_1", "historyIds": ["offer_x_3_1", "offer_y_2_0"] },
+      "expect": { "reuse": true }
+    },
+    {
+      "id": "MC-12",
+      "desc": "坐标式随机：同 (seed,week,index) 企划逐字段一致",
+      "op": "determinism",
+      "input": { "seed": 99, "week": 4, "index": 2 },
+      "expect": { "identical": true }
+    },
+    {
+      "id": "MC-13",
+      "desc": "坐标敏感：不同周生成不同企划 id",
+      "op": "week_sensitivity",
+      "input": { "seed": 99, "week": 4, "index": 2 },
+      "expect": { "identical": false }
+    },
+    {
+      "id": "MC-14",
+      "desc": "热度由坐标决定：同 (seed,week,genre) 恒等，取值合法",
+      "op": "heat",
+      "input": { "seed": 42, "week": 3, "genre": "action" },
+      "expect": { "deterministic": true, "valid_level": true }
+    },
+    {
+      "id": "MC-15",
+      "desc": "锁定边界：expires_week 失效周当周企划已不存在，不可锁定",
+      "op": "lock",
+      "input": {
+        "week": 8, "deposit": 500000,
+        "offer": { "id": "o", "expires_week": 8, "locked_until": null, "lock_used": false, "deposit_paid": 0 }
+      },
+      "expect": { "error": "NOT_FOUND" }
+    },
+    {
+      "id": "MC-16",
+      "desc": "锁定期外（week >= locked_until）接单不抵扣定金",
+      "op": "deduct",
+      "input": {
+        "week": 7,
+        "totalPayable": 10000000,
+        "offer": { "id": "o", "deposit_paid": 800000, "locked_until": 7 }
+      },
+      "expect": { "cash_due": 10000000, "deposit_applied": 0 }
+    },
+    {
+      "id": "MC-17",
+      "desc": "定金档位（已冻结）：普通企划 deposit_basis × 5%",
+      "op": "deposit",
+      "input": { "offer": { "id": "o", "offer_source_type": "market", "deposit_basis": 10000000, "contract_budget": 10000000 } },
+      "expect": { "deposit": 500000 }
+    },
+    {
+      "id": "MC-18",
+      "desc": "定金档位（已冻结）：IP 上门企划 deposit_basis × 10%",
+      "op": "deposit",
+      "input": { "offer": { "id": "o", "offer_source_type": "ip_visit", "deposit_basis": 10000000, "contract_budget": 10000000 } },
+      "expect": { "deposit": 1000000 }
+    },
+    {
+      "id": "MC-19",
+      "desc": "定金基数生成时固定：后续 contract_budget 调整不追溯改变定金",
+      "op": "deposit",
+      "input": { "offer": { "id": "o", "offer_source_type": "market", "deposit_basis": 10000000, "contract_budget": 20000000 } },
+      "expect": { "deposit": 500000 }
+    }
+  ]
+}

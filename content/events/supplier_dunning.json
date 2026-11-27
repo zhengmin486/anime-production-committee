@@ -1,0 +1,55 @@
+{
+  "schema_version": 1,
+  "id": "supplier_dunning",
+  "name": "外包催款",
+  "category": "budget",
+  "polarity": "negative",
+  "tier": "normal",
+  "tag": "budget_pressure",
+  "stages": [
+    "storyboard_key_animation",
+    "animation"
+  ],
+  "priority": 25,
+  "cooldown_weeks": 8,
+  "once_per_project": false,
+  "trigger": {
+    "metric": "funds",
+    "op": "<",
+    "threshold": 600000
+  },
+  "random_weight": 0,
+  "expires_weeks": 0,
+  "description": "协力的外包公司来催上一批分镜的尾款，账面这周本来就不宽裕。",
+  "foreshadow": "外包方的对账邮件已经拖了两周没回。",
+  "options": [
+    {
+      "id": "settle",
+      "kind": "abandon",
+      "label": "先结清尾款",
+      "cost": 300000,
+      "risk_hint": "现金更紧",
+      "effects": [
+        {
+          "scope": "instant",
+          "target": "morale",
+          "value": -2
+        }
+      ]
+    },
+    {
+      "id": "negotiate",
+      "kind": "overtime",
+      "label": "商量分期支付",
+      "cost": 150000,
+      "risk_hint": "合作关系受损",
+      "effects": [
+        {
+          "scope": "instant",
+          "target": "morale",
+          "value": -4
+        }
+      ]
+    }
+  ]
+}

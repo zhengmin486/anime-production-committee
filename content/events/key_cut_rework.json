@@ -1,0 +1,61 @@
+{
+  "schema_version": 1,
+  "id": "key_cut_rework",
+  "name": "关键镜头返修",
+  "category": "quality",
+  "polarity": "negative",
+  "tier": "normal",
+  "tag": "quality_rework",
+  "stages": [
+    "storyboard_key_animation",
+    "animation"
+  ],
+  "priority": 20,
+  "cooldown_weeks": 6,
+  "once_per_project": false,
+  "trigger": {
+    "metric": "stage_quality",
+    "op": "<",
+    "threshold": 55
+  },
+  "random_weight": 0,
+  "expires_weeks": 0,
+  "description": "关键镜头的作画稳定性不达标，检查时被指出构图和动作衔接都需要返修。",
+  "foreshadow": "连续两周的作画检查都出现了返修标记。",
+  "options": [
+    {
+      "id": "accept",
+      "kind": "abandon",
+      "label": "按现状推进",
+      "cost": 0,
+      "risk_hint": "质量缺口留到成片",
+      "effects": [
+        {
+          "scope": "instant",
+          "target": "morale",
+          "value": -3
+        }
+      ]
+    },
+    {
+      "id": "rework",
+      "kind": "overtime",
+      "label": "抽调人手返修",
+      "cost": 180000,
+      "risk_hint": "疲劳累积",
+      "effects": [
+        {
+          "scope": "instant",
+          "target": "fatigue",
+          "value": 6
+        },
+        {
+          "scope": "stage",
+          "target": "quality",
+          "stage": "storyboard_key_animation",
+          "value": 4
+        }
+      ]
+    }
+  ]
+}

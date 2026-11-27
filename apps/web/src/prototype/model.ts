@@ -4,13 +4,13 @@
 export type EpisodeStage = 'content_design' | 'storyboard_key_animation' | 'animation' | 'art_visual' | 'photography_editing' | 'sound_delivery'
 export type Role = 'director' | 'scriptwriter' | 'animation_director' | 'key_animator' | 'animator' | 'production_manager' | 'postproduction'
 export type Ability = 'planning' | 'direction' | 'drawing' | 'animation' | 'management' | 'postproduction'
-export type Source = 'manga' | 'light_novel' | 'game' | 'original'
+export type Source = 'manga' | 'light_novel' | 'game' | 'original' | 'publisher' | 'studio'
 export type Scale = 'ova' | 'short' | 'tv' | 'movie'
 export type Mode = 'contract' | 'committee'
-export type Channel = 'bd' | 'publisher' | 'toy' | 'music' | 'tv_broadcast'
+export type Channel = 'bd' | 'publisher' | 'toy' | 'music' | 'tv_broadcast' | 'domestic_streaming' | 'overseas' | 'merchandise' | 'bd_dvd' | 'tv' | 'streaming' | 'publishing'
 export type Effort = 'conservative' | 'standard' | 'focused'
-export type Priority = 'quality' | 'progress' | 'cost'
-export type OutsourcePolicy = 'off' | 'gap' | 'active'
+export type Priority = 'quality' | 'progress' | 'cost' | 'schedule'
+export type OutsourcePolicy = 'off' | 'gap' | 'active' | 'gap_fill' | 'aggressive' | 'none'
 export type RiskLevel = 'low' | 'medium' | 'high'
 export type Mark = 'confirmed' | 'proposal' | 'pending' | 'sample'
 
@@ -32,13 +32,13 @@ export const roleNames: Record<Role, string> = {
 export const abilityNames: Record<Ability, string> = {
   planning: '企划', direction: '演出', drawing: '作画', animation: '动画', management: '管理', postproduction: '后期',
 }
-export const sourceNames: Record<Source, string> = { manga: '漫画改编', light_novel: '轻小说改编', game: '游戏改编', original: '原创' }
+export const sourceNames: Record<Source, string> = { manga: '漫画改编', light_novel: '轻小说改编', game: '游戏改编', original: '原创', publisher: '出版委托', studio: '制作所企划' }
 export const scaleNames: Record<Scale, string> = { ova: 'OVA', short: '短篇', tv: '电视动画', movie: '剧场版' }
 export const modeNames: Record<Mode, string> = { contract: '承制', committee: '制作委员会' }
-export const channelNames: Record<Channel, string> = { bd: 'BD', publisher: '出版', toy: '玩具', music: '音乐', tv_broadcast: '电视' }
+export const channelNames: Record<Channel, string> = { bd: 'BD', publisher: '出版', toy: '玩具', music: '音乐', tv_broadcast: '电视', domestic_streaming: '国内配信', overseas: '海外', merchandise: '周边', bd_dvd: 'BD/DVD', tv: '电视', streaming: '配信', publishing: '出版' }
 export const effortNames: Record<Effort, string> = { conservative: '保守', standard: '标准', focused: '集中' }
-export const priorityNames: Record<Priority, string> = { quality: '质量', progress: '进度', cost: '成本' }
-export const outsourceNames: Record<OutsourcePolicy, string> = { off: '不主动外包', gap: '按缺口补充', active: '积极外包' }
+export const priorityNames: Record<Priority, string> = { quality: '质量', progress: '进度', schedule: '进度', cost: '成本' }
+export const outsourceNames: Record<OutsourcePolicy, string> = { off: '不主动外包', none: '不主动外包', gap: '按缺口补充', gap_fill: '按缺口补充', active: '积极外包', aggressive: '积极外包' }
 export const riskNames: Record<RiskLevel, string> = { low: '低', medium: '中', high: '高' }
 export const markNames: Record<Mark, string> = { confirmed: '已确认', proposal: '设计建议', pending: '待细化参数', sample: '原型样本' }
 
@@ -47,10 +47,10 @@ export interface Company {
   week: number
   totalWeeks: number
   cash: number
-  committedNextWeek: number
+  committedNextWeek: number | null
   weeklyFixed: { salary: number; operations: number }
   reputation: number
-  runwayWeeks: number
+  runwayWeeks: number | null
   headline: string
 }
 
@@ -172,7 +172,7 @@ export interface CommitteeMember {
   id: string
   name: string
   channel: Channel
-  investPercent: number
+  investPercent: number | null
   since: number
 }
 
@@ -211,9 +211,9 @@ export interface Project {
   commonItems: WorkItem[]
   episodes: Episode[]
   focusLabel: string | null
-  plannedCompletion: number
+  plannedCompletion: number | null
   quality: number
-  audienceExpectation: number
+  audienceExpectation: number | null
   commercialPotential: number
   plan: PlanSetting
   planGaps: PlanGap[]
@@ -298,7 +298,8 @@ export interface EventCard {
   signals: string[]
   options: EventOption[]
   outcomes: Record<string, string>
-  deadlineWeek: number
+  deadlineWeek: number | null
+  viewed: boolean
 }
 
 /* 正常、事件待处理、周结算回滚与关闭中的操作差异必须可辨认。 */
@@ -350,6 +351,8 @@ export interface MarketOffer {
   heat: 'cold' | 'warm' | 'hot'
   hook: string
   blockedBy: string | null
+  allowedModes: Mode[]
+  committeeCandidates: string[]
 }
 
 export const offerOriginNames: Record<MarketOffer['origin'], string> = {
@@ -405,4 +408,5 @@ export interface PrototypeData {
   marketOffers: MarketOffer[]
   relationships: PartnerRelationship[]
   history: WorkRecord[]
+  pendingEvents: EventCard[]
 }

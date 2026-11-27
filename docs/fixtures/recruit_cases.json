@@ -1,0 +1,159 @@
+{
+  "description": "v4 招聘契约用例（M0_CONTRACT_FREEZE §14.7 / DECISION_LOG §17 Q3）。oracle: scripts/lib/recruit-oracle.mjs。数值均为 [PLACEHOLDER] 测试参数，不是标定结论。",
+  "cases": [
+    {
+      "id": "RC-01",
+      "desc": "同周第二次 scout 被拒（每周至多一次）",
+      "op": "scout_guard",
+      "input": { "week": 5, "last_scout_week": 5, "company_status": "running", "pending_count": 0, "solvency": "normal", "balance": 1000000, "fee": 50000 },
+      "expect": { "error": "INVALID_PHASE" }
+    },
+    {
+      "id": "RC-02",
+      "desc": "跨周可再次 scout",
+      "op": "scout_guard",
+      "input": { "week": 6, "last_scout_week": 5, "company_status": "running", "pending_count": 0, "solvency": "normal", "balance": 1000000, "fee": 50000 },
+      "expect": { "error": null }
+    },
+    {
+      "id": "RC-03",
+      "desc": "role 与 focus_ability 同传被拒（至多一个）",
+      "op": "scout_guard",
+      "input": { "week": 6, "last_scout_week": null, "company_status": "running", "pending_count": 0, "solvency": "normal", "balance": 1000000, "fee": 50000, "role": "作画", "focus_ability": "drawing" },
+      "expect": { "error": "INVALID_INPUT" }
+    },
+    {
+      "id": "RC-04",
+      "desc": "存在待处理事件时 scout 被拒",
+      "op": "scout_guard",
+      "input": { "week": 6, "last_scout_week": null, "company_status": "running", "pending_count": 1, "solvency": "normal", "balance": 1000000, "fee": 50000 },
+      "expect": { "error": "INVALID_PHASE" }
+    },
+    {
+      "id": "RC-05",
+      "desc": "非 running 公司 scout 被拒（当前不启用危机周）",
+      "op": "scout_guard",
+      "input": { "week": 6, "last_scout_week": null, "company_status": "closing", "pending_count": 0, "balance": 1000000, "fee": 50000 },
+      "expect": { "error": "INVALID_PHASE" }
+    },
+    {
+      "id": "RC-06",
+      "desc": "现金不足 scout 被拒",
+      "op": "scout_guard",
+      "input": { "week": 6, "last_scout_week": null, "company_status": "running", "pending_count": 0, "solvency": "normal", "balance": 40000, "fee": 50000 },
+      "expect": { "error": "INSUFFICIENT_FUNDS" }
+    },
+    {
+      "id": "RC-07",
+      "desc": "scout 候选窗口到期被移除，regular 不受影响",
+      "op": "expire",
+      "input": {
+        "week": 8,
+        "pool": [
+          { "staff": { "id": "s1" }, "expires_week": 7, "origin": "scout" },
+          { "staff": { "id": "s2" }, "expires_week": 8, "origin": "scout" },
+          { "staff": { "id": "r1" }, "expires_week": null, "origin": "regular" }
+        ]
+      },
+      "expect": { "remaining_ids": ["r1"] }
+    },
+    {
+      "id": "RC-08",
+      "desc": "窗口边界：expires_week 是首个不可签约周，当周即移除",
+      "op": "expire",
+      "input": {
+        "week": 7,
+        "pool": [
+          { "staff": { "id": "s1" }, "expires_week": 7, "origin": "scout" }
+        ]
+      },
+      "expect": { "remaining_ids": [] }
+    },
+    {
+      "id": "RC-09",
+      "desc": "部分轮换：未选中常规候选逐字段不变，scout 不参与轮换",
+      "op": "rotate",
+      "input": {
+        "seed": 42,
+        "week": 10,
+        "params": { "rotate_count": 2, "pool_cap": 6 },
+        "pool": [
+          { "staff": { "id": "r0", "weekly_salary": 111 }, "expires_week": null, "origin": "regular" },
+          { "staff": { "id": "r1", "weekly_salary": 222 }, "expires_week": null, "origin": "regular" },
+          { "staff": { "id": "r2", "weekly_salary": 333 }, "expires_week": null, "origin": "regular" },
+          { "staff": { "id": "r3", "weekly_salary": 444 }, "expires_week": null, "origin": "regular" },
+          { "staff": { "id": "sc0" }, "expires_week": 12, "origin": "scout" }
+        ]
+      },
+      "expect": { "regular_kept": 2, "regular_added": 2, "scout_untouched": true, "kept_fields_identical": true }
+    },
+    {
+      "id": "RC-10",
+      "desc": "轮换不整池洗牌：rotate_count=1 时至少保留 n-1 个原常规候选",
+      "op": "rotate",
+      "input": {
+        "seed": 7,
+        "week": 3,
+        "params": { "rotate_count": 1, "pool_cap": 6 },
+        "pool": [
+          { "staff": { "id": "a" }, "expires_week": null, "origin": "regular" },
+          { "staff": { "id": "b" }, "expires_week": null, "origin": "regular" },
+          { "staff": { "id": "c" }, "expires_week": null, "origin": "regular" }
+        ]
+      },
+      "expect": { "regular_kept": 2, "regular_added": 1, "scout_untouched": true, "kept_fields_identical": true }
+    },
+    {
+      "id": "RC-11",
+      "desc": "hire 解包：expires_week/origin 不残留名册 Staff",
+      "op": "unpack",
+      "input": {
+        "candidate": {
+          "staff": { "id": "cand_x", "role": "作画", "signing_fee": 300000, "weekly_salary": 35000 },
+          "expires_week": 9,
+          "origin": "scout"
+        }
+      },
+      "expect": { "has_keys": ["id", "role", "signing_fee", "weekly_salary"], "absent_keys": ["expires_week", "origin"] }
+    },
+    {
+      "id": "RC-12",
+      "desc": "坐标式随机：同 (seed,week,index) 生成逐字段一致，与调用顺序无关",
+      "op": "determinism",
+      "input": { "seed": 99, "week": 4, "index": 2 },
+      "expect": { "identical": true }
+    },
+    {
+      "id": "RC-13",
+      "desc": "坐标敏感：不同周生成不同候选（id 含周坐标）",
+      "op": "week_sensitivity",
+      "input": { "seed": 99, "week": 4, "index": 2 },
+      "expect": { "identical": false }
+    },
+    {
+      "id": "RC-14",
+      "desc": "scout 成功后 last_scout_week 更新、候选带窗口与 origin=scout",
+      "op": "scout",
+      "input": {
+        "ctx": { "seed": 42, "week": 5, "last_scout_week": null, "company_status": "running", "pending_count": 0, "solvency": "normal", "balance": 1000000, "pity": { "since_sr": 0, "since_ssr": 0 } },
+        "pool": [],
+        "params": { "scout_count": 1, "scout_window_weeks": 2 }
+      },
+      "expect": { "error": null, "last_scout_week": 5, "added_count": 1, "added_origin": "scout", "added_expires_week": 7 }
+    },
+    {
+      "id": "RC-15",
+      "desc": "未知职业枚举被拒",
+      "op": "scout_guard",
+      "input": { "week": 6, "last_scout_week": null, "company_status": "running", "pending_count": 0, "solvency": "normal", "balance": 1000000, "fee": 50000, "role": "未知职业" },
+      "expect": { "error": "INVALID_INPUT" }
+    },
+    {
+      "id": "RC-16",
+      "desc": "没有职业映射的能力方向被拒，不静默退化为随机候选",
+      "op": "scout_guard",
+      "input": { "week": 6, "last_scout_week": null, "company_status": "running", "pending_count": 0, "solvency": "normal", "balance": 1000000, "fee": 50000, "focus_ability": "animation" },
+      "expect": { "error": "INVALID_INPUT" }
+    }
+  ]
+}
