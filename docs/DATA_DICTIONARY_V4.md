@@ -294,6 +294,7 @@ PoolCandidate { staff: Staff, expires_week: uint | null, origin: "regular" | "sc
 - 员工报酬统一 `signing_fee + weekly_salary`，不再使用 `project_fee`；签约费走 Finance `salary` 流水（`w{week}.salary.{staff_id}.signing`），scout 费用走 `operations`（`w{week}.operations.scout`），见 §3.7。
 - `dismiss_staff` 历史贡献者解雇语义已按 2026-11-27 负责人裁决收口：INV-12 的 contributors 是历史事实引用，不要求员工仍在当前 Staff 名册；允许满足命令 7 其他守卫的历史参与者解雇，历史 contributors 与 Archive 团队快照保持不变。运行时与 validator 回归已通过。
 - `hire_core` 只接受 `employment=core` 且 `temporary_contract=null` 的池候选；scout 候选在 `week >= expires_week` 后即使仍留在输入状态中也返回 `NOT_FOUND`，不得签约。
+- `recruitment.free_pool[]` 是自由人才池：被轮换换下的常规候选进池冷却（条目 `expires_week` 表示冷却结束周），冷却结束后优先以同一身份重返展示槽，池里没有可用者才生成新人；上限 8 条，超出丢最旧。展示槽 6、每周轮换 2、冷却 2 周均为 `[PLACEHOLDER]`。
 - 招聘池固定保留 1 张临时用工卡（`origin="temporary"`，`employment="temporary"`），不占 6 个常规槽、不参与常规轮换；签走或过期后下一周开局刷新。能力按声望 Tier 分档（42–52 / 56–65 / 66–74），只有主能力在档位内、其余五维取档位下限，周薪 = (20,000 + 主能力×300)×120%、签约费 = 两周薪资。该刷新节奏是 `[PLACEHOLDER]`。
 
 **Offer 生命周期（M0 §14.13.2，市场槽已实现）**：

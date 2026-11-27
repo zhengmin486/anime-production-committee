@@ -3840,11 +3840,40 @@ test('dismiss_staff：Archive 团队历史不阻止解雇且快照保持不变',
   assert.ok(dismissed.state.archive.works[0].team.some((member) => member.id === 'staff_ka'))
 })
 
+test('招聘四槽生命周期：换下的候选回自由池，冷却后同身份重返', () => {
+  let state = ok('initialize', { seed: 42 }).state
+  const initialRegularIds = state.recruitment.pool
+    .filter((candidate) => candidate.origin === 'regular').map((candidate) => candidate.staff.id)
+  assert.equal(initialRegularIds.length, 6)
+  assert.deepEqual(state.recruitment.free_pool, [])
+
+  // 第 1 周：轮换 2 个槽 → 被换下的进自由池，冷却到第 3 周
+  state = ok('advance_week', { state }).state
+  assert.equal(state.recruitment.free_pool.length, 2)
+  assert.ok(state.recruitment.free_pool.every((entry) => entry.expires_week === 3), '冷却结束周 = 换下周 + 2')
+  const retired = state.recruitment.free_pool.map((entry) => entry.staff.id)
+  assert.ok(retired.every((id) => initialRegularIds.includes(id)), '回池的是原本在架上的候选')
+
+  // 第 2 周：再换 2 个，自由池 4 人且都还在冷却
+  state = ok('advance_week', { state }).state
+  assert.equal(state.recruitment.free_pool.length, 4)
+
+  // 第 3 周：最早那批冷却结束 → 同身份重返展示槽，自由池回落到 2
+  state = ok('advance_week', { state }).state
+  const regularIds = state.recruitment.pool
+    .filter((candidate) => candidate.origin === 'regular').map((candidate) => candidate.staff.id)
+  // 每周固定换下 2 人：累计 6 人入池、2 人重返，池里剩 4
+  assert.equal(state.recruitment.free_pool.length, 4)
+  assert.ok(retired.some((id) => regularIds.includes(id)), '应出现至少一个同身份重返的候选')
+})
+
 test('advance_week 招聘池周步骤：部分轮换与 oracle rotatePool 一致', () => {
   const state = ok('initialize', { seed: 42 }).state
   const advanced = ok('advance_week', { state }).state
-  const expected = refreshTemporary(rotatePool(state.recruitment.pool, 42, 1).pool, 42, 1, state.company.reputation)
-  assert.deepEqual(advanced.recruitment.pool, expected)
+  const rotated = rotatePool(state.recruitment.pool, 42, 1, { freePool: state.recruitment.free_pool })
+  assert.deepEqual(advanced.recruitment.free_pool, rotated.freePool)
+  assert.deepEqual(advanced.recruitment.pool,
+    refreshTemporary(rotated.pool, 42, 1, state.company.reputation))
   assert.equal(advanced.company.week, 1)
 })
 
@@ -3852,7 +3881,8 @@ test('advance_week 招聘池轮换落点碰撞时仍无放回替换两个槽', (
   const state = ok('initialize', { seed: 2 }).state
   state.company.week = 2
   const advanced = ok('advance_week', { state }).state
-  const expected = rotatePool(state.recruitment.pool, 2, 3)
+  const expected = rotatePool(state.recruitment.pool, 2, 3, { freePool: state.recruitment.free_pool })
+  assert.deepEqual(advanced.recruitment.free_pool, expected.freePool)
   assert.deepEqual(advanced.recruitment.pool,
     refreshTemporary(expected.pool, 2, 3, state.company.reputation))
   assert.equal(expected.added_ids.length, 2)
@@ -3866,8 +3896,8 @@ test('scout 窗口：expires_week 是首个不可签约周，regular 不受影�
   const scoutId = state.recruitment.pool.at(-1).staff.id
   const poolAfterScout = state.recruitment.pool
   state = ok('advance_week', { state }).state
-  assert.deepEqual(state.recruitment.pool,
-    refreshTemporary(rotatePool(poolAfterScout, 42, 1).pool, 42, 1, state.company.reputation))
+  const rotated = rotatePool(poolAfterScout, 42, 1, { freePool: state.recruitment.free_pool })
+  assert.deepEqual(state.recruitment.pool, refreshTemporary(rotated.pool, 42, 1, state.company.reputation))
   assert.ok(state.recruitment.pool.some((candidate) => candidate.staff.id === scoutId))
   state = ok('advance_week', { state }).state
   assert.ok(!state.recruitment.pool.some((candidate) => candidate.staff.id === scoutId))

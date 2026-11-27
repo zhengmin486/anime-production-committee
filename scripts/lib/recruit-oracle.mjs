@@ -50,6 +50,8 @@ export const DEFAULT_PARAMS = Object.freeze({
   scout_count: 1,              // [PLACEHOLDER] 每次 scout 生成候选数
   scout_window_weeks: 2,       // [PLACEHOLDER] 讨论范围 1–2 周
   pool_cap: 6,                 // [PLACEHOLDER] 常规池上限（scout 候选另计）
+  reappear_cooldown_weeks: 2,  // [PLACEHOLDER] 被换下后回自由池的冷却周数
+  free_pool_cap: 8,            // [PLACEHOLDER] 自由池上限，超出丢最旧
   rotate_count: 2,             // [PLACEHOLDER] 每周部分轮换的常规候选数
   ssr_rate: 30,                // [PLACEHOLDER] 千分比
   sr_rate: 150,                // [PLACEHOLDER] 千分比
@@ -245,13 +247,29 @@ export function rotatePool(pool, seed, week, opts = {}) {
     slots.push(available.splice(roll, 1)[0])
   }
   const kept = regulars.filter((_, i) => !slots.includes(i))
-  const added = []
+  // 被换下的候选回自由池并进入冷却（DEC-STAFF-009 / M0 §14.13）
+  const freePool = [...(opts.freePool ?? [])]
   for (const slot of slots.sort((a, b) => a - b)) {
+    freePool.push({ ...regulars[slot], expires_week: week + params.reappear_cooldown_weeks })
+  }
+  const added = []
+  for (const slot of slots) {
+    const readyIndex = freePool.findIndex((c) => c.expires_week !== null && c.expires_week <= week)
+    if (readyIndex >= 0) {
+      const [returning] = freePool.splice(readyIndex, 1)
+      added.push({ ...returning, expires_week: null })
+      continue
+    }
     const { staff } = generateCandidate(seed, week, slot, { purpose: PURPOSE.recruit, params })
     added.push({ staff, expires_week: null, origin: 'regular' })
   }
+  if (freePool.length > params.free_pool_cap) freePool.splice(0, freePool.length - params.free_pool_cap)
   const regularPool = [...kept, ...added].slice(0, params.pool_cap)
-  return { pool: [...regularPool, ...temporaries, ...scouts], added_ids: added.map((c) => c.staff.id) }
+  return {
+    pool: [...regularPool, ...temporaries, ...scouts],
+    freePool,
+    added_ids: added.map((c) => c.staff.id)
+  }
 }
 
 // ---- hire 解包：包装字段不得残留名册 ----

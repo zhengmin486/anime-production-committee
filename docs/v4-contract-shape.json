@@ -1333,6 +1333,7 @@
       "target"
     ],
     "state.recruitment": [
+      "free_pool",
       "last_scout_week",
       "pity",
       "pool"
@@ -1341,12 +1342,17 @@
       "since_sr",
       "since_ssr"
     ],
-    "state.recruitment.pool[]": [
+        "state.recruitment.free_pool[]": [
       "expires_week",
       "origin",
       "staff"
     ],
-    "state.recruitment.pool[].staff": [
+"state.recruitment.pool[]": [
+      "expires_week",
+      "origin",
+      "staff"
+    ],
+        "state.recruitment.free_pool[].staff": [
       "abilities",
       "assignment_work_id",
       "departure_warning",
@@ -1365,7 +1371,26 @@
       "temporary_contract",
       "weekly_salary"
     ],
-    "state.recruitment.pool[].staff.abilities": [
+"state.recruitment.pool[].staff": [
+      "abilities",
+      "assignment_work_id",
+      "departure_warning",
+      "employment",
+      "experience",
+      "fatigue",
+      "id",
+      "last_participation",
+      "morale",
+      "name",
+      "potential",
+      "revealed_potential",
+      "role",
+      "signing_fee",
+      "talent_type",
+      "temporary_contract",
+      "weekly_salary"
+    ],
+        "state.recruitment.free_pool[].staff.abilities": [
       "animation",
       "direction",
       "drawing",
@@ -1373,7 +1398,7 @@
       "planning",
       "postproduction"
     ],
-    "state.recruitment.pool[].staff.experience": [
+"state.recruitment.pool[].staff.abilities": [
       "animation",
       "direction",
       "drawing",
@@ -1381,7 +1406,7 @@
       "planning",
       "postproduction"
     ],
-    "state.recruitment.pool[].staff.potential": [
+        "state.recruitment.free_pool[].staff.experience": [
       "animation",
       "direction",
       "drawing",
@@ -1389,7 +1414,39 @@
       "planning",
       "postproduction"
     ],
-    "state.recruitment.pool[].staff.revealed_potential": [
+"state.recruitment.pool[].staff.experience": [
+      "animation",
+      "direction",
+      "drawing",
+      "management",
+      "planning",
+      "postproduction"
+    ],
+        "state.recruitment.free_pool[].staff.potential": [
+      "animation",
+      "direction",
+      "drawing",
+      "management",
+      "planning",
+      "postproduction"
+    ],
+"state.recruitment.pool[].staff.potential": [
+      "animation",
+      "direction",
+      "drawing",
+      "management",
+      "planning",
+      "postproduction"
+    ],
+        "state.recruitment.free_pool[].staff.revealed_potential": [
+      "animation",
+      "direction",
+      "drawing",
+      "management",
+      "planning",
+      "postproduction"
+    ],
+"state.recruitment.pool[].staff.revealed_potential": [
       "animation",
       "direction",
       "drawing",

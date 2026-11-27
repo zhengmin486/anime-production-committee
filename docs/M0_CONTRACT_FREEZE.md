@@ -566,7 +566,8 @@ PoolCandidate {
 - `hire_core(staff_id)` / `hire_temporary` 命中池中候选时，把 `PoolCandidate.staff` 解包转入名册；`expires_week/origin` 是池包装字段，**不得**残留在名册 Staff 上。员工报酬统一使用 `signing_fee + weekly_salary`，不再使用 `project_fee`；签约费只通过 Finance 流水入账。
 - 签约窗口：`expires_week` 是首个不可签约周；进入该周开局时候选失效并移除，到期不产生费用、不退款、不惩罚。窗口周数 `[PLACEHOLDER]`（讨论范围 1–2 周）。
 - 常规池**部分轮换**：周结算固定步骤只替换部分候选，不整池清空重生成；轮换比例 `[PLACEHOLDER]`。scout 候选不参与常规轮换，只按各自窗口到期。
-- 招聘市场固定 4 个候选人展示槽，四槽全部属于 Recruitment；通用随机简历招聘后成为正式核心员工，正常占编制并参与长期成长。展示窗口暂按 2 周，到期回自由人才池并进入冷却，冷却后可同身份重现。当前运行时尚未实现展示槽身份、自由池、冷却及 Tier 生成衔接，现有 regular/scout 池不得冒充该完整生命周期。
+- 招聘市场固定 4 个候选人展示槽，四槽全部属于 Recruitment；通用随机简历招聘后成为正式核心员工，正常占编制并参与长期成长。展示窗口暂按 2 周，到期回自由人才池并进入冷却，冷却后可同身份重现。
+- **2026-11-27 落地形态**：`recruitment.free_pool[]` 保存回池候选，条目复用 `PoolCandidate` 形状，其中 `expires_week` 在该池内表示**冷却结束周**（常规候选在展示槽上仍必须为 `null`，INV-01 不变）。v0.5 用"每周轮换 2 个展示槽"作为刷新节奏而非硬 2 周窗口；被换下者入池冷却 2 周，冷却结束后优先同身份重返，池空才生成新人。展示槽数、轮换数、冷却周数与自由池上限均为 `[PLACEHOLDER]`。
 - Scout 每周至多一次：以 `last_scout_week ≠ company.week` 判定，不引入额外计数器字段；`last_scout_week` 只由 `scout` 命令写入。
 - 随机坐标（沿用坐标式随机，无计数器入档）：候选生成 `draw(seed, week, "staff/recruit", purpose, index)`；常规轮换 `"staff/recruit_regular"`；保底抽取结果由 pity 计数参与 purpose/index 派生，具体映射由实现提出并经测试固定。
 

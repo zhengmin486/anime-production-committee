@@ -250,6 +250,9 @@ struct PoolCandidate {
 
 struct Recruitment {
     std::vector<PoolCandidate> pool;
+    // 自由人才池：展示窗口到期后回池，冷却结束可"同身份"重返展示槽。
+    // 条目复用 PoolCandidate 形状，其中 expires_week 在自由池里表示"冷却结束周"。
+    std::vector<PoolCandidate> free_pool;
     Pity pity;
     std::optional<int> last_scout_week;   // null = 从未 scout；只由 scout 命令写入
 };

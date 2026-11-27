@@ -303,6 +303,21 @@ GameState decode_state(const Json& request) {
             nullptr
         );
     }
+    const auto require_candidate = [](const Json& candidate) {
+        if (!candidate.is_object()) throw Json::type_error::create(302, "recruitment 候选人必须是对象", nullptr);
+        for (const char* key : {"staff", "expires_week", "origin"}) {
+            if (!candidate.contains(key)) {
+                throw Json::type_error::create(302, std::string("recruitment 候选人缺少字段: ") + key, nullptr);
+            }
+        }
+        if (!candidate.at("expires_week").is_null() && !candidate.at("expires_week").is_number_integer()) {
+            throw Json::type_error::create(302, "recruitment 候选人 expires_week 必须是整数或 null", nullptr);
+        }
+        if (!candidate.at("origin").is_string()) {
+            throw Json::type_error::create(302, "recruitment 候选人 origin 必须是字符串", nullptr);
+        }
+    };
+
     const auto require_staff = [&require](const Json& member, const std::string& where) {
         require(member, "id", where);
         require(member, "name", where);
@@ -328,6 +343,7 @@ GameState decode_state(const Json& request) {
     require(state, "recruitment", "state");
     const Json& recruitment = state.at("recruitment");
     require(recruitment, "pool", "recruitment");
+    require(recruitment, "free_pool", "recruitment");
     require(recruitment, "pity", "recruitment");
     require(recruitment, "last_scout_week", "recruitment");
     if (!recruitment.at("pool").is_array()) {
@@ -353,6 +369,10 @@ GameState decode_state(const Json& request) {
             throw Json::type_error::create(302, "recruitment.pool[].origin 必须是字符串", nullptr);
         }
         require_staff(candidate.at("staff"), "recruitment.pool[].staff");
+    }
+    for (const auto& candidate : recruitment.at("free_pool")) {
+        require_candidate(candidate);
+        require_staff(candidate.at("staff"), "recruitment.free_pool[].staff");
     }
     const auto require_item = [&require](const Json& item) {
         for (const char* key : {"id", "key", "ability", "work_total", "work_done", "deliver_at", "deps",
@@ -503,7 +523,9 @@ constexpr std::int64_t kScoutFee = 50000;          // [PLACEHOLDER]
 constexpr int kScoutCount = 1;                     // [PLACEHOLDER]
 constexpr int kScoutWindowWeeks = 2;               // [PLACEHOLDER] 讨论范围 1–2 周
 constexpr int kPoolCap = 6;                        // [PLACEHOLDER] 常规池上限
-constexpr int kRotateCount = 2;                    // [PLACEHOLDER] 每周部分轮换数
+constexpr int kRotateCount = 2;
+constexpr int kReappearCooldownWeeks = 2;          // [PLACEHOLDER] 被换下后回自由池的冷却周数
+constexpr std::size_t kFreePoolCap = 8;            // [PLACEHOLDER] 自由池上限，超出丢最旧的                    // [PLACEHOLDER] 每周部分轮换数
 constexpr int kSsrRate = 30;                       // [PLACEHOLDER] 千分比
 constexpr int kSrRate = 150;                       // [PLACEHOLDER] 千分比
 constexpr int kPitySr = 10;                        // [PLACEHOLDER] 未冻结
@@ -605,7 +627,9 @@ std::vector<PoolCandidate> expire_candidates(const std::vector<PoolCandidate>& p
 
 // 常规池部分轮换：先到期清理，再确定性选 kRotateCount 个常规槽替换；
 // 未选中候选逐字段不变；scout 候选不参与轮换。轮换生成不带保底计数（与 oracle 一致）。
-std::vector<PoolCandidate> rotate_pool(const std::vector<PoolCandidate>& pool, std::uint32_t seed, int week) {
+std::vector<PoolCandidate> rotate_pool(const std::vector<PoolCandidate>& pool,
+                                       std::vector<PoolCandidate>& free_pool,
+                                       std::uint32_t seed, int week) {
     const auto alive = expire_candidates(pool, week);
     std::vector<PoolCandidate> regulars;
     std::vector<PoolCandidate> temporaries;
@@ -631,7 +655,28 @@ std::vector<PoolCandidate> rotate_pool(const std::vector<PoolCandidate>& pool, s
     for (std::size_t i = 0; i < regulars.size(); ++i) {
         if (std::find(slots.begin(), slots.end(), static_cast<int>(i)) == slots.end()) kept.push_back(regulars[i]);
     }
+    // 被换下的候选不销毁：回自由池并进入冷却，冷却结束后可能以同一身份重返展示槽（DEC-STAFF-009 / M0 §14.13）
     for (const int slot : slots) {
+        PoolCandidate retired = regulars[static_cast<std::size_t>(slot)];
+        retired.expires_week = week + kReappearCooldownWeeks;
+        free_pool.push_back(std::move(retired));
+    }
+    for (const int slot : slots) {
+        // 先看自由池里有没有冷却结束的候选人：有就同身份重返，没有才生成新人
+        auto ready = free_pool.end();
+        for (auto it = free_pool.begin(); it != free_pool.end(); ++it) {
+            if (it->expires_week && *it->expires_week <= week) {
+                ready = it;
+                break;
+            }
+        }
+        if (ready != free_pool.end()) {
+            PoolCandidate returning = std::move(*ready);
+            free_pool.erase(ready);
+            returning.expires_week = std::nullopt;   // 回到展示槽后重新等下一次轮换
+            kept.push_back(std::move(returning));
+            continue;
+        }
         auto generated = generate_candidate(seed, week, slot, purpose_recruit(), std::nullopt, Pity{});
         PoolCandidate candidate;
         candidate.staff = std::move(generated.staff);
@@ -639,6 +684,9 @@ std::vector<PoolCandidate> rotate_pool(const std::vector<PoolCandidate>& pool, s
         kept.push_back(std::move(candidate));
     }
     if (kept.size() > static_cast<std::size_t>(kPoolCap)) kept.resize(static_cast<std::size_t>(kPoolCap));
+    if (free_pool.size() > kFreePoolCap) {
+        free_pool.erase(free_pool.begin(), free_pool.end() - static_cast<std::ptrdiff_t>(kFreePoolCap));
+    }
     kept.insert(kept.end(), temporaries.begin(), temporaries.end());
     kept.insert(kept.end(), scouts.begin(), scouts.end());
     return kept;
@@ -1780,6 +1828,22 @@ std::vector<std::string> validate(const GameState& state) {
         if (candidate.staff.weekly_salary <= 0) error("INV-01 候选 weekly_salary 必须为正: " + candidate.staff.id);
         if (candidate.staff.assignment_work_id) {
             error("INV-01 池中候选不得有项目归属: " + candidate.staff.id);
+        }
+    }
+    // 自由人才池：只有常规候选会回池，且必须带冷却结束周（entry.expires_week 在这里换语义）。
+    if (state.recruitment.free_pool.size() > 3 * kFreePoolCap) {
+        error("INV-01 自由人才池超过上限");
+    }
+    for (const auto& candidate : state.recruitment.free_pool) {
+        claim_id(candidate.staff.id, "candidate");
+        if (candidate.origin != "regular") {
+            error("INV-01 自由池只允许常规候选: " + candidate.staff.id);
+        }
+        if (!candidate.expires_week || *candidate.expires_week < 0) {
+            error("INV-01 自由池候选必须带冷却结束周: " + candidate.staff.id);
+        }
+        if (candidate.staff.employment != "core" || candidate.staff.assignment_work_id) {
+            error("INV-01 自由池候选必须是无归属的正式候选: " + candidate.staff.id);
         }
     }
     if (state.recruitment.pity.since_sr < 0 || state.recruitment.pity.since_ssr < 0) {
@@ -4209,7 +4273,8 @@ std::string advance_week(const std::string& input) {
         const int next_week = week + 1;
         // 招聘池进入新周先清理到期 scout 窗口，再部分轮换常规池。
         // 市场释放到期锁定 → 自然过期 → 自然补充；破产路径已在阶段 2 提前返回。
-        state.recruitment.pool = rotate_pool(state.recruitment.pool, state.seed, next_week);
+        state.recruitment.pool = rotate_pool(state.recruitment.pool, state.recruitment.free_pool,
+                                             state.seed, next_week);
         refresh_temporary_slot(state, next_week);
         state.market = weekly_market_step(state.market, state.seed, next_week, state.company.reputation);
 

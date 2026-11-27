@@ -461,7 +461,14 @@ void to_json(Json& j, const Recruitment& value) {
                             {"expires_week", candidate.expires_week ? Json(*candidate.expires_week) : Json(nullptr)},
                             {"origin", candidate.origin}});
     }
+    Json free_pool = Json::array();
+    for (const auto& candidate : value.free_pool) {
+        free_pool.push_back(Json{{"staff", candidate.staff},
+                                 {"expires_week", candidate.expires_week ? Json(*candidate.expires_week) : Json(nullptr)},
+                                 {"origin", candidate.origin}});
+    }
     j = Json{{"pool", pool},
+             {"free_pool", free_pool},
              {"pity", Json{{"since_sr", value.pity.since_sr}, {"since_ssr", value.pity.since_ssr}}},
              {"last_scout_week", value.last_scout_week ? Json(*value.last_scout_week) : Json(nullptr)}};
 }
@@ -478,6 +485,18 @@ void from_json(const Json& j, Recruitment& value) {
                 candidate.expires_week = raw.at("expires_week").get<int>();
             }
             value.pool.push_back(std::move(candidate));
+        }
+    }
+    if (j.contains("free_pool") && j.at("free_pool").is_array()) {
+        for (const auto& raw : j.at("free_pool")) {
+            if (!raw.is_object()) continue;
+            PoolCandidate candidate;
+            candidate.staff = raw.at("staff").get<Staff>();
+            candidate.origin = raw.value("origin", std::string{"regular"});
+            if (raw.contains("expires_week") && raw.at("expires_week").is_number_integer()) {
+                candidate.expires_week = raw.at("expires_week").get<int>();
+            }
+            value.free_pool.push_back(std::move(candidate));
         }
     }
     if (j.contains("pity") && j.at("pity").is_object()) {
