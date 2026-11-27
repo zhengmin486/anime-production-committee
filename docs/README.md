@@ -42,7 +42,8 @@
 
 ## 复盘与协作约定
 
-- [开放式增量开发与提前实现原则](OPEN_INCREMENTAL_DEVELOPMENT_POLICY.md)：明确首版范围是最低交付目标而非功能禁区，以及无冲突新增能力的默认接纳边界。
+- [开放式增量开发与提前实现原则](OPEN_INCREMENTAL_DEVELOPMENT_POLICY.md)：明确首版范围是最低交付目标而非功能禁区，并规定未冻结细节的默认决策权、临时假设和局部阻塞。
+- [工程变更治理](ENGINEERING_CHANGE_GOVERNANCE.md)：区分内部修补、兼容扩展、契约修订与破坏性重构，明确何时需要升级裁决。
 - [2026-11 重构复盘与协作约定](REBUILD_RETROSPECTIVE_AND_WORKING_RULES_2026-11-25.md)：记录本次架构纠偏暴露的问题、分支迁移原则、智能体协作要求和 PR 合并检查。
 
 ## 研究资料与外部证据
