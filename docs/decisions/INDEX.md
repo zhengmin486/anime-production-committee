@@ -29,6 +29,7 @@ superseded_by: []
 | 编号 | 主题 | 状态 |
 | --- | --- | --- |
 | [ADR-0001](ADR-0001-decision-record-process.md) | 决定记录与文档改动流程 | accepted |
+| [ADR-0004](ADR-0004-agent-decision-authority-and-local-blocking.md) | 未冻结细节的默认决策权与局部阻塞 | accepted |
 
 ## 新增决定的做法
 
