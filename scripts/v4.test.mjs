@@ -2384,7 +2384,7 @@ test('M3 终局边界：外包 due_week 封顶 520，临时合同 end_week 跟�
   const hired = ok('hire_temporary', {
     state: outsourced.state, work_id: 'work_01', candidate_id: candidateId
   })
-  assert.equal(hired.state.staff.find((member) => member.id === candidateId).temporary_contract.end_week, 520)
+  assert.equal(hired.state.staff.find((member) => member.id === candidateId).temporary_contract.end_week, 537)
   const extended = ok('request_extension', { state: hired.state, work_id: 'work_01' })
   assert.equal(extended.state.works[0].deadline_week, 541)
   assert.equal(extended.state.staff.find((member) => member.id === candidateId).temporary_contract.end_week, 541)

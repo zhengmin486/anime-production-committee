@@ -192,6 +192,11 @@ describe('v4 GameState 关键不变式', () => {
   it('接受合法临时合同并拒绝形状、期限或归属不一致', () => {
     expect(isV4GameState(temporaryState())).toBe(true)
 
+    const extended = temporaryState()
+    extended.works[0].deadline_week = 541
+    extended.staff[0].temporary_contract!.end_week = 541
+    expect(isV4GameState(extended)).toBe(true)
+
     const invalidStates = [
       (value: V4GameState) => { value.staff[0].employment = 'core' },
       (value: V4GameState) => { value.staff[0].temporary_contract = null },
@@ -209,20 +214,20 @@ describe('v4 GameState 关键不变式', () => {
     }
   })
 
-  it('contributors 必须在籍、不重复且未开工项不得有参与者', () => {
+  it('contributors 可引用历史员工、不重复且未开工项不得有参与者', () => {
     const valid = withProject()
     const item = valid.works[0].common.items[0]
     item.work_done = 1
-    item.contributors = ['staff_01']
+    item.contributors = ['staff_01', 'former_staff']
     expect(isV4GameState(valid)).toBe(true)
 
     const duplicate = structuredClone(valid)
-    duplicate.works[0].common.items[0].contributors.push('staff_01')
+    duplicate.works[0].common.items[0].contributors.push('former_staff')
     expect(isV4GameState(duplicate)).toBe(false)
 
-    const dangling = structuredClone(valid)
-    dangling.works[0].common.items[0].contributors = ['missing']
-    expect(isV4GameState(dangling)).toBe(false)
+    const empty = structuredClone(valid)
+    empty.works[0].common.items[0].contributors = ['']
+    expect(isV4GameState(empty)).toBe(false)
 
     const unstarted = structuredClone(valid)
     unstarted.works[0].common.items[0].work_done = 0

@@ -343,7 +343,7 @@ const isV4Participation = (value: unknown): value is V4Participation => exactFie
   && isText(value.work_id) && isText(value.item_id) && integer(value.week)
 
 const isV4TemporaryContract = (value: unknown): value is V4TemporaryContract => exactFields(value, ['work_id', 'start_week', 'end_week'])
-  && isText(value.work_id) && integer(value.start_week, 0, 520) && integer(value.end_week, 1, 520)
+  && isText(value.work_id) && integer(value.start_week, 0, 520) && integer(value.end_week, 1)
 
 export const isV4Staff = (value: unknown): value is V4Staff => exactFields(value,
   ['id', 'name', 'role', 'employment', 'abilities', 'experience', 'potential', 'revealed_potential', 'talent_type',
@@ -457,7 +457,7 @@ export const isV4GameState = (value: unknown): value is V4GameState => {
       const contract = member.temporary_contract
       if (contract === null || contract.start_week > state.company.week || member.assignment_work_id !== contract.work_id) return false
       const owner = worksById.get(contract.work_id)
-      if (!owner || owner.status !== 'producing' || contract.end_week !== Math.min(owner.deadline_week, 520)) return false
+      if (!owner || owner.status !== 'producing' || contract.end_week !== owner.deadline_week) return false
     }
   }
 
@@ -465,7 +465,7 @@ export const isV4GameState = (value: unknown): value is V4GameState => {
   const validContributors = (item: V4WorkItem): boolean => {
     const contributors = new Set<string>()
     for (const id of item.contributors) {
-      if (!staffIds.has(id) || contributors.has(id)) return false
+      if (!id || contributors.has(id)) return false
       contributors.add(id)
     }
     return item.work_done > 0 || contributors.size === 0
