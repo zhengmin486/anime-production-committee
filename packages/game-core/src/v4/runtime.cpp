@@ -608,9 +608,11 @@ std::vector<PoolCandidate> expire_candidates(const std::vector<PoolCandidate>& p
 std::vector<PoolCandidate> rotate_pool(const std::vector<PoolCandidate>& pool, std::uint32_t seed, int week) {
     const auto alive = expire_candidates(pool, week);
     std::vector<PoolCandidate> regulars;
+    std::vector<PoolCandidate> temporaries;
     std::vector<PoolCandidate> scouts;
     for (const auto& candidate : alive) {
-        if (candidate.origin == "regular") regulars.push_back(candidate);
+        if (candidate.origin == "temporary") temporaries.push_back(candidate);
+        else if (candidate.origin == "regular") regulars.push_back(candidate);
         else scouts.push_back(candidate);
     }
     std::vector<int> available(regulars.size());
@@ -637,8 +639,68 @@ std::vector<PoolCandidate> rotate_pool(const std::vector<PoolCandidate>& pool, s
         kept.push_back(std::move(candidate));
     }
     if (kept.size() > static_cast<std::size_t>(kPoolCap)) kept.resize(static_cast<std::size_t>(kPoolCap));
+    kept.insert(kept.end(), temporaries.begin(), temporaries.end());
     kept.insert(kept.end(), scouts.begin(), scouts.end());
     return kept;
+}
+
+// ---- 项目临时用工（DEC-STAFF-009）----
+// 临时候选不占 6 个常规槽：它是独立的一张卡，每周刷新，被签走或过期后下周补位。
+// 这样 rotate_pool 的既有契约（常规槽轮换）保持不变，招聘对拍用例仍然独立成立。
+//
+// 能力档按公司声望 Tier：T0–T1 → 42–52、T2–T4 → 56–65、T5–T7 → 66–74。
+// 设计意图是"单点补位"：只有主能力落在档位内，其余五维压到档位下限，
+// 所以临时工能补上某个瓶颈工序，但不能当通才用。
+struct AbilityBand {
+    int low;
+    int high;
+};
+
+AbilityBand temporary_ability_band(std::int64_t reputation) {
+    if (reputation >= 10000) return AbilityBand{66, 74};   // T5–T7
+    if (reputation >= 250) return AbilityBand{56, 65};     // T2–T4
+    return AbilityBand{42, 52};                            // T0–T1
+}
+
+GeneratedCandidate generate_temporary(std::uint32_t seed, int week, int index, std::int64_t reputation) {
+    GeneratedCandidate generated = generate_candidate(seed, week, index, purpose_recruit(), std::nullopt, Pity{});
+    Staff& member = generated.staff;
+    const AbilityBand band = temporary_ability_band(reputation);
+    const std::string primary_ability = profession_ability(member.role);
+    const int primary_index = ability_index(primary_ability);
+    const int span = std::max(1, band.high - band.low + 1);
+    const int raw = primary_index < 0 ? band.low : member.abilities[static_cast<std::size_t>(primary_index)];
+    const int primary = band.low + raw % span;
+    for (int i = 0; i < kAbilityCount; ++i) {
+        const int value = kAbilities[static_cast<std::size_t>(i)] == primary_ability ? primary : band.low;
+        member.abilities[static_cast<std::size_t>(i)] = value;
+        // 临时员工不参与长期成长（DEC-STAFF-009）：潜力等于当前值，经验恒为 0。
+        member.potential[static_cast<std::size_t>(i)] = value;
+        member.experience[static_cast<std::size_t>(i)] = 0;
+    }
+    // 周薪 = 同能力正式员工标准周薪 × 1.20；签约费 = 两周薪资。整数向下取整。
+    member.weekly_salary = (kSalaryBase + primary * kSalaryPerPrimary) * 120 / 100;
+    member.signing_fee = member.weekly_salary * 2;
+    member.employment = "temporary";
+    member.temporary_contract = Json();
+    member.assignment_work_id.reset();
+    member.last_participation.reset();
+    generated.tier = "temporary";
+    return generated;
+}
+
+// 维持池里"恰好一张临时候选"：先摘掉旧的（被签走、过期或上次遗留），再按本周重新生成。
+void refresh_temporary_slot(GameState& state, int week) {
+    auto& pool = state.recruitment.pool;
+    pool.erase(std::remove_if(pool.begin(), pool.end(),
+                              [](const PoolCandidate& candidate) { return candidate.staff.employment == "temporary"; }),
+               pool.end());
+    auto generated = generate_temporary(state.seed, week, kPoolCap, state.company.reputation);
+    PoolCandidate candidate;
+    candidate.staff = std::move(generated.staff);
+    candidate.origin = "temporary";
+    candidate.expires_week = std::nullopt;
+    pool.push_back(std::move(candidate));
 }
 
 // 开局常规池：第 0 周 purpose=recruit、index 0..pool_cap-1，保底计数从零起。
@@ -1658,7 +1720,7 @@ std::vector<std::string> validate(const GameState& state) {
     // 但 id 仍走全局唯一集合，且不得与名册员工重叠；包装字段语义在这里拦住。
     for (const auto& candidate : state.recruitment.pool) {
         claim_id(candidate.staff.id, "candidate");
-        if (!one_of_text(candidate.origin, {"regular", "scout"})) {
+        if (!one_of_text(candidate.origin, {"regular", "scout", "temporary"})) {
             error("INV-01 candidate.origin 非法: " + candidate.staff.id);
         }
         if (candidate.origin == "regular" && candidate.expires_week) {
@@ -3201,6 +3263,7 @@ std::string initialize(const std::string& input) {
         state.market = initial_market();
         state.events = EventState{};
         state.recruitment = initial_recruitment(seed);
+        refresh_temporary_slot(state, 0);
         state.archive = Json{{"works", Json::array()}, {"series", Json::array()}, {"company_result", nullptr}};
 
         const auto errors = validate(state);
@@ -4057,6 +4120,7 @@ std::string advance_week(const std::string& input) {
         // 招聘池进入新周先清理到期 scout 窗口，再部分轮换常规池。
         // 市场释放到期锁定 → 自然过期 → 自然补充；破产路径已在阶段 2 提前返回。
         state.recruitment.pool = rotate_pool(state.recruitment.pool, state.seed, next_week);
+        refresh_temporary_slot(state, next_week);
         state.market = weekly_market_step(state.market, state.seed, next_week, state.company.reputation);
 
         // ---- 阶段 8：随机事件抽取与周数 +1 ----

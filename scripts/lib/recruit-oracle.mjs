@@ -188,10 +188,54 @@ export function expireCandidates(pool, week) {
 // 常规池部分轮换：先到期清理，再确定性选 rotate_count 个常规槽替换；
 // 未选中的常规候选逐字段不变；scout 候选不参与常规轮换。
 // pool_cap 只约束常规候选数量（提案）。
+// ---- 项目临时用工（DEC-STAFF-009）----
+// 独立于 6 个常规槽：每周刷新一张，被签走或过期后补位。
+// 能力档按声望 Tier：T0–T1 42–52、T2–T4 56–65、T5–T7 66–74；
+// 只有主能力落在档位内，其余五维压到档位下限（单点补位，不当通才）。
+export function temporaryAbilityBand(reputation) {
+  if (reputation >= 10000) return [66, 74]
+  if (reputation >= 250) return [56, 65]
+  return [42, 52]
+}
+
+export function generateTemporary(seed, week, index, reputation = 100, opts = {}) {
+  const { staff } = generateCandidate(seed, week, index, { ...opts, purpose: PURPOSE.recruit })
+  const [low, high] = temporaryAbilityBand(reputation)
+  const span = Math.max(1, high - low + 1)
+  const primaryAbility = PROFESSION_ABILITY[staff.role]
+  const primary = low + (staff.abilities[primaryAbility] % span)
+  const abilities = Object.fromEntries(ABILITIES.map((ability) => [ability, ability === primaryAbility ? primary : low]))
+  const salary = Math.floor((20000 + primary * 300) * 120 / 100)
+  return {
+    staff: {
+      ...staff,
+      employment: 'temporary',
+      abilities,
+      experience: Object.fromEntries(ABILITIES.map((ability) => [ability, 0])),
+      potential: { ...abilities },
+      revealed_potential: Object.fromEntries(ABILITIES.map((ability) => [ability, false])),
+      weekly_salary: salary,
+      signing_fee: salary * 2,
+      assignment_work_id: null,
+      last_participation: null,
+      temporary_contract: null,
+    },
+    tier: 'temporary',
+  }
+}
+
+export function refreshTemporary(pool, seed, week, reputation = 100, opts = {}) {
+  const params = { ...DEFAULT_PARAMS, ...(opts.params ?? {}) }
+  const kept = pool.filter((c) => c.origin !== 'temporary')
+  const { staff } = generateTemporary(seed, week, params.pool_cap, reputation, opts)
+  return [...kept, { staff, origin: 'temporary', expires_week: null }]
+}
+
 export function rotatePool(pool, seed, week, opts = {}) {
   const params = { ...DEFAULT_PARAMS, ...(opts.params ?? {}) }
   const alive = expireCandidates(pool, week)
   const regulars = alive.filter((c) => c.origin === 'regular')
+  const temporaries = alive.filter((c) => c.origin === 'temporary')
   const scouts = alive.filter((c) => c.origin === 'scout')
 
   const available = regulars.map((_, index) => index)
@@ -207,7 +251,7 @@ export function rotatePool(pool, seed, week, opts = {}) {
     added.push({ staff, expires_week: null, origin: 'regular' })
   }
   const regularPool = [...kept, ...added].slice(0, params.pool_cap)
-  return { pool: [...regularPool, ...scouts], added_ids: added.map((c) => c.staff.id) }
+  return { pool: [...regularPool, ...temporaries, ...scouts], added_ids: added.map((c) => c.staff.id) }
 }
 
 // ---- hire 解包：包装字段不得残留名册 ----

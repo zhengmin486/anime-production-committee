@@ -2,7 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { validateCard } from './lib/event-schema.mjs'
-import { generateCandidate, scout as oracleScout, rotatePool, PURPOSE } from './lib/recruit-oracle.mjs'
+import { generateCandidate, generateTemporary, refreshTemporary, scout as oracleScout, rotatePool, PURPOSE } from './lib/recruit-oracle.mjs'
 import { generateOffer, weeklyMarketStep, startWorkCash, depositAmount } from './lib/market-oracle.mjs'
 import { draw, hashText, Stream } from './lib/coordinate-random.mjs'
 
@@ -3305,15 +3305,20 @@ const scoutCtx = (state, extra = {}) => ({
 test('initialize 招聘池与 oracle 逐候选一致', () => {
   for (const seed of [42, 20261127]) {
     const state = ok('initialize', { seed }).state
-    assert.equal(state.recruitment.pool.length, 6)
+    // 6 个常规槽 + 1 张独立的临时用工卡
+    assert.equal(state.recruitment.pool.length, 7)
     assert.deepEqual(state.recruitment.pity, { since_sr: 0, since_ssr: 0 })
     assert.equal(state.recruitment.last_scout_week, null)
-    state.recruitment.pool.forEach((candidate, index) => {
-      assert.equal(candidate.origin, 'regular')
+    const regulars = state.recruitment.pool.filter((candidate) => candidate.origin === 'regular')
+    assert.equal(regulars.length, 6)
+    regulars.forEach((candidate, index) => {
       assert.equal(candidate.expires_week, null)
       const expected = generateCandidate(seed, 0, index, { purpose: PURPOSE.recruit })
       assert.deepEqual(candidate.staff, expected.staff)
     })
+    const temporary = state.recruitment.pool.find((candidate) => candidate.origin === 'temporary')
+    assert.equal(temporary.staff.employment, 'temporary')
+    assert.deepEqual(temporary.staff, generateTemporary(seed, 0, 6, 100).staff)
   }
 })
 
@@ -3414,6 +3419,45 @@ test('hire_temporary：解包签约、项目合同、临时账目与延期联动
   assert.equal(advanced.report.funds.costs.temporary, 50000)
   assert.deepEqual(advanced.state.staff.find((entry) => entry.id === candidate.id).experience, experienceBefore)
   assert.equal(advanced.state.finance.opening_funds + advanced.state.finance.entries.reduce((sum, entry) => sum + entry.amount, 0), advanced.state.finance.balance)
+})
+
+test('临时候选：能力按声望档、单点补位、周薪 1.2 倍与两周签约费', () => {
+  const bands = [[100, 42, 52], [249, 42, 52], [250, 56, 65], [9999, 56, 65], [10000, 66, 74], [300000, 66, 74]]
+  for (const [reputation, low, high] of bands) {
+    const state = ok('initialize', { seed: 42 }).state
+    state.company.reputation = reputation
+    const card = refreshTemporary(state.recruitment.pool, 42, 0, reputation)
+      .find((candidate) => candidate.origin === 'temporary')
+    const primaryAbility = { 作画: 'drawing', 演出: 'direction', 脚本: 'planning', 摄影: 'postproduction',
+      监督: 'direction', 音乐: 'postproduction', 声优: 'postproduction', 美术: 'drawing' }[card.staff.role]
+    const primary = card.staff.abilities[primaryAbility]
+    assert.ok(primary >= low && primary <= high, `声望 ${reputation} 主能力应在 ${low}–${high}：${primary}`)
+    for (const [ability, value] of Object.entries(card.staff.abilities)) {
+      if (ability === primaryAbility) continue
+      assert.equal(value, low, `${ability} 应压在档位下限 ${low}`)
+    }
+    assert.equal(card.staff.weekly_salary, Math.floor((20000 + primary * 300) * 1.2))
+    assert.equal(card.staff.signing_fee, card.staff.weekly_salary * 2)
+    assert.equal(card.staff.employment, 'temporary')
+    assert.deepEqual(Object.values(card.staff.experience), [0, 0, 0, 0, 0, 0])
+  }
+})
+
+test('临时候选：签走后下周补位，且不占用常规 6 槽', () => {
+  let state = ok('initialize', { seed: 42 }).state
+  state = ok('start_work', { state, offer_id: 'offer_01', mode: 'contract' }).state
+  const card = state.recruitment.pool.find((candidate) => candidate.origin === 'temporary')
+  const hired = ok('hire_temporary', { state, work_id: 'work_01', candidate_id: card.staff.id })
+  assert.ok(!hired.state.recruitment.pool.some((candidate) => candidate.origin === 'temporary'), '签走后池里暂时没有临时卡')
+
+  const advanced = ok('advance_week', { state: hired.state })
+  const refreshed = advanced.state.recruitment.pool.filter((candidate) => candidate.origin === 'temporary')
+  assert.equal(refreshed.length, 1, '下周应补一张临时卡')
+  assert.notEqual(refreshed[0].staff.id, card.staff.id, '补位的是新候选，不是原卡')
+  assert.equal(advanced.state.recruitment.pool.filter((candidate) => candidate.origin === 'regular').length, 6)
+  const hiredMember = advanced.state.staff.find((member) => member.id === card.staff.id)
+  assert.equal(hiredMember.employment, 'temporary')
+  assert.equal(hiredMember.temporary_contract.work_id, 'work_01')
 })
 
 test('hire_temporary：声望 Tier 弹性工位上限按公司总人数计算', () => {
@@ -3560,7 +3604,7 @@ test('hire_core：解包入册、包装字段不残留、签约费流水', () =>
   assert.deepEqual(hired, candidate.staff)
   assert.equal('expires_week' in hired, false)
   assert.equal('origin' in hired, false)
-  assert.equal(result.state.recruitment.pool.length, 5)
+  assert.equal(result.state.recruitment.pool.length, 6)
   assert.ok(!result.state.recruitment.pool.some((entry) => entry.staff.id === candidate.staff.id))
   const entry = result.state.finance.entries.find((item) => item.id === `w0.salary.${candidate.staff.id}.signing`)
   assert.equal(entry.category, 'salary')
@@ -3669,8 +3713,8 @@ test('dismiss_staff：Archive 团队历史不阻止解雇且快照保持不变',
 test('advance_week 招聘池周步骤：部分轮换与 oracle rotatePool 一致', () => {
   const state = ok('initialize', { seed: 42 }).state
   const advanced = ok('advance_week', { state }).state
-  const expected = rotatePool(state.recruitment.pool, 42, 1)
-  assert.deepEqual(advanced.recruitment.pool, expected.pool)
+  const expected = refreshTemporary(rotatePool(state.recruitment.pool, 42, 1).pool, 42, 1, state.company.reputation)
+  assert.deepEqual(advanced.recruitment.pool, expected)
   assert.equal(advanced.company.week, 1)
 })
 
@@ -3679,7 +3723,8 @@ test('advance_week 招聘池轮换落点碰撞时仍无放回替换两个槽', (
   state.company.week = 2
   const advanced = ok('advance_week', { state }).state
   const expected = rotatePool(state.recruitment.pool, 2, 3)
-  assert.deepEqual(advanced.recruitment.pool, expected.pool)
+  assert.deepEqual(advanced.recruitment.pool,
+    refreshTemporary(expected.pool, 2, 3, state.company.reputation))
   assert.equal(expected.added_ids.length, 2)
   assert.equal(new Set(expected.added_ids).size, 2)
   assert.equal(advanced.recruitment.pool.filter((candidate) => candidate.origin === 'regular').length, 6)
@@ -3691,7 +3736,8 @@ test('scout 窗口：expires_week 是首个不可签约周，regular 不受影�
   const scoutId = state.recruitment.pool.at(-1).staff.id
   const poolAfterScout = state.recruitment.pool
   state = ok('advance_week', { state }).state
-  assert.deepEqual(state.recruitment.pool, rotatePool(poolAfterScout, 42, 1).pool)
+  assert.deepEqual(state.recruitment.pool,
+    refreshTemporary(rotatePool(poolAfterScout, 42, 1).pool, 42, 1, state.company.reputation))
   assert.ok(state.recruitment.pool.some((candidate) => candidate.staff.id === scoutId))
   state = ok('advance_week', { state }).state
   assert.ok(!state.recruitment.pool.some((candidate) => candidate.staff.id === scoutId))

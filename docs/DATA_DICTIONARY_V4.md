@@ -290,10 +290,11 @@ PoolCandidate { staff: Staff, expires_week: uint | null, origin: "regular" | "sc
 - 常规招聘池每周部分轮换（周结算固定步骤，先清理到期窗口再替换部分常规槽）；scout 候选不参与常规轮换，只按各自窗口到期。Scout 每周至多一次（`last_scout_week ≠ week`）；候选 `expires_week` 是首个不可签约周，regular 候选为 `null`。
 - DEC-MARKET-001/#59 已确认招聘市场固定 4 个候选人展示槽，四槽全部属于 Recruitment，与企划市场完全独立；临时员工不进入候选池。当前 `pool` 仍沿用 6 个 regular 候选加 scout 的占位实现，尚未拆出四个展示槽身份、自由人才池、冷却与同身份重现，不得宣称最新四槽生命周期已实现。
 - 生成逻辑与随机坐标逐位镜像 `scripts/lib/recruit-oracle.mjs`（规则样本）；池容量、轮换数、窗口周数、概率与费用全部 `[PLACEHOLDER]`，由 #59/#58 标定。职业→主能力映射沿用 DEC-STAFF-006 提案（DISC-11 细化前不改）。
-- 2026-11-27 招聘市场设计归档要求通用随机简历按声望 Tier 生成，周薪由同能力全职工资公式乘 1.20 得出；当前 §14.13 的稀有度/保底生成与 `salary_base + primary × salary_per_primary` 仍是 #99 的 `[PLACEHOLDER]`。两套口径的衔接、档位随机分布与取整尚未裁决；在 #7/#53 收口前不得把当前占位生成误称为已实现最新设计。
+- 2026-11-27 招聘市场设计归档要求通用随机简历按声望 Tier 生成，周薪由同能力全职工资公式乘 1.20 得出；常备池（6 槽）仍用稀有度/保底生成与 `salary_base + primary × salary_per_primary`（#99 `[PLACEHOLDER]`），临时用工卡已按声望 Tier 定能力档并乘 1.20 计薪。常规池的 Tier 化、档位随机分布与取整仍未裁决；在 #7/#53 收口前不得把当前占位生成误称为已实现最新设计。
 - 员工报酬统一 `signing_fee + weekly_salary`，不再使用 `project_fee`；签约费走 Finance `salary` 流水（`w{week}.salary.{staff_id}.signing`），scout 费用走 `operations`（`w{week}.operations.scout`），见 §3.7。
 - `dismiss_staff` 历史贡献者解雇语义已按 2026-11-27 负责人裁决收口：INV-12 的 contributors 是历史事实引用，不要求员工仍在当前 Staff 名册；允许满足命令 7 其他守卫的历史参与者解雇，历史 contributors 与 Archive 团队快照保持不变。运行时与 validator 回归已通过。
 - `hire_core` 只接受 `employment=core` 且 `temporary_contract=null` 的池候选；scout 候选在 `week >= expires_week` 后即使仍留在输入状态中也返回 `NOT_FOUND`，不得签约。
+- 招聘池固定保留 1 张临时用工卡（`origin="temporary"`，`employment="temporary"`），不占 6 个常规槽、不参与常规轮换；签走或过期后下一周开局刷新。能力按声望 Tier 分档（42–52 / 56–65 / 66–74），只有主能力在档位内、其余五维取档位下限，周薪 = (20,000 + 主能力×300)×120%、签约费 = 两周薪资。该刷新节奏是 `[PLACEHOLDER]`。
 
 **Offer 生命周期（M0 §14.13.2，市场槽已实现）**：
 

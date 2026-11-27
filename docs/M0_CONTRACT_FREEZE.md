@@ -558,7 +558,7 @@ Recruitment {
 PoolCandidate {
   staff: Staff                  // 完整候选人实体，字段与名册 Staff 相同
   expires_week: uint | null     // 首个不可签约周；regular 候选为 null，scout 候选必填
-  origin: "regular" | "scout"
+  origin: "regular" | "scout" | "temporary"   // temporary = 项目临时用工卡，独立于常规轮换
 }
 ```
 
