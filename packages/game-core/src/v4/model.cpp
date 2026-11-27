@@ -186,6 +186,11 @@ void to_json(Json& j, const WorkItem& value) {
              {"outsourceable", value.outsourceable},
              {"quality_weight_permille", value.quality_weight_permille},
              {"core_aesthetic", value.core_aesthetic},
+             {"in_house_points", value.in_house_points},
+             {"in_house_ability_centi_sum", value.in_house_ability_centi_sum},
+             {"external_points", value.external_points},
+             {"external_quality_milli_sum", value.external_quality_milli_sum},
+             {"external_min_quality", value.external_min_quality},
              {"quality", dims_to_json(value.quality.dims)},
              {"contributors", value.contributors}};
 }
@@ -202,6 +207,11 @@ void from_json(const Json& j, WorkItem& value) {
     value.outsourceable = j.value("outsourceable", false);
     value.quality_weight_permille = j.value("quality_weight_permille", 0);
     value.core_aesthetic = j.value("core_aesthetic", false);
+    value.in_house_points = j.value("in_house_points", 0);
+    value.in_house_ability_centi_sum = j.value("in_house_ability_centi_sum", static_cast<std::int64_t>(0));
+    value.external_points = j.value("external_points", 0);
+    value.external_quality_milli_sum = j.value("external_quality_milli_sum", static_cast<std::int64_t>(0));
+    value.external_min_quality = j.value("external_min_quality", 0);
     value.quality.dims = dims_from_json(j.value("quality", Json::object()));
     value.contributors = strings_from_json(j.value("contributors", Json::array()));
 }

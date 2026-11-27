@@ -105,6 +105,15 @@ struct WorkItem {
     int quality_weight_permille = 0;
     // DEC-STAFF-008：核心审美工序才参与「核心审美奖励」（要求 S_sup>70 且 Q_item>70）。
     bool core_aesthetic = false;
+    // DEC-STAFF-008 质量修型所需的贡献账本（按"实际有效完成点数"加权，单位见字段名）：
+    //   in_house_points / in_house_ability_centi_sum：社内贡献点数与 Σ(点数×S_eff_centi)
+    //   external_points / external_quality_milli_sum：外包贡献点数与 Σ(点数×供应商质量_milli)
+    //   external_min_quality：实际交付过点数的外部供应商里最低 quality（0=无外包）
+    int in_house_points = 0;
+    std::int64_t in_house_ability_centi_sum = 0;
+    int external_points = 0;
+    std::int64_t external_quality_milli_sum = 0;
+    int external_min_quality = 0;
     Quality quality;
     std::vector<std::string> contributors;
 

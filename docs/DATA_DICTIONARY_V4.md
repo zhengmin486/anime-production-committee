@@ -149,6 +149,7 @@ GameState {
 实测键与 M0 §3 必填逐一对应：`id, key, ability, work_total, work_done, deliver_at, deps, is_gate, outsourceable, quality, contributors`。
 
 - `quality` 是对象，固定 6 键 `story/direction/drawing/animation/art/sound`。
+- 贡献账本（DEC-STAFF-008）：`in_house_points`/`in_house_ability_centi_sum` 记社内点数与 Σ(点数×S_eff_centi)，`external_points`/`external_quality_milli_sum` 记外包点数与 Σ(点数×供应商质量_milli)，`external_min_quality` 记实际交付过点数的供应商最低质量。`Q_base` 由这些字段按点数加权得出，`Q_item = min(Q_sup, Q_cap, Q_ext_cap)`。返工不回滚账本。
 - `core_aesthetic` 标记该工作项是否为核心审美工序（DEC-STAFF-008）。只有标记为 true 且 `S_sup>70、Q_item>70` 的工作项参与核心审美奖励，奖励按核心审美权重加权平均后加到基础分，最高 +5 分。
 - `quality_weight_permille` 是全片质量权重（INV-30）。作品分 = 公共层 × Σcommon + 单集均分 × Σepisode，两层各自归一后再合成；v0.5 为 200‰ / 800‰，与 DEC-STAFF-008 的 20 / 20 / 22 / 10 / 13 / 5 / 10 对应。
 - 质量写入语义：**首次接触**把整项基准铺满六维（样本以能力或供应商 quality 为准，逐维受依赖上限约束），之后每次投入只精修一个维度（700/300 加权抽取、30% 靠拢）。外包交付同样写质量，样本取 `Supplier.quality`，不写会让"多数工作量由协力完成"在作品分里消失。

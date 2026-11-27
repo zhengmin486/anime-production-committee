@@ -282,9 +282,16 @@ std::array<int, kDimensionCount> dimension_weights(const std::string& stage_key,
     return weights;
 }
 
-int apply_outsourced_quality(WorkItem& item, int supplier_quality, std::uint32_t seed, int week,
+int apply_outsourced_quality(WorkItem& item, int supplier_quality, int points, std::uint32_t seed, int week,
                              const std::string& stage_key, const std::string& contract_id,
                              const std::array<int, kDimensionCount>& caps) {
+    // 贡献账本：外包部分按供应商 quality 记点数权重（与社内同一把尺）
+    if (points > 0) {
+        item.external_points += points;
+        item.external_quality_milli_sum += static_cast<std::int64_t>(points) * supplier_quality * 1000;
+        item.external_min_quality =
+            item.external_min_quality == 0 ? supplier_quality : std::min(item.external_min_quality, supplier_quality);
+    }
     const auto weights = dimension_weights(stage_key, item.ability);
     int total_weight = 0;
     for (int i = 0; i < kDimensionCount; ++i) total_weight += std::max(weights[static_cast<std::size_t>(i)], 0);
@@ -325,6 +332,10 @@ ProductionResult apply_production(WorkItem& item, const Staff& staff, int points
     if (gain <= 0) return result;
 
     item.work_done += gain;
+    // 贡献账本：Q_base 需要"谁做的、什么水准、做了多少点"
+    item.in_house_points += gain;
+    item.in_house_ability_centi_sum +=
+        static_cast<std::int64_t>(gain) * effective_ability_centi(staff, item.ability);
     result.points = gain;
 
     if (std::find(item.contributors.begin(), item.contributors.end(), staff.id) == item.contributors.end()) {
@@ -423,19 +434,6 @@ int mean_of(const std::array<int, kDimensionCount>& dims) {
 
 namespace {
 
-// 工作项自身水准：只取已经形成质量的维度做均值（未接触维度不参与，否则被 6 除）。
-int item_level_of(const WorkItem& item) {
-    int sum = 0;
-    int count = 0;
-    for (int i = 0; i < kDimensionCount; ++i) {
-        const int value = item.quality.dims[static_cast<std::size_t>(i)];
-        if (value <= 0) continue;
-        sum += value;
-        ++count;
-    }
-    return count == 0 ? 0 : (sum + count / 2) / count;
-}
-
 }  // namespace
 
 int supervisor_ability_centi(const Staff& staff) {
@@ -459,6 +457,49 @@ int supervisor_ability_centi(const Staff& staff) {
     return 50 * direction + 25 * management + 25 * primary;
 }
 
+int effective_ability_centi(const Staff& staff, const std::string& ability) {
+    const int primary = ability_value(staff, ability) * 100;             // 百分之一分
+    int other_sum = 0;
+    for (int i = 0; i < kAbilityCount; ++i) {
+        if (kAbilities[static_cast<std::size_t>(i)] != ability) {
+            other_sum += staff.abilities[static_cast<std::size_t>(i)] * 100;
+        }
+    }
+    return (85 * primary + 3 * other_sum) / 100;
+}
+
+int item_quality_milli(const WorkItem& item, std::int64_t supervisor_milli) {
+    const std::int64_t total = static_cast<std::int64_t>(item.in_house_points) + item.external_points;
+    if (total <= 0) return 0;
+
+    // Q_base：社内贡献用 S_eff、外包贡献用 Supplier.quality，按实际有效点数加权
+    const std::int64_t in_house_milli_sum = item.in_house_ability_centi_sum * 10;
+    const std::int64_t base_sum = in_house_milli_sum + item.external_quality_milli_sum;
+    const std::int64_t q_base = base_sum / total;
+
+    // Q_sup：监督修型，只向上抬 35%，且不得超过监督自身水准
+    const std::int64_t q_sup = q_base + 35 * std::max<std::int64_t>(0, supervisor_milli - q_base) / 100;
+
+    // Q_cap：主责团队质量上限（整数分 half-up 后再 +8）
+    const std::int64_t q_inhouse = item.in_house_points > 0 ? in_house_milli_sum / item.in_house_points : 0;
+    const std::int64_t cap_inner = 60 * std::max(q_inhouse, supervisor_milli) + 40 * q_inhouse + 50000;
+    const std::int64_t q_cap =
+        std::min<std::int64_t>(100000, 1000 * (cap_inner / 100000) + 8000);
+
+    std::int64_t q_item = std::min(q_sup, q_cap);
+
+    // Q_ext_cap：存在外包时再压一层木桶——最低供应商质量 + 监督抬升 + 外包占比折扣
+    if (item.external_points > 0 && item.external_min_quality > 0) {
+        const std::int64_t ext_min = static_cast<std::int64_t>(item.external_min_quality) * 1000;
+        const std::int64_t r_ext_bp = 10000 * item.external_points / total;
+        const std::int64_t ext_cap =
+            ext_min + 25 * std::max<std::int64_t>(0, supervisor_milli - ext_min) / 100 +
+            (10000 - r_ext_bp) * 12000 / 10000;
+        q_item = std::min(q_item, ext_cap);
+    }
+    return static_cast<int>(std::clamp<std::int64_t>(q_item, 0, 100000));
+}
+
 int final_quality_milli(const Project& work, const Staff* supervisor) {
     const std::int64_t s_sup_milli = supervisor == nullptr ? 0 : supervisor_ability_centi(*supervisor) * 10;
     std::int64_t weighted = 0;
@@ -469,7 +510,7 @@ int final_quality_milli(const Project& work, const Staff* supervisor) {
     const auto accumulate = [&](const WorkItem& item) {
         const int weight = std::max(item.quality_weight_permille, 0);
         if (weight == 0) return;
-        const std::int64_t q_milli = static_cast<std::int64_t>(item_level_of(item)) * 1000;
+        const std::int64_t q_milli = item_quality_milli(item, s_sup_milli);
         weighted += weight * q_milli;
         weight_sum += weight;
         if (!item.core_aesthetic) return;
@@ -496,7 +537,7 @@ int final_quality_milli(const Project& work, const Staff* supervisor) {
     const auto accumulate_layer = [&](const WorkItem& item, bool common) {
         const int weight = std::max(item.quality_weight_permille, 0);
         if (weight == 0) return;
-        const std::int64_t q_milli = static_cast<std::int64_t>(item_level_of(item)) * 1000;
+        const std::int64_t q_milli = item_quality_milli(item, s_sup_milli);
         if (common) {
             common_weighted += weight * q_milli;
             common_weight += weight;

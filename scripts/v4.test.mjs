@@ -1445,19 +1445,24 @@ test('事件结算：选项 cost 与 funds 效果同周入账时账本 id 不冲
 
 function completeWork(state, workId, quality = 80, gatesOnly = false) {
   const work = state.works.find((entry) => entry.id === workId)
+  // 质量与"谁做的"要一起伪造：Q_base 由贡献账本推导，不填账本的话 Q_item 恒为 0。
+  const setQuality = (item) => {
+    for (const dim of Object.keys(item.quality)) item.quality[dim] = quality
+    item.in_house_points = item.work_total
+    item.in_house_ability_centi_sum = item.work_total * quality * 100   // S_eff=quality → centi=quality×100
+    item.external_points = 0
+    item.external_quality_milli_sum = 0
+    item.external_min_quality = 0
+  }
   // 公共层现在参与全片质量（200‰），夹具也要给它质量，否则作品分被 0 拉低。
   if (!gatesOnly) {
-    for (const item of work.common.items) {
-      for (const dim of Object.keys(item.quality)) item.quality[dim] = quality
-    }
+    for (const item of work.common.items) setQuality(item)
   }
   for (const episode of work.episodes) {
     for (const stage of episode.stages) {
       for (const item of stage.items) {
         if (item.is_gate) item.work_done = item.work_total
-        if (!gatesOnly) {
-          for (const dim of Object.keys(item.quality)) item.quality[dim] = quality
-        }
+        if (!gatesOnly) setQuality(item)
       }
     }
   }
@@ -1839,6 +1844,43 @@ test('DEC-STAFF-008：核心审美奖励按 min(S_sup,Q_item) 计算，Q_final �
   assert.equal(noCore.report.q_final, 100)
 })
 
+test('DEC-STAFF-008 四段修型：Q_base→Q_sup→Q_cap→Q_ext_cap 取最小', () => {
+  const build = ({ supervisor, inHouseQuality, externalQuality = 0, externalPoints = 0 }) => {
+    let state = funded(ok('initialize', { seed: 7 }).state)
+    state = ok('start_work', { state, offer_id: 'offer_01', mode: 'contract' }).state
+    const director = state.staff.find((member) => member.id === 'staff_dir')
+    director.abilities.direction = supervisor
+    director.abilities.management = supervisor
+    for (const item of allItems(state, 'work_01')) {
+      for (const dim of Object.keys(item.quality)) item.quality[dim] = 0
+      if (item.is_gate) item.work_done = item.work_total
+      item.in_house_points = externalPoints > 0 ? 0 : item.work_total
+      item.in_house_ability_centi_sum = externalPoints > 0 ? 0 : item.work_total * inHouseQuality * 100
+      item.external_points = externalPoints > 0 ? externalPoints : 0
+      item.external_quality_milli_sum = externalPoints > 0 ? externalPoints * externalQuality * 1000 : 0
+      item.external_min_quality = externalPoints > 0 ? externalQuality : 0
+    }
+    const firstCommon = state.works[0].common.items[0]
+    firstCommon.work_done = firstCommon.work_total
+    firstCommon.contributors = ['staff_dir']
+    return ok('deliver_work', { state, work_id: 'work_01' })
+  }
+
+  // 社内 60 分 + 强监督 100：Q_sup = 60 + 35%×(100−60) = 74，Q_cap = min(100, 86)+8 → 94 → 取 74
+  const strong = build({ supervisor: 100, inHouseQuality: 60 })
+  assert.equal(strong.report.q_final, 74)
+  assert.equal(strong.report.rating, 'B')
+
+  // 弱监督 60：Q_sup = 60，Q_cap = 60+8 → 68 → 取 60
+  const weak = build({ supervisor: 60, inHouseQuality: 60 })
+  assert.equal(weak.report.q_final, 60)
+  assert.equal(weak.report.rating, 'C')
+
+  // 全外包、供应商 50 分、强监督 100：Q_ext_cap = 50 + 25%×50 + 0 = 62.5 → 被木桶压到 62
+  const outsourced = build({ supervisor: 100, inHouseQuality: 0, externalQuality: 50, externalPoints: 100 })
+  assert.equal(outsourced.report.q_final, 62, '协力木桶必须压住监督修型后的 67.5')
+})
+
 test('DEC-QUALITY-001：Q_min 未达标按 2%/分扣罚、扣声望与委员会好感', () => {
   let state = funded(ok('initialize', { seed: 7 }).state)
   state = ok('start_work', {
@@ -1861,9 +1903,9 @@ test('DEC-QUALITY-001：Q_min 未达标按 2%/分扣罚、扣声望与委员会�
   assert.ok(qualityLog, '应写一条 Q_min 声望记录')
   assert.equal(qualityLog.delta, -5)
   assert.ok(delivered.state.company.reputation < reputationBefore)
-  // 委员会：额外 -2 好感度（评级 D 本身 -2，合计 -4）
+  // 委员会：Q_min 未达标额外 -2；评级由 Q_final 决定（监督修型后到 C，评级本身 0）
   const partner = delivered.state.partners.find((entry) => entry.id === 'partner_tv')
-  assert.equal(partner.history.at(-1).delta, -4)
+  assert.equal(partner.history.at(-1).delta, -2)
 })
 
 test('DEC-QUALITY-001：质量达标时不产生质量扣罚', () => {
@@ -2698,6 +2740,8 @@ test('sign_outsourcing：产能是供应商级共享池，排满后拒绝', () =
     id: 'work_01.ep01.background_b', key: 'background_b', ability: 'drawing', work_total: 100, work_done: 0,
     deliver_at: 1000, deps: ['work_01.ep01.storyboard'], is_gate: false, outsourceable: true,
     quality_weight_permille: 0, core_aesthetic: false,
+    in_house_points: 0, in_house_ability_centi_sum: 0, external_points: 0,
+    external_quality_milli_sum: 0, external_min_quality: 0,
     quality: { story: 0, direction: 0, drawing: 0, animation: 0, art: 0, sound: 0 },
     contributors: []
   })
@@ -4613,7 +4657,7 @@ test('M2 v0.5：固定 seed 真实推进十集、事件、外包、交付、Fina
   const record = first.state.archive.works[0]
   // v0.5 基线质量：权重制 + 外包质量的首次可复现锚点（全外包、四人混合派工）
   assert.equal(first.diagnostics.quality_mean, 56, detail)     // 六维聚合（展示口径）
-  assert.equal(first.diagnostics.quality_score, 58, detail)    // Q_final：权重加权 + 核心审美奖励折算后
+  assert.equal(first.diagnostics.quality_score, 59, detail)    // Q_final：Q_item 四段修型后按权重加权
   assert.equal(first.diagnostics.rating, 'C', detail)
   assert.equal(record.episodes.length, 10)
   assert.equal(record.start_week, 0)

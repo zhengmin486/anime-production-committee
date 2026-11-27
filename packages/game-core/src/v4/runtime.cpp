@@ -378,13 +378,17 @@ GameState decode_state(const Json& request) {
     }
     const auto require_item = [&require](const Json& item) {
         for (const char* key : {"id", "key", "ability", "work_total", "work_done", "deliver_at", "deps",
-                                "is_gate", "outsourceable", "quality_weight_permille", "core_aesthetic", "quality", "contributors"}) {
+                                "is_gate", "outsourceable", "quality_weight_permille", "core_aesthetic",
+                                "in_house_points", "in_house_ability_centi_sum", "external_points",
+                                "external_quality_milli_sum", "external_min_quality", "quality", "contributors"}) {
             require(item, key, "item");
         }
         for (const char* key : {"id", "key", "ability"}) {
             if (!item.at(key).is_string()) throw Json::type_error::create(302, "item." + std::string(key) + " 必须是字符串", nullptr);
         }
-        for (const char* key : {"work_total", "work_done", "deliver_at", "quality_weight_permille"}) {
+        for (const char* key : {"work_total", "work_done", "deliver_at", "quality_weight_permille", "in_house_points",
+                                "in_house_ability_centi_sum", "external_points", "external_quality_milli_sum",
+                                "external_min_quality"}) {
             if (!item.at(key).is_number_integer()) throw Json::type_error::create(302, "item." + std::string(key) + " 必须是整数", nullptr);
         }
         if (!item.at("is_gate").is_boolean() || !item.at("outsourceable").is_boolean() ||
@@ -1888,6 +1892,16 @@ std::vector<std::string> validate(const GameState& state) {
             if (item.quality_weight_permille < 0 || item.quality_weight_permille > 1000) {
                 error("INV-01 quality_weight_permille 越界: " + item.id);
             }
+            // 贡献账本（DEC-STAFF-008）：非负；外包点数不得超过工作项总投入；
+            // 返工不回滚账本，所以只要求"账本 ≥ 当前 work_done"，不要求相等。
+            if (item.in_house_points < 0 || item.in_house_ability_centi_sum < 0 || item.external_points < 0 ||
+                item.external_quality_milli_sum < 0 || item.external_min_quality < 0 ||
+                item.external_min_quality > 100) {
+                error("INV-01 贡献账本越界: " + item.id);
+            }
+            if (item.external_points > 0 && item.external_min_quality == 0) {
+                error("INV-01 有外包贡献时 external_min_quality 必须为正: " + item.id);
+            }
         };
         // INV-30：全片质量权重。公共层与单集各自成组，Σcommon + Σepisode = 1000‰，
         // 每个单集的权重和必须相同——否则作品质量会随"先做哪集"漂移（DEC-STAFF-008）。
@@ -2779,7 +2793,8 @@ void advance_outsourcing(GameState& state, int week, Json& log) {
             share.contract->at("work_done") = share.contract->at("work_done").get<std::int64_t>() + share.amount;
             item->work_done += static_cast<int>(share.amount);
             if (share.supplier_quality > 0) {
-                kernel::apply_outsourced_quality(*item, share.supplier_quality, state.seed, week, stage_key,
+                kernel::apply_outsourced_quality(*item, share.supplier_quality, static_cast<int>(share.amount),
+                                                 state.seed, week, stage_key,
                                                  share.contract->at("id").get<std::string>(), caps);
             }
         }

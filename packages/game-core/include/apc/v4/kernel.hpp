@@ -95,7 +95,7 @@ ProductionResult apply_production(WorkItem& item, const Staff& staff, int points
 // 同一条维度权重抽取、同样的 30% 靠拢、同样的依赖上限。工作量本身仍不进质量公式。
 // 随机坐标取 (seed, week, quality, hash(contract_id), 维度+1)，与合同遍历顺序无关。
 // 返回该维度的质量增量（0 表示本周没有写入）。
-int apply_outsourced_quality(WorkItem& item, int supplier_quality, std::uint32_t seed, int week,
+int apply_outsourced_quality(WorkItem& item, int supplier_quality, int points, std::uint32_t seed, int week,
                              const std::string& stage_key, const std::string& contract_id,
                              const std::array<int, kDimensionCount>& caps);
 
@@ -131,6 +131,14 @@ AggregatedQuality aggregate_work(const Project& work);
 int final_quality_milli(const Project& work, const Staff* supervisor);
 // 监督能力 S_sup（百分之一分精度）：天然监督系 70/30，转任系 50/25/25。
 int supervisor_ability_centi(const Staff& staff);
+
+// 工序有效能力 S_eff（百分之一分精度，DEC-STAFF-008）：
+// floor((85*S_primary + 3*Σ其他五维)/100)，不做中间截断。
+int effective_ability_centi(const Staff& staff, const std::string& ability);
+
+// 工作项最终质量 Q_item（千分之一分），按 DEC-STAFF-008 的四段修型：
+// Q_base（贡献加权）→ Q_sup（监督修型）→ Q_cap（主责上限）→ Q_ext_cap（协力木桶）取最小。
+int item_quality_milli(const WorkItem& item, std::int64_t supervisor_milli);
 
 // ---- 费用（周结算的强制成本，[PLACEHOLDER] 数值）----
 int64_t weekly_operations_cost();
