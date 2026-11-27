@@ -883,8 +883,8 @@ bool archive_work_record(const Json& record, std::int64_t company_week,
                          const std::function<void(const std::string&)>& error) {
     const std::string path = "archive.works[]";
     if (!archive_exact_fields(record, {"id", "ip_id", "offer_id", "name", "source", "genre", "scale", "mode",
-                                       "investment_percent", "start_week", "end_week", "end_reason", "forced",
-                                       "gate_completion_permille", "quality", "quality_score", "rating",
+                                       "investment_percent", "start_week", "end_week", "end_reason", "status", "forced",
+                                       "gate_completion_permille", "aborted_week", "penalty_paid", "quality", "quality_score", "rating",
                                        "commercial_revenue", "bd_gross", "bd_revenue", "committee_pool", "investor_share",
                                        "company_received", "finance_summary", "channel_breakdown", "episodes", "team",
                                        "rules_status"})) {
@@ -925,10 +925,21 @@ bool archive_work_record(const Json& record, std::int64_t company_week,
         error("INV-22 archive.works[].周数越界或倒序: " + id);
         return false;
     }
-    if (!archive_text(record.at("end_reason")) || !one_of_text(record.at("end_reason").get<std::string>(),
-        {"completed", "deadline", "company_closed"}) || !record.at("forced").is_boolean()
+    if (!archive_text(record.at("end_reason")) || !archive_text(record.at("status"))) {
+        error("INV-22 archive.works[].end_reason/status 非法: " + id);
+        return false;
+    }
+    const std::string end_reason = record.at("end_reason").get<std::string>();
+    const std::string status = record.at("status").get<std::string>();
+    const bool aborted = end_reason == "aborted";
+    if (!one_of_text(end_reason, {"completed", "deadline", "company_closed", "aborted"})
+        || !one_of_text(status, {"DELIVERED", "ABORTED"}) || !record.at("forced").is_boolean()
         || !archive_integer(record.at("gate_completion_permille"), 0, 1000)
-        || (record.at("end_reason") == "completed" && (record.at("forced").get<bool>() || record.at("gate_completion_permille").get<int>() != 1000))) {
+        || !archive_integer(record.at("penalty_paid"), 0)
+        || (aborted ? (status != "ABORTED" || !archive_integer(record.at("aborted_week"), 0, company_week)
+                       || record.at("aborted_week").get<std::int64_t>() != record.at("end_week").get<std::int64_t>())
+                    : (status != "DELIVERED" || !record.at("aborted_week").is_null()))
+        || (end_reason == "completed" && (record.at("forced").get<bool>() || record.at("gate_completion_permille").get<int>() != 1000))) {
         error("INV-22 archive.works[].结束状态非法: " + id);
         return false;
     }
@@ -942,13 +953,17 @@ bool archive_work_record(const Json& record, std::int64_t company_week,
     }
 
     const Json& finance = record.at("finance_summary");
-    if (!archive_exact_fields(finance, {"contract_received", "investment_paid", "commercial_share", "bd_revenue",
+    if (!archive_exact_fields(finance, {"contract_received", "contract_refund", "investment_paid", "commercial_share", "bd_revenue",
                                         "success_reward", "penalty", "costs", "total_costs", "profit"})) {
         error("INV-22 archive.works[].finance_summary 根字段缺失或含未知字段: " + id);
         return false;
     }
-    for (const char* key : {"contract_received", "investment_paid", "commercial_share", "bd_revenue", "success_reward", "penalty", "total_costs"}) {
+    for (const char* key : {"contract_received", "contract_refund", "investment_paid", "commercial_share", "bd_revenue", "success_reward", "penalty", "total_costs"}) {
         if (!archive_integer(finance.at(key), 0)) { error("INV-22 archive.works[].finance_summary." + std::string(key) + " 必须为非负整数"); return false; }
+    }
+    if (finance.at("penalty").get<std::int64_t>() != record.at("penalty_paid").get<std::int64_t>()) {
+        error("INV-22 archive.works[].penalty_paid 与 finance_summary.penalty 不一致: " + id);
+        return false;
     }
     if (!finance.at("profit").is_number_integer() || finance.at("bd_revenue").get<std::int64_t>() > finance.at("commercial_share").get<std::int64_t>()) {
         error("INV-22 archive.works[].finance_summary.profit/bd_revenue 非法: " + id);
@@ -973,13 +988,16 @@ bool archive_work_record(const Json& record, std::int64_t company_week,
     const auto total_costs = finance.at("total_costs").get<std::int64_t>();
     auto investment_paid = finance.at("investment_paid").get<std::int64_t>();
     auto contract_received = finance.at("contract_received").get<std::int64_t>();
+    const auto contract_refund = finance.at("contract_refund").get<std::int64_t>();
+    auto invested_cost = investment_paid;
+    auto contract_total = contract_received;
     if (!archive_add(contract_received, commercial_share) || !archive_add(contract_received, success_reward)
-        || !archive_add(investment_paid, total_costs)) {
+        || !archive_add(invested_cost, total_costs) || !archive_add(contract_total, contract_refund)) {
         error("INV-22 archive.works[].finance_summary 对账溢出: " + id);
         return false;
     }
     auto company_total = commercial_share;
-    if (costs_sum != total_costs || finance.at("profit").get<std::int64_t>() != contract_received - investment_paid
+    if (costs_sum != total_costs || finance.at("profit").get<std::int64_t>() != contract_received - contract_refund - investment_paid - total_costs
         || !archive_add(company_total, success_reward) || company_total != record.at("company_received").get<std::int64_t>()) {
         error("INV-22 archive.works[].finance_summary 对账失败: " + id);
         return false;
@@ -1096,7 +1114,8 @@ void validate_archive(const GameState& state, const std::function<void(const std
         for (const auto& work_id_value : series.at("works")) {
             const std::string work_id = work_id_value.get<std::string>();
             const auto found = works.find(work_id);
-            if (found == works.end() || !found->second->contains("ip_id") || found->second->at("ip_id") != ip_id) {
+            if (found == works.end() || found->second->at("end_reason") == "aborted" ||
+                !found->second->contains("ip_id") || found->second->at("ip_id") != ip_id) {
                 error("INV-22 archive.series[].works 引用不存在或 IP 不匹配: " + work_id);
                 continue;
             }
@@ -1108,8 +1127,9 @@ void validate_archive(const GameState& state, const std::function<void(const std
         if (series.at("last_week").get<std::int64_t>() != latest_week) error("INV-22 archive.series[].last_week 不等于最后交付周: " + ip_id);
     }
     for (const auto& [id, record] : works) {
-        if (!record->at("ip_id").is_null() && (series_by_ip.find(record->at("ip_id").get<std::string>()) == series_by_ip.end()
-            || listed_works.find(id) == listed_works.end())) {
+        if (record->at("end_reason") != "aborted" && !record->at("ip_id").is_null() &&
+            (series_by_ip.find(record->at("ip_id").get<std::string>()) == series_by_ip.end()
+             || listed_works.find(id) == listed_works.end())) {
             error("INV-22 带 ip_id 的作品必须且只能归属一个系列: " + id);
         }
     }
@@ -1126,7 +1146,9 @@ void validate_archive(const GameState& state, const std::function<void(const std
         || result.at("reason").get<std::string>() != state.company.end_reason.value_or("")
         || !archive_integer(result.at("weeks"), 0, kMaxWeek) || result.at("weeks").get<std::int64_t>() != state.company.week
         || (result.at("reason") == "time_limit" && result.at("weeks").get<std::int64_t>() != kMaxWeek)
-        || !archive_integer(result.at("final_funds"), 0) || result.at("final_funds").get<std::int64_t>() != state.finance.balance
+        || !result.at("final_funds").is_number_integer()
+        || (result.at("reason") != "bankrupt" && result.at("final_funds").get<std::int64_t>() < 0)
+        || result.at("final_funds").get<std::int64_t>() != state.finance.balance
         || !result.at("net_cash_change").is_number_integer()
         || result.at("net_cash_change").get<std::int64_t>() != state.finance.balance - state.finance.opening_funds
         || !archive_integer(result.at("total_projects"), 0) || result.at("total_projects").get<std::int64_t>() != static_cast<std::int64_t>(works.size())
@@ -1910,7 +1932,9 @@ std::vector<std::string> validate(const GameState& state) {
         state.finance.solvency.gap != 0) {
         error("INV-18 当前 finance.solvency 必须保持 normal/null/null/0");
     }
-    if (state.finance.balance < 0) error("INV-25 余额不能为负");
+    const bool bankrupt_negative_allowed = state.company.end_reason == "bankrupt" &&
+        (state.company.status == "closing" || state.company.status == "ended");
+    if (state.finance.balance < 0 && !bankrupt_negative_allowed) error("INV-25 余额不能为负");
     return errors;
 }
 
@@ -2227,6 +2251,29 @@ int gate_completion_permille(const Project& work) {
     return count == 0 ? 0 : static_cast<int>(sum / count);
 }
 
+std::pair<std::int64_t, std::int64_t> project_work_progress(const Project& work) {
+    std::int64_t done = 0;
+    std::int64_t total = 0;
+    walk_items(work, [&done, &total](const WorkItem& item) {
+        done += item.work_done;
+        total += item.work_total;
+    });
+    return {done, total};
+}
+
+int scale_permille(const std::string& scale) {
+    if (scale == "short") return 350;
+    if (scale == "ova") return 650;
+    if (scale == "movie") return 1600;
+    return 1000;
+}
+
+int abort_reputation_delta(int reputation, const std::string& scale) {
+    const int stage_percent = reputation < 600 ? 10 : reputation < 10000 ? 70 : reputation < 60000 ? 140 : 220;
+    const std::int64_t base = 35000LL * scale_permille(scale) / 1000;
+    return -static_cast<int>(base * stage_percent / 100);
+}
+
 struct SettlementOutcome {
     bool ok = false;
     const char* code = "INVALID_STATE";
@@ -2271,6 +2318,7 @@ SettlementOutcome settle_project(GameState& state, Project& work, const std::str
     SettlementOutcome outcome;
     const int week = state.company.week;
     const std::string work_id = work.id;
+    const bool aborted = end_reason == "aborted";
     // DEC-EVENT-001：待处理事件不得因交付/中止/关闭被丢弃；先处理再结项。
     for (const auto& pending : state.events.pending) {
         if (pending.work_id != work_id) continue;
@@ -2278,7 +2326,7 @@ SettlementOutcome settle_project(GameState& state, Project& work, const std::str
         outcome.message = "该项目仍有待处理事件，请先处理： " + pending.event_id;
         return outcome;
     }
-    const int gcp = forced ? gate_completion_permille(work) : 1000;
+    const int gcp = forced || aborted ? gate_completion_permille(work) : 1000;
 
     const auto quality = kernel::aggregate_work(work);
     const int raw_score = quality.mean;
@@ -2297,8 +2345,8 @@ SettlementOutcome settle_project(GameState& state, Project& work, const std::str
     const int rf = reputation_factor(state.company.reputation);
 
     const bool contract = work.mode != "committee";
-    const bool aborted = end_reason == "aborted";
     const int percent = work.investment.value("percent", 0);
+    const auto [progress_done, progress_total] = project_work_progress(work);
 
     std::set<std::string> member_windows;
     if (work.committee_id) {
@@ -2397,11 +2445,18 @@ SettlementOutcome settle_project(GameState& state, Project& work, const std::str
     } else if (contract && !aborted && bd_revenue >= budget) {
         reward = budget * 200 / 1000;   // [PLACEHOLDER] 承制成功奖励 20%
     }
-    // 强制交付扣罚：按门槛缺口比例扣合同预算的 kForcedPenaltyPermille‰。
-    // 中止的违约扣罚系数未标定，记 0 并在回执标记 penalty_pending。
-    std::int64_t penalty =
-        (!aborted && forced) ? budget * (1000 - gcp) / 1000 * kForcedPenaltyPermille / 1000
-                             : static_cast<std::int64_t>(0);
+    // DEC-PROJECT-001：中止按权威总工作量判定 50% 边界；委员会沉没投资与成本，不退款、不罚违约金。
+    std::int64_t contract_refund = 0;
+    std::int64_t penalty = 0;
+    if (aborted && contract) {
+        if (progress_total > 0 && progress_done * 2 > progress_total) {
+            contract_refund = budget * (progress_total - progress_done) / progress_total;
+        } else {
+            penalty = budget * 150 / 1000;
+        }
+    } else if (!aborted && forced) {
+        penalty = budget * (1000 - gcp) / 1000 * kForcedPenaltyPermille / 1000;
+    }
     const std::int64_t company_revenue = bd_revenue + company_share + reward;
     // #120：强制终局（破产 / 第 520 周）不能再让扣罚把现金推到负数，否则 INV-25 与
     // §14.7「直接破产终局」互相矛盾，公司会被永久卡在无法关闭的状态。可支付额 = 现有现金 + 本次收入；
@@ -2416,8 +2471,8 @@ SettlementOutcome settle_project(GameState& state, Project& work, const std::str
         }
     }
     const std::int64_t balance_after_settlement =
-        state.finance.balance + company_revenue - penalty;
-    if (balance_after_settlement < 0) {
+        state.finance.balance + company_revenue + contract_refund - penalty;
+    if (balance_after_settlement < 0 && !aborted && !forced_terminal) {
         outcome.code = "INSUFFICIENT_FUNDS";
         outcome.message = "交付结算后现金余额将为负，已原子拒绝";
         return outcome;
@@ -2460,16 +2515,24 @@ SettlementOutcome settle_project(GameState& state, Project& work, const std::str
             reward, std::nullopt, "contract success reward"});
         state.finance.balance += reward;
     }
+    if (contract_refund > 0) {
+        state.finance.entries.push_back(LedgerEntry{
+            "w" + std::to_string(week) + ".refund." + work_id, week, work_id, "contract_refund",
+            contract_refund, std::nullopt, "abort refund for incomplete work"});
+        state.finance.balance += contract_refund;
+    }
     if (penalty > 0) {
         state.finance.entries.push_back(LedgerEntry{
             "w" + std::to_string(week) + ".penalty." + work_id, week, work_id, "penalty",
-            -penalty, std::nullopt, forced ? "forced delivery penalty" : "penalty"});
+            -penalty, std::nullopt, aborted ? "abort penalty" : forced ? "forced delivery penalty" : "penalty"});
         state.finance.balance -= penalty;
     }
 
     static const std::map<std::string, int> kReputationDelta{{"S", 8}, {"A", 5}, {"B", 2}, {"C", 0}, {"D", -5}};
-    const int reputation_delta = forced ? std::min(0, kReputationDelta.at(rating)) : kReputationDelta.at(rating);
-    change_reputation(state, reputation_delta, "作品交付 " + rating + (forced ? "（强制）" : ""));
+    const int reputation_delta = aborted ? abort_reputation_delta(state.company.reputation, offer.value("scale", std::string{"tv"}))
+                               : forced ? std::min(0, kReputationDelta.at(rating))
+                                        : kReputationDelta.at(rating);
+    change_reputation(state, reputation_delta, aborted ? "项目中止" : "作品交付 " + rating + (forced ? "（强制）" : ""));
 
     // 委员会关闭 + 伙伴关系沉淀
     if (work.committee_id) {
@@ -2485,11 +2548,12 @@ SettlementOutcome settle_project(GameState& state, Project& work, const std::str
                     if (m.value("partner_id", std::string{}) == partner.value("id", std::string{})) member = true;
                 }
                 if (!member) continue;
-                const int delta = forced ? std::min(0, kRelationshipDelta.at(rating)) : kRelationshipDelta.at(rating);
+                const int delta = aborted ? 0 : forced ? std::min(0, kRelationshipDelta.at(rating))
+                                                   : kRelationshipDelta.at(rating);
                 partner["relationship"] = std::clamp(partner.value("relationship", 50) + delta, 0, 100);
                 if (!partner.contains("history") || !partner.at("history").is_array()) partner["history"] = Json::array();
                 partner["history"].push_back(Json{{"week", week}, {"work_id", work_id}, {"delta", delta},
-                                                  {"reason", std::string("作品交付 ") + rating}});
+                                                  {"reason", aborted ? "项目中止" : std::string("作品交付 ") + rating}});
             }
         }
     }
@@ -2528,7 +2592,7 @@ SettlementOutcome settle_project(GameState& state, Project& work, const std::str
         total_costs += amount;
     }
     const std::int64_t investment_paid = work.investment.value("paid", static_cast<std::int64_t>(0));
-    const std::int64_t profit = budget + company_revenue - investment_paid - total_costs;
+    const std::int64_t profit = budget - contract_refund + company_revenue - investment_paid - total_costs;
 
     Json record = Json{{"id", work_id},
                        {"ip_id", work.ip_id ? Json(*work.ip_id) : Json(nullptr)},
@@ -2542,8 +2606,11 @@ SettlementOutcome settle_project(GameState& state, Project& work, const std::str
                        {"start_week", work.opened_week},
                        {"end_week", week},
                        {"end_reason", end_reason},
+                       {"status", aborted ? "ABORTED" : "DELIVERED"},
                        {"forced", forced},
                        {"gate_completion_permille", gcp},
+                       {"aborted_week", aborted ? Json(week) : Json(nullptr)},
+                       {"penalty_paid", penalty},
                        {"quality", Json{{"dims", dims}, {"mean", raw_score}}},
                        {"quality_score", score},
                        {"rating", rating},
@@ -2554,6 +2621,7 @@ SettlementOutcome settle_project(GameState& state, Project& work, const std::str
                        {"investor_share", investor_share},
                        {"company_received", company_revenue},
                        {"finance_summary", Json{{"contract_received", budget},
+                                                {"contract_refund", contract_refund},
                                                 {"investment_paid", investment_paid},
                                                 {"commercial_share", company_share + bd_revenue},
                                                 {"bd_revenue", bd_revenue},
@@ -2566,33 +2634,31 @@ SettlementOutcome settle_project(GameState& state, Project& work, const std::str
                        {"episodes", episode_records},
                        {"team", team},
                        {"rules_status", "placeholder"}};
-    // aborted 不是交付：M0 Archive 只定义 completed/deadline/company_closed，
-    // 不扩展冻结枚举；中止只清项目并保留财务/声望事实（见文档兼容性分析）。
-    if (end_reason != "aborted") {
-        if (!state.archive.contains("works") || !state.archive.at("works").is_array()) state.archive["works"] = Json::array();
-        state.archive["works"].push_back(record);
-        if (work.ip_id) {
-            if (!state.archive.contains("series") || !state.archive.at("series").is_array()) state.archive["series"] = Json::array();
-            Json* series = nullptr;
-            for (auto& entry : state.archive.at("series")) {
-                if (entry.is_object() && entry.value("ip_id", std::string{}) == *work.ip_id) {
-                    series = &entry;
-                    break;
-                }
+    if (!state.archive.contains("works") || !state.archive.at("works").is_array()) state.archive["works"] = Json::array();
+    state.archive["works"].push_back(record);
+    // 中止保留作品履历，但不把未交付作品加入 IP 系列。
+    if (!aborted && work.ip_id) {
+        if (!state.archive.contains("series") || !state.archive.at("series").is_array()) state.archive["series"] = Json::array();
+        Json* series = nullptr;
+        for (auto& entry : state.archive.at("series")) {
+            if (entry.is_object() && entry.value("ip_id", std::string{}) == *work.ip_id) {
+                series = &entry;
+                break;
             }
-            if (series == nullptr) {
-                state.archive["series"].push_back(Json{{"ip_id", *work.ip_id}, {"title", record.at("name")},
-                                                       {"works", Json::array({work_id})}, {"last_week", week}});
-            } else {
-                (*series)["works"].push_back(work_id);
-                (*series)["last_week"] = week;
-            }
+        }
+        if (series == nullptr) {
+            state.archive["series"].push_back(Json{{"ip_id", *work.ip_id}, {"title", record.at("name")},
+                                                   {"works", Json::array({work_id})}, {"last_week", week}});
+        } else {
+            (*series)["works"].push_back(work_id);
+            (*series)["last_week"] = week;
         }
     }
 
     outcome.report = Json{{"work_id", work_id},
                           {"end_reason", end_reason},
-                          {"archived", end_reason != "aborted"},
+                          {"archived", true},
+                          {"status", aborted ? "ABORTED" : "DELIVERED"},
                           {"rules_status", "placeholder"},
                           {"forced", forced},
                           {"gate_completion_permille", gcp},
@@ -2606,12 +2672,17 @@ SettlementOutcome settle_project(GameState& state, Project& work, const std::str
                           {"commercial_share", company_share},
                           {"investor_share", investor_share},
                           {"success_reward", reward},
+                          {"contract_refund", contract_refund},
                           {"penalty", penalty},
+                          {"penalty_paid", penalty},
                           {"penalty_waived", penalty_waived},
                           {"total_costs", total_costs},
-                          {"net_received", company_revenue - penalty},
+                          {"net_received", company_revenue + contract_refund - penalty},
                           {"channels", channel_report}};
 
+    state.contracts.erase(std::remove_if(state.contracts.begin(), state.contracts.end(), [&work_id](const Json& contract) {
+        return contract.is_object() && contract.value("work_id", std::string{}) == work_id;
+    }), state.contracts.end());
     // 清理：临时员工随合同项目退出，核心员工只解绑；pending 已在入口拒绝，不在此删除。
     state.staff.erase(std::remove_if(state.staff.begin(), state.staff.end(), [&work_id](const Staff& member) {
         if (member.employment != "temporary") return false;
@@ -3968,8 +4039,7 @@ std::string deliver_work(const std::string& input) {
     }
 }
 
-// M0 命令 11：abort_work。违约扣罚与中止履历尚未冻结；
-// 在契约补齐前原子拒绝，不能以 0 处罚 + penalty_pending 伪报完成。
+// M0 命令 11：abort_work。DEC-PROJECT-001 规定的中止结算、履历与破产路径。
 std::string abort_work(const std::string& input) {
     try {
         const Json request = Json::parse(input);
@@ -3984,8 +4054,29 @@ std::string abort_work(const std::string& input) {
         Project* work = find_work(state, work_id);
         if (work == nullptr) return encode(error_body("NOT_FOUND", "项目不存在"));
         if (work->status != "producing") return encode(error_body("INVALID_PHASE", "只有 producing 项目可以中止"));
-        return encode(error_body("NOT_IMPLEMENTED",
-                                 "abort_work 的违约扣罚公式与中止履历结构尚未冻结"));
+        if (state.company.week > work->deadline_week) {
+            return encode(error_body("INVALID_PHASE", "已过截止：到期交付由周结算自动执行"));
+        }
+
+        auto outcome = settle_project(state, *work, "aborted", false);
+        if (!outcome.ok) return encode(error_body(outcome.code, outcome.message));
+        if (state.finance.balance < 0) {
+            Json terminal_expired = Json::array();
+            if (!state.events.pending.empty()) {
+                std::string code;
+                std::string message;
+                if (!settle_pending_for_terminal(state, state.company.week, terminal_expired, code, message)) {
+                    return encode(error_body(code.c_str(), "中止破产终局 pending 结清失败: " + message));
+                }
+            }
+            const auto closed = close_company(state, "bankrupt");
+            if (!closed.ok) return encode(error_body(closed.code, closed.message));
+            outcome.report["company_end_reason"] = "bankrupt";
+            outcome.report["events"] = Json{{"expired", terminal_expired}};
+        }
+        const auto errors = validate(state);
+        if (!errors.empty()) return encode(error_body("INTERNAL_ERROR", "中止后状态非法: " + errors.front()));
+        return encode(Json{{"state", state}, {"report", outcome.report}});
     } catch (const Json::exception&) {
         return encode(error_body("INVALID_INPUT", "JSON 或字段类型无效"));
     } catch (...) {

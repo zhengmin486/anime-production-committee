@@ -161,7 +161,7 @@ GameState {
 
 | 字段 | 分类 | 当前约束 | 说明 |
 | --- | --- | --- | --- |
-| `opening_funds` `balance` `entries[]` | `实现` | `balance = opening_funds + Σentries.amount ≥ 0` | INV-16/INV-25；Finance 是现金唯一权威 |
+| `opening_funds` `balance` `entries[]` | `实现` | `balance = opening_funds + Σentries.amount`；running 时 ≥0，bankrupt 的 closing/ended 允许负余额 | INV-16/INV-25；Finance 是现金唯一权威 |
 | `loans` | `reserved_fields` | 必填，当前恒为 `[]` | M0 §3/INV-18/DECISION_LOG §7 明确保留；非空数组或错误类型拒绝 |
 | `solvency{state,since_week,deadline_week,gap}` | `reserved_fields` | 必填；`state="normal"`、`since_week=null`、`deadline_week=null`、`gap=0` | `state="crisis"` 拒绝；不得绕过 INV-25 |
 | `entries[]` 形状 | `实现` | `{id, week, work_id\|null, category, amount, counterparty\|null, memo}` | 与 DA §7.5 一致 |
@@ -204,17 +204,17 @@ GameState {
 
 ### 3.9 `Archive`
 
-初始化实测：`{company_result: null, series: [], works: []}`。`archive/works/series/company_result` 均为解析必填；交付结算写入 `works` 与可选 `series`，关闭路径可生成 `company_result`。INV-22 已独立断言完整载荷、系列引用、追加顺序和终局统计。
+初始化实测：`{company_result: null, series: [], works: []}`。`archive/works/series/company_result` 均为解析必填；交付结算与中止结算写入 `works`，仅交付结算按 IP 写可选 `series`，关闭路径可生成 `company_result`。INV-22 已独立断言完整载荷、系列引用、追加顺序和终局统计。
 
-#### 3.9.1 当前冻结的 `WorkRecord`（28 个根字段）
+#### 3.9.1 当前冻结的 `WorkRecord`（31 个根字段）
 
 | 分组 | 字段 | 约束 |
 | --- | --- | --- |
 | 身份与企划 | `id, ip_id, offer_id, name, source, genre, scale, mode, investment_percent` | `ip_id` 为非空字符串或 null；source 为 publisher/studio/manga/light_novel/game/original；scale 为 ova/short/tv/movie；contract 投资比例为 0，committee 为 10..100 的 10 倍数 |
-| 时间与结论 | `start_week, end_week, end_reason, forced, gate_completion_permille` | 0..520 且不倒退；end_reason 为 completed/deadline/company_closed；completed 必须 forced=false 且完成度=1000 |
+| 时间与结论 | `start_week, end_week, end_reason, status, forced, gate_completion_permille, aborted_week, penalty_paid` | 0..520 且不倒退；end_reason 为 completed/deadline/company_closed/aborted；status 为 DELIVERED/ABORTED；completed 必须 forced=false 且完成度=1000；aborted 必须 status=ABORTED、aborted_week=end_week，非 aborted 的 aborted_week=null；penalty_paid 必须等于 finance_summary.penalty |
 | 质量 | `quality, quality_score, rating` | quality 为 `{dims{六维}, mean}`，六维与均值均为 0..100 整数，均值四舍五入；rating 按 S≥85/A≥75/B≥65/C≥50/D 分档 |
 | 商业汇总 | `commercial_revenue, bd_gross, bd_revenue, committee_pool, investor_share, company_received` | 非负整数；由 `channel_breakdown` 精确对账 |
-| 财务 | `finance_summary` | 根字段为 contract_received/investment_paid/commercial_share/bd_revenue/success_reward/penalty/costs/total_costs/profit；costs 是允许类目的动态子集 |
+| 财务 | `finance_summary` | 根字段为 contract_received/contract_refund/investment_paid/commercial_share/bd_revenue/success_reward/penalty/costs/total_costs/profit；costs 是允许类目的动态子集 |
 | 明细与快照 | `channel_breakdown, episodes, team, rules_status` | channel 窗口不重复；episodes 非空且 id 不重复；team 的 id/name/role 快照 id 不重复；rules_status 当前固定 placeholder |
 
 `channel_breakdown[]` 固定为 `window/potential/quality_factor/heat_factor/reputation_factor/tv_multiplier/agency_fee_permille/gross/net/revenue/company_received/owner`。窗口为 domestic_streaming/overseas/merchandise/music/tv/bd_dvd；BD 的 owner=company，其余 owner=committee_pool。`revenue=gross`、`0≤net≤gross`、`0≤company_received≤net`，且：
@@ -224,14 +224,14 @@ GameState {
 - `investor_share = committee_pool - (commercial_share - bd_revenue)`。
 - `company_received = commercial_share + success_reward`。
 - `Σcosts = total_costs`；允许类目为 salary/production/temporary/outsourcing/events/extension/distribution/penalty/development，不要求全部出现。
-- `profit = contract_received + commercial_share + success_reward - investment_paid - total_costs`。penalty 已计入 costs 时不再重复扣除。
+- `profit = contract_received - contract_refund + commercial_share + success_reward - investment_paid - total_costs`。penalty 已计入 costs 时不再重复扣除。
 
 `episodes[]` 当前固定为 `{id, quality}`；`team[]` 当前固定为 `{id, name, role}`，角色枚举与项目岗位快照一致。完整键树见 `docs/v4-contract-shape.json`，TypeScript 守卫见 `apps/web/src/types/gameV4.ts`，不得用 v3 WorkRecord 代替。
 
 #### 3.9.2 系列写入时机与来源
 
 - 唯一来源链：`OfferSnapshot.ip_id → Project.ip_id → WorkRecord.ip_id → Archive.series`；不按标题猜测续作，不恢复 v3 的线性 `previous_work_id`。
-- `Series = {ip_id, title, works[], last_week}`。仅在 completed/deadline/company_closed 交付结算时与 WorkRecord 同次原子提交；aborted 不写 Archive。
+- `Series = {ip_id, title, works[], last_week}`。仅在 completed/deadline/company_closed 交付结算时与 WorkRecord 同次原子提交；aborted 保留 WorkRecord 但不写 Archive.series。
 - 首次带 IP 的交付创建系列，`title` 冻结为该作品名，`works=[work_id]`，`last_week=end_week`。
 - 后续同 IP 交付只向 `works` 追加并推进 `last_week`，不改标题和既有 WorkRecord；不同 IP 即使同名也各自成系列。
 - 系列 ip_id 唯一；works 引用必须存在、IP 一致、按交付周追加且不重复归属；last_week 等于系列最后交付周。无 IP 作品不创建系列。
@@ -239,7 +239,7 @@ GameState {
 
 #### 3.9.3 `CompanyResult` 与 v3 隔离
 
-v4 固定九字段：`reason/weeks/final_funds/net_cash_change/total_projects/best_work_id/rating/highlights/negatives`。reason 为 time_limit/bankrupt/voluntary，rating 为 S/A/B/C/D；time_limit 的 weeks 必须为 520。项目数、评级和最佳作品与 Archive.works 一致；评分并列时取 Archive 中首条。v3 的七字段结果与 renowned/stable/small/failed 评级只保留在 `gameV3.ts`，v4 使用独立 `gameV4.ts` 子契约。
+v4 固定九字段：`reason/weeks/final_funds/net_cash_change/total_projects/best_work_id/rating/highlights/negatives`。reason 为 time_limit/bankrupt/voluntary，rating 为 S/A/B/C/D；time_limit 的 weeks 必须为 520。项目数、评级和最佳作品与 Archive.works 一致；评分并列时取 Archive 中首条。bankrupt 的 final_funds 允许为负，其余原因必须非负。v3 的七字段结果与 renowned/stable/small/failed 评级只保留在 `gameV3.ts`，v4 使用独立 `gameV4.ts` 子契约。
 
 ### 3.10 `Supplier` / `OutsourceContract` / `Partner` / `Committee` / `MarketState`
 
@@ -258,7 +258,7 @@ v4 固定九字段：`reason/weeks/final_funds/net_cash_change/total_projects/be
 
 ### 3.11 未冻结的形状
 
-`WorkRecord` 当前 28 字段载荷已于 §3.9 冻结；`episode_count/occurrence_issues/commercial_rank/episode_summary/committee_snapshot/major_events` 等未来扩展字段尚未实现，不得提前写入当前载荷。`Facility`、`temporary_contract` 内部字段按 D-07/D-10 跟踪。`Project.investment{percent,total,paid}`、`Project.extension`、`Project.delivery` 已由当前命令写入并实际使用，但其完整长期契约仍随对应批次收敛，不再标记为“命令未实现”。
+`WorkRecord` 当前 31 字段载荷已于 §3.9 冻结；`episode_count/occurrence_issues/commercial_rank/episode_summary/committee_snapshot/major_events` 等未来扩展字段尚未实现，不得提前写入当前载荷。`Facility`、`temporary_contract` 内部字段按 D-07/D-10 跟踪。`Project.investment{percent,total,paid}`、`Project.extension`、`Project.delivery` 已由当前命令写入并实际使用，但其完整长期契约仍随对应批次收敛，不再标记为“命令未实现”。
 
 ### 3.12 Q3/Q4 契约落地状态
 
@@ -317,7 +317,7 @@ M0 §5 冻结 **23 条命令**。核心实际导出 **27 个绑定入口**：21 
 | 8 | `hire_temporary(work_id, candidate_id)` | ❌ | — | — | — | `待实现` |
 | 9 | `sign_outsourcing(work_id, item_id, supplier_id, work_total, mode)` | ❌ | — | — | — | `待实现` |
 | 10 | `deliver_work(work_id)` | ✅ | `state, work_id` | `NOT_FOUND/INVALID_PHASE/GATE_UNMET/INVALID_STATE` | `{state, report}` | `实现`；pending 守卫拒绝交付 |
-| 11 | `abort_work(work_id)` | ✅ | `state, work_id` | `NOT_FOUND/NOT_IMPLEMENTED` | `NOT_IMPLEMENTED` 错误信封 | `入口实现`；处罚/履历载荷未冻结时原子拒绝 |
+| 11 | `abort_work(work_id)` | ✅ | `state, work_id` | `NOT_FOUND/INVALID_PHASE/COMPANY_ENDED/INVALID_STATE` | `{state, report}` | `实现`；50% 违约金/退款、声望重罚、Archive 履历、负余额破产见 §3.9/M0 §14.14 |
 | 12 | `create_custom_offer(name, source, scale, style)` | ✅ | `state` + 命令参数 | `INVALID_INPUT/INVALID_PHASE` | `{state}` | `实现` |
 | 13 | `adopt_proposal()` | ✅ | `state` | `NOT_FOUND/INVALID_PHASE` | `{state}` | `实现` |
 | 14 | `reject_proposal()` | ✅ | `state` | `NOT_FOUND` | `{state}` | `实现` |
@@ -335,7 +335,7 @@ M0 §5 冻结 **23 条命令**。核心实际导出 **27 个绑定入口**：21 
 
 ### 4.1 未实现命令的回执
 
-M0 §6 的 `NOT_IMPLEMENTED` 已用于载荷尚未冻结的 `abort_work`、破产/第 520 周仍携带 pending 时的终局守卫，以及非整除委员会净池分配。返回错误信封且不携带 `state`，不清事件、不关闭项目、不伪造处罚或归档、不静默舍入。
+M0 §6 的 `NOT_IMPLEMENTED` 当前用于非整除委员会净池分配；事件升级实现合入前仍拒绝非空升级配置。返回错误信封且不携带 `state`，不清事件、不关闭项目、不伪造处罚或归档、不静默舍入。破产/第 520 周携带 pending 时已按稳定顺序执行默认保守分支后进入强制终局，不再返回 `NOT_IMPLEMENTED`。
 
 ### 4.2 通用信封
 
@@ -407,20 +407,20 @@ report {
 
 ### 5.3 原子性与失败后状态
 
-M0 §5 的“工作副本 + 一次提交”在已实现命令上成立：守卫失败不返回 `state`，输入状态逐字段不变。`advance_week` 预检不足按 §14.2/§14.7 回滚并直接破产；不写负现金、不产生部分流水或制作推进。若仍有 pending，则终局转移/归档语义未冻结，整周原子拒绝并返回 `NOT_IMPLEMENTED`。
+M0 §5 的“工作副本 + 一次提交”在已实现命令上成立：守卫失败不返回 `state`，输入状态逐字段不变。`advance_week` 预检不足按 §14.2/§14.7 回滚并直接破产，不产生部分流水或制作推进；若仍有 pending，则按 `(work_id,event_id)` 顺序执行冻结快照中的默认保守分支并移除后再关闭。自动分支成本按现金封顶，非法配置使整周原子失败且不误删事件。
 
 ### 5.4 八阶段与 v4 实现对照
 
 | §14.7 阶段 | 内容 | v4 实现 |
 | --- | --- | --- |
 | 1 | 计划冻结与快照 | `实现`；失败回到快照 |
-| 2 | 刚性支出预检 | `实现`；不足直接破产，pending 终局未冻结时拒绝 |
+| 2 | 刚性支出预检 | `实现`；不足直接破产，pending 按冻结默认分支结清 |
 | 3 | 刚性支出扣款 | `实现`；核心/临时员工周薪均走唯一流水 |
 | 4 | 项目生产推进 | `实现` |
 | 5 | 经验/疲劳/红灯 | 经验/疲劳/士气 `实现`；`forced_rest` 未实现 |
 | 6 | 商业窗口与交付收入 | `实现`；含委员会分账与强制交付扣罚 |
-| 7 | 延迟状态倒计时 | 限时事件默认分支 `实现`；一次性升级载荷未冻结 |
-| 8 | 随机事件与周数递增 | `实现`；第 520 周 pending 终局未冻结时拒绝 |
+| 7 | 延迟状态倒计时 | 限时事件默认分支 `实现`；DEC-EVENT-002 一次升级已冻结，代码由独立工作树收尾 |
+| 8 | 随机事件与周数递增 | `实现`；第 520 周 pending 按冻结默认分支结清后关闭 |
 
 ---
 
@@ -451,10 +451,10 @@ M0 §4 共 **29 条**。当前 `validate()` 实际断言 **17 条**：`INV-01/02
 | 19 供应商周承诺 | ✅ | validate 按 supplier_id 汇总 active weekly_cap，超过容量或 int64 汇总溢出即拒绝；命令 9 未实现 |
 | 20 合同项归属/累计交付 | ✅ | validate 校验供应商、项目、工作项、episode 容器与能力引用；按 item_id 汇总全部合同 work_done，不得超过工作项 work_total；终态释放容量 |
 | 21 week 只由 advance_week 改 | ✅ | |
-| 22 Archive 载荷/系列/终局一致性 | ✅ | INV-22 校验 28 字段 WorkRecord、渠道财务对账、IP 系列引用与追加顺序；命令前后快照测试验证历史前缀不变 |
+| 22 Archive 载荷/系列/终局一致性 | ✅ | INV-22 校验 31 字段 WorkRecord、aborted 状态与退款对账、渠道财务对账、IP 系列引用与追加顺序；命令前后快照测试验证历史前缀不变 |
 | 23 事件仲裁 | ✅ | |
 | 24 市场固定 4 槽/至少 2 个可承接/终身唯一 | 🔶 部分 | 初始 4/固定上限 4 与当前槽 id 唯一已断言；Finance 定金历史防删除后重插；周补位保障至少 2 个可承接，跨槽历史互斥未完整断言 |
-| 25 balance ≥0 / 预检失败破产 | 🔶 部分 | 非负余额与无 pending 破产已实现；pending 终局语义未冻结 |
+| 25 balance ≥0 / 预检失败破产 | 🔶 部分 | running 非负余额、无 pending 破产与 pending 终局默认分支已实现；bankrupt closing/ended 允许负余额，融资/贷款仍为未来预留 |
 | 26 存档无派生值 | ❌ | 无黑名单检查 |
 | 27 每项目恰一名监督 | ✅ | `Project.supervisor_staff_id` + 资格/归属/重复校验 |
 | 28 forced_rest | ❌ | 无字段 |
@@ -496,7 +496,7 @@ M0 §4 共 **29 条**。当前 `validate()` 实际断言 **17 条**：`INV-01/02
 | D-09 | pending 扩展字段 | C | §3.8 | `expires_week` 已实现；`episode_id/escalation` 与升级载荷仍待冻结 |
 | D-10 | 未实现形状冻结节奏 | B | §3.10/§4.1 | 随实现批次冻结 |
 | D-11 | 别名是否保留 | B | §4 | 命令实现后评估移除 |
-| D-12 | 未实现命令 NOT_IMPLEMENTED 占位 | B | §4.1 | 已用于 abort 与 pending 终局守卫；不为未冻结载荷猜测成功回执 |
+| D-12 | 未实现命令 NOT_IMPLEMENTED 占位 | B | §4.1 | 当前仅用于非整除委员会净池分配；事件升级实现前拒绝非空升级配置，不为未实现载荷猜测成功回执 |
 | D-13 | report 成本分解 | B | §5.1 | 建议按 category 汇总 |
 | D-14 | report/WeekReceipt 边界 | B/C | §5.1 | report 为结算回执，WeekReceipt 为前端派生 |
 | D-15 | resolve_event 回执效果 | B | §5.2 | 建议增补，不改变业务规则 |
@@ -572,7 +572,7 @@ npm run test:v4 && npm run audit:v4
 | 字段 | 写入点 | 唯一性 | 备注 |
 | --- | --- | --- | --- |
 | `opening_funds` | initialize | 唯一 | INV-16 |
-| `balance/entries` | 立项、周结算、事件与交付/结清，经账本提交器 | 同一写入器族 | 收入与支出均已实现；INV-16/INV-25 |
+| `balance/entries` | 立项、周结算、事件、交付/中止/结清，经账本提交器 | 同一写入器族 | 收入与支出均已实现；INV-16/INV-25；contract_refund 仅由中止退款写入 |
 | `loans/solvency` | initialize 默认值；运行时只校验 | reserved，不授权写入 | 未来机制必须重新评审 |
 
 ### 10.6 EventState
@@ -591,7 +591,7 @@ npm run test:v4 && npm run audit:v4
 | `partners` | 初始化；交付后关系与 history | 更多伙伴/关系玩法仍属 M4 缺口 |
 | `committees` | start_work 成立；交付后关闭 | 当前仅单项目委员会主链 |
 | `market` | 初始化；原创草稿、采纳/拒绝、start_work 消费企划；lock_offer 锁定快照；advance_week 周补充/过期/释放 | 初始目录与热度内容待 #59 标定；竞争仍属 M3 缺口 |
-| `archive` | 交付/结清追加 works；finalize_company 写 company_result | 只追加；中止履历与终局 pending 未冻结 |
+| `archive` | 交付/中止追加 works；交付按 IP 写 series；finalize_company 写 company_result | 只追加；aborted 不写 series；终局 pending 按冻结快照执行默认保守分支后结清 |
 | `suppliers/contracts` | 初始化空聚合；解析与 validate 读取 | 强形状、INV-19/20 与规范化哈希已实现；供应商目录、签约、周交付、费用、可靠性失败和项目终止释放尚未实现 |
 
 ### 10.8 跨模块共享值
@@ -617,15 +617,15 @@ npm run test:v4 && npm run audit:v4
 | 级 | 项 |
 | --- | --- |
 | P0 | initialize 原子范围不足；report/WeekReceipt 边界；未实现命令无 NOT_IMPLEMENTED |
-| P1 | 事件效果代写 Staff/Project/Finance；终局 pending 转移/归档；abort_work 扣罚与履历；事件升级载荷 |
-| P2 | market 竞争与热度内容标定；Archive 中止与扩展履历；前置商业成本输入；非整除净池取整；更多伙伴/关系玩法 |
+| P1 | 事件效果代写 Staff/Project/Finance；事件升级载荷 |
+| P2 | market 竞争与热度内容标定；Archive 扩展履历；前置商业成本输入；非整除净池取整；更多伙伴/关系玩法 |
 | P3 | 供应商/外包；Facility；系列续作玩法（Archive 系列写入已完成）；hire_temporary 载荷（D-07/D-10）；招聘四展示槽/自由池/冷却；其余未冻结载荷 |
 
 `loans/solvency` 不再列入删除阻塞；其当前约束由 INV-18/INV-25 与 reserved 审计保证。`project_fee` 不再列入 V4 待改名项；历史 v3 字段保留，V4 统一使用 `signing_fee`。
 
 ### 11.2 端到端 fixture 现状
 
-当前可执行链路：`initialize_game → start_work → assign_staff → 多周 advance_week → view_event → resolve_event → deliver_work → end_company/finalize_delivery → finalize_company`。承制与委员会模式均可贯通“交付 → Archive → Finance”；命令 10/19/20/21 已实现。仍有 pending 的破产/第 520 周终局与 `abort_work` 完整闭环按未冻结语义原子拒绝，不伪造通过路径，详见 `M2_M4_PROJECT_LOOP.md`。
+当前可执行链路：`initialize_game → start_work → assign_staff → 多周 advance_week → view_event → resolve_event → deliver_work → end_company/finalize_delivery → finalize_company`。承制与委员会模式均可贯通“交付 → Archive → Finance”；命令 10/19/20/21 已实现。`abort_work` 可按权威进度完成承制退款/违约金、委员会沉没核销、声望重罚、WorkRecord/Finance 归档和资源释放；破产或第 520 周携带 pending 时，按 `(work_id,event_id)` 顺序只执行冻结快照中的默认保守分支并移除对应 pending，再进入既有终局结清路径。事件升级仍待独立契约与实现，详见 `M2_M4_PROJECT_LOOP.md`。
 
 ### 11.3 #53 验收项自查
 
@@ -635,6 +635,6 @@ npm run test:v4 && npm run audit:v4
 | 共享 ID/枚举/可空/时间/金额一致 | 部分 | §10.8；D-06/D-08 等例外 |
 | 命令输入/输出/错误码/原子性 | 已实现部分满足 | §4/§5/§9 |
 | 无未解释重复事实源 | 满足 | Finance 唯一现金权威；deposit_paid 仅快照 |
-| 端到端至交付/Archive | 已实现主链满足 | §11.2；中止与终局 pending 除外 |
+| 端到端至交付/Archive | 已实现主链满足 | §11.2；中止及终局 pending 均已覆盖 |
 | M2 与远期分层 | 满足 | §3.12/§11.1 |
 | 裁决项含证据与边界 | 满足 | §8 |

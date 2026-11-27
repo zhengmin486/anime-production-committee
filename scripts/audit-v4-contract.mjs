@@ -300,6 +300,50 @@ if (archived.channel_breakdown.reduce((sum, line) => sum + line.revenue, 0) !== 
 if (archived.channel_breakdown.reduce((sum, line) => sum + line.company_received, 0) !== archived.finance_summary.commercial_share) {
   fail('Archive channel_breakdown 的 Σcompany_received 不等于 finance_summary.commercial_share（DA §7.6）')
 }
+
+const abortBase = fundedInitialize()
+abortBase.market.slots[0].ip_id = 'ip_abort'
+const abortStart = unwrap('start_work', { state: abortBase, offer_id: 'offer_01', mode: 'contract' })
+for (const episode of abortStart.state.works[0].episodes) {
+  for (const stage of episode.stages) {
+    for (const item of stage.items) item.work_done = Math.floor(item.work_total * 3 / 4)
+  }
+}
+const abortReceipt = unwrap('abort_work', { state: abortStart.state, work_id: abortStart.work_id })
+collect(abortReceipt.state, 'state', observed)
+collect([abortReceipt.report], 'report.settlements', observed)
+const abortedRecord = abortReceipt.state.archive.works[0]
+if (abortedRecord.status !== 'ABORTED' || abortedRecord.end_reason !== 'aborted'
+    || abortedRecord.aborted_week !== abortedRecord.end_week || abortedRecord.penalty_paid !== 0
+    || abortedRecord.finance_summary.contract_refund <= 0 || abortReceipt.report.contract_refund <= 0) {
+  fail('DEC-PROJECT-001 中止履历缺少 ABORTED 状态、退款或违约金字段')
+}
+if (abortReceipt.state.archive.series.length !== 0) {
+  fail('DEC-PROJECT-001 aborted 作品不得写入 Archive.series')
+}
+if (!abortReceipt.state.finance.entries.some((entry) => entry.category === 'contract_refund' && entry.amount > 0)) {
+  fail('DEC-PROJECT-001 中止退款未进入 Finance 流水')
+}
+if (abortedRecord.finance_summary.profit !== abortedRecord.finance_summary.contract_received
+    - abortedRecord.finance_summary.contract_refund + abortedRecord.finance_summary.commercial_share
+    + abortedRecord.finance_summary.success_reward - abortedRecord.finance_summary.investment_paid
+    - abortedRecord.finance_summary.total_costs) {
+  fail('DEC-PROJECT-001 中止 WorkRecord 利润公式未扣除 contract_refund')
+}
+const abortedArchiveProbes = [
+  ['aborted 状态与结束原因不一致', (archive) => { archive.works[0].status = 'DELIVERED' }],
+  ['aborted penalty_paid 与 finance_summary 不一致', (archive) => { archive.works[0].penalty_paid = 1 }],
+  ['aborted 退款利润对账', (archive) => { archive.works[0].finance_summary.profit -= 1 }]
+]
+for (const [label, mutate] of abortedArchiveProbes) {
+  const probe = structuredClone(abortReceipt.state)
+  mutate(probe.archive)
+  const result = call('advance_week', { state: probe })
+  if (result.error?.code !== 'INVALID_STATE' || !result.error.message.includes('INV-22') || 'state' in result) {
+    fail(`${label} 应以 INV-22/INVALID_STATE 原子拒绝，实际 ${result.error ? `${result.error.code}: ${result.error.message}` : '成功返回'}`)
+  }
+}
+
 endReceipt = unwrap('end_company', { state: deliveryReceipt.state })
 collect(endReceipt.state, 'state', observed)
 finalizeCompanyReceipt = unwrap('finalize_company', { state: endReceipt.state })
@@ -622,9 +666,19 @@ for (const [label, mutate] of archiveProbes) {
   }
 }
 if (!shape.archive_contract.cost_categories_are_dynamic_subset
-    || shape.archive_contract.profit_formula !== 'contract_received + commercial_share + success_reward - investment_paid - total_costs'
-    || !shape.archive_contract.series_source.includes('OfferSnapshot.ip_id')) {
+    || shape.archive_contract.profit_formula !== 'contract_received - contract_refund + commercial_share + success_reward - investment_paid - total_costs'
+    || !shape.archive_contract.series_source.includes('OfferSnapshot.ip_id')
+    || !shape.archive_contract.series_write.includes('aborted 保留 WorkRecord 但不写 series')) {
   fail('Archive 动态成本子集、利润公式或系列来源链未冻结')
+}
+const abortContract = shape.project_abort_contract
+if (!abortContract?.implemented || abortContract.contract_penalty_threshold_permille !== 500
+    || abortContract.contract_penalty_permille !== 150 || abortContract.committee_penalty !== 0
+    || abortContract.committee_refund !== 0 || abortContract.reputation_base !== -35000
+    || abortContract.work_record_status !== 'ABORTED' || abortContract.series_write !== false
+    || abortContract.negative_balance_reuses_bankruptcy !== true
+    || JSON.stringify(abortContract.scale_permille) !== JSON.stringify({ short: 350, ova: 650, tv: 1000, movie: 1600 })) {
+  fail('DEC-PROJECT-001 中止阈值、退款、声望、履历或破产路径未冻结')
 }
 for (const path of ['state.suppliers[]', 'state.contracts[]']) {
   if (!shape.paths[path] || JSON.stringify(shape.paths[path]) !== JSON.stringify(shape.contract_fields[path])) {
@@ -728,8 +782,9 @@ if (state.finance.balance < 0) fail(`INV-25 当前运行余额为负：${state.f
 if (!shape.current_behavior.normal_balance_nonnegative || !shape.current_behavior.crisis_cannot_bypass_inv25 ||
     shape.current_behavior.nonempty_loans_allowed || shape.current_behavior.crisis_state_allowed ||
     shape.current_behavior.nondefault_solvency_fields_allowed ||
-    shape.current_behavior.future_ledger_categories_allowed || shape.current_behavior.arrange_financing_export_allowed) {
-  fail('docs/v4-contract-shape.json current_behavior 放宽了当前现金与危机边界')
+    shape.current_behavior.future_ledger_categories_allowed || shape.current_behavior.arrange_financing_export_allowed ||
+    !shape.current_behavior.abort_work_implemented || !shape.current_behavior.bankrupt_negative_balance_allowed) {
+  fail('docs/v4-contract-shape.json current_behavior 放宽了当前现金、危机或中止边界')
 }
 
 // ---- 8. 账本约定 ----
@@ -741,7 +796,7 @@ for (const category of categories) {
   if (!shape.ledger.categories_frozen.includes(category)) fail(`未冻结的账本类目：${category}`)
 }
 const badIds = state.finance.entries.filter(
-  (entry) => !/^w\d+\.(salary\.|operations(?:\.|$)|production\.|event\.)/.test(entry.id)
+  (entry) => !/^w\d+\.(salary\.|operations(?:\.|$)|production\.|event\.|refund\.)/.test(entry.id)
 )
 if (badIds.length) fail(`账本 id 不符合约定前缀：${badIds.slice(0, 3).map((entry) => entry.id).join(', ')}`)
 const ids = state.finance.entries.map((entry) => entry.id)
@@ -759,7 +814,10 @@ if (asserted.join(',') !== shape.invariants.asserted_in_validate.slice().sort().
   if (gone.length) fail(`不变式断言消失：${gone.join(', ')}`)
 }
 if (shape.invariants.declared_total !== 29) fail('数据字典声明的不变式总数应为 29（M0 §4）')
-const codesInSource = [...new Set(v4Sources.match(/"(?:[A-Z][A-Z_]{3,})"/g) || [])].map((text) => text.replaceAll('"', ''))
+const codesInSource = [...new Set([
+  ...[...v4Sources.matchAll(/error_body\(\s*"([A-Z][A-Z_]{3,})"/g)].map((match) => match[1]),
+  ...[...v4Sources.matchAll(/(?:\.code|code)\s*=\s*"([A-Z][A-Z_]{3,})"/g)].map((match) => match[1])
+])]
 const unknownCodes = codesInSource.filter((code) => !shape.error_codes.documented.includes(code))
 if (unknownCodes.length) fail(`核心产生了 M0 §6 未登记的错误码：${unknownCodes.sort().join(', ')}`)
 const produced = shape.error_codes.produced_by_v4_source.filter((code) => codesInSource.includes(code))

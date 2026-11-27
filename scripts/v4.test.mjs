@@ -1501,22 +1501,152 @@ test('DEC-EVENT-001：待处理事件阻止交付与关闭，跨项目事件不�
   assert.deepEqual(delivered.state.works.map((work) => work.id), ['work_b'])
 })
 
-test('abort_work：处罚与履历契约未冻结时原子拒绝，不伪报完成', () => {
+function setProjectProgress(state, workId, done) {
+  let remaining = done
+  for (const item of allItems(state, workId)) {
+    const amount = Math.min(item.work_total, remaining)
+    item.work_done = amount
+    remaining -= amount
+  }
+  assert.equal(remaining, 0)
+  return state
+}
+
+test('DEC-PROJECT-001：中止 50% 收 15% 违约金、顶格声望重罚并归档', () => {
   let state = ok('initialize', { seed: 7 }).state
   state = ok('start_work', { state, offer_id: 'offer_01', mode: 'contract' }).state
   state = assign(state, 'staff_dir')
-  state = completeWork(state, 'work_01', 70)
-  const beforeHash = ok('hash_state', { state }).hash
-  const beforeBalance = state.finance.balance
+  const items = allItems(state, 'work_01')
+  if (items.reduce((sum, item) => sum + item.work_total, 0) % 2 !== 0) items[0].work_total += 1
+  const total = items.reduce((sum, item) => sum + item.work_total, 0)
+  state = setProjectProgress(state, 'work_01', total / 2)
+  const balance = state.finance.balance
+  const result = ok('abort_work', { state, work_id: 'work_01' })
 
-  const blocked = call('abort_work', { state, work_id: 'work_01' })
-  assert.equal(blocked.error.code, 'NOT_IMPLEMENTED')
-  assert.match(blocked.error.message, /扣罚公式.*中止履历/)
-  assert.equal('state' in blocked, false)
-  assert.equal(ok('hash_state', { state }).hash, beforeHash)
-  assert.equal(state.finance.balance, beforeBalance)
-  assert.equal(state.works.length, 1)
-  assert.equal(state.staff.find((member) => member.id === 'staff_dir').assignment_work_id, 'work_01')
+  assert.equal(result.report.penalty, 180000)
+  assert.equal(result.report.contract_refund, 0)
+  assert.equal(result.state.finance.balance, balance - 180000)
+  assert.equal(result.state.company.reputation, 0)
+  assert.equal(result.state.works.length, 0)
+  assert.equal(result.state.staff.find((member) => member.id === 'staff_dir').assignment_work_id, null)
+  const record = result.state.archive.works[0]
+  assert.equal(record.status, 'ABORTED')
+  assert.equal(record.end_reason, 'aborted')
+  assert.equal(record.aborted_week, record.end_week)
+  assert.equal(record.penalty_paid, 180000)
+  assert.equal(record.finance_summary.contract_refund, 0)
+  assert.equal(record.commercial_revenue, 0)
+  assert.equal(result.state.archive.series.length, 0)
+  assert.equal(result.state.finance.entries.find((entry) => entry.category === 'contract_refund'), undefined)
+})
+
+test('DEC-PROJECT-001：超过 50% 按未完成进度退款且不收违约金', () => {
+  let state = ok('initialize', { seed: 7 }).state
+  state = ok('start_work', { state, offer_id: 'offer_01', mode: 'contract' }).state
+  const total = allItems(state, 'work_01').reduce((sum, item) => sum + item.work_total, 0)
+  state = setProjectProgress(state, 'work_01', Math.floor(total / 2) + 1)
+  const balance = state.finance.balance
+  const expectedRefund = Math.floor(1200000 * (total - Math.floor(total / 2) - 1) / total)
+  const result = ok('abort_work', { state, work_id: 'work_01' })
+
+  assert.equal(result.report.penalty, 0)
+  assert.equal(result.report.contract_refund, expectedRefund)
+  assert.equal(result.state.finance.balance, balance + expectedRefund)
+  assert.equal(result.state.archive.works[0].finance_summary.contract_refund, expectedRefund)
+  assert.equal(result.state.finance.entries.find((entry) => entry.category === 'contract_refund').amount, expectedRefund)
+})
+
+test('DEC-PROJECT-001：委员会中止只核销沉没成本并零增量关闭合作', () => {
+  let state = ok('initialize', { seed: 7 }).state
+  state = ok('start_work', {
+    state, offer_id: 'offer_02', mode: 'committee', percent: 50,
+    committee_partner_ids: ['partner_stream']
+  }).state
+  const investment = state.works[0].investment.paid
+  const balance = state.finance.balance
+  const relationship = state.partners.find((partner) => partner.id === 'partner_stream').relationship
+  const result = ok('abort_work', { state, work_id: 'work_01' })
+
+  assert.equal(result.report.penalty, 0)
+  assert.equal(result.report.contract_refund, 0)
+  assert.equal(result.state.finance.balance, balance)
+  assert.equal(result.state.archive.works[0].finance_summary.investment_paid, investment)
+  assert.equal(result.state.committees[0].status, 'closed')
+  const partner = result.state.partners.find((entry) => entry.id === 'partner_stream')
+  assert.equal(partner.relationship, relationship)
+  assert.equal(partner.history.at(-1).delta, 0)
+})
+
+test('DEC-PROJECT-001：中止解绑临时员工、释放外包产能并保留团队履历', () => {
+  let state = ok('initialize', { seed: 7 }).state
+  state = ok('start_work', { state, offer_id: 'offer_02', mode: 'contract' }).state
+  const temporary = state.staff.find((member) => member.id === 'staff_ka')
+  temporary.employment = 'temporary'
+  state = assign(state, 'staff_ka')
+  const item = allItems(state, 'work_01')[0]
+  item.work_done = 1
+  item.contributors.push('staff_ka')
+  state.suppliers = [{
+    id: 'supplier_abort', name: '中止协力供应商', specialties: [item.ability], capacity_per_week: 10,
+    quality: 70, speed: 60, price_per_unit: 40, reliability: 80, unlocked_week: 0
+  }]
+  state.contracts.push({
+    id: 'outsource_abort', supplier_id: 'supplier_abort', work_id: 'work_01', episode_id: null, item_id: item.id,
+    ability: item.ability, mode: 'normal', work_total: 10, work_done: 0, weekly_cap: 5,
+    fee_total: 1000, fee_paid: 0, signed_week: 0, due_week: 2, status: 'active'
+  })
+  const result = ok('abort_work', { state, work_id: 'work_01' })
+  assert.equal(result.state.staff.some((member) => member.id === 'staff_ka'), false)
+  assert.equal(result.state.contracts.length, 0)
+  assert.ok(result.state.archive.works[0].team.some((member) => member.id === 'staff_ka'))
+})
+
+test('DEC-PROJECT-001：中止负余额复用破产关闭且保持原子结算', () => {
+  let state = ok('initialize', { seed: 7 }).state
+  state = ok('start_work', { state, offer_id: 'offer_01', mode: 'contract' }).state
+  const balance = state.finance.balance
+  state.finance.entries.push({ id: 'manual.cash.drain', week: 0, work_id: null, category: 'production', amount: -balance, memo: 'fixture' })
+  state.finance.balance = 0
+  const result = ok('abort_work', { state, work_id: 'work_01' })
+  assert.equal(result.report.company_end_reason, 'bankrupt')
+  assert.equal(result.state.company.status, 'ended')
+  assert.equal(result.state.company.end_reason, 'bankrupt')
+  assert.equal(result.state.finance.balance, -180000)
+  assert.equal(result.state.archive.works.length, 1)
+})
+
+test('DEC-PROJECT-001：中止破产先结清其他项目 pending 再复用关闭路径', () => {
+  let state = ok('initialize', { seed: 7 }).state
+  state = ok('start_work', { state, offer_id: 'offer_01', mode: 'contract' }).state
+  state = addIdleSupervisor(state)
+  state = ok('instantiate_work', { state, blueprint: tiny, work_id: 'work_02', duration_weeks: 26 }).state
+  state.events.pending.push(injectedEvent('work_02'))
+  const balance = state.finance.balance
+  state.finance.entries.push({ id: 'manual.cash.drain', week: 0, work_id: null, category: 'production', amount: -balance, memo: 'fixture' })
+  state.finance.balance = 0
+
+  const aborted = ok('abort_work', { state, work_id: 'work_01' })
+  assert.equal(aborted.report.company_end_reason, 'bankrupt')
+  assert.equal(aborted.state.company.status, 'closing')
+  assert.equal(aborted.state.company.end_reason, 'bankrupt')
+  assert.equal(aborted.state.events.pending.length, 0)
+  assert.deepEqual(aborted.state.works.map((work) => [work.id, work.status]), [['work_02', 'delivering']])
+  assert.equal(aborted.state.archive.works.length, 1)
+
+  const finalizedDelivery = ok('finalize_delivery', { state: aborted.state, work_id: 'work_02' })
+  assert.equal(finalizedDelivery.state.company.status, 'ended')
+  assert.equal(finalizedDelivery.state.archive.works.length, 2)
+  const finalizedCompany = ok('finalize_company', { state: finalizedDelivery.state })
+  assert.equal(finalizedCompany.state.archive.company_result.reason, 'bankrupt')
+})
+
+test('DEC-PROJECT-001：pending 与非法阶段中止原子拒绝', () => {
+  let state = ok('initialize', { seed: 7 }).state
+  state = ok('start_work', { state, offer_id: 'offer_01', mode: 'contract' }).state
+  state.events.pending.push(injectedEvent('work_01'))
+  const hash = ok('hash_state', { state }).hash
+  assert.equal(call('abort_work', { state, work_id: 'work_01' }).error.code, 'INVALID_PHASE')
+  assert.equal(ok('hash_state', { state }).hash, hash)
   assert.equal(state.archive.works.length, 0)
 })
 
@@ -1575,15 +1705,16 @@ function completedChannelHistory(id, windows) {
   const commercialShare = channelBreakdown.reduce((sum, line) => sum + line.company_received, 0)
   return {
     id, ip_id: null, offer_id: `${id}_offer`, name: id, source: 'publisher', genre: 'sf', scale: 'tv',
-    mode: 'committee', investment_percent: 100, start_week: 0, end_week: 0, end_reason: 'completed',
-    forced: false, gate_completion_permille: 1000, quality: { dims, mean: 70 }, quality_score: 70, rating: 'B',
+    mode: 'committee', investment_percent: 100, start_week: 0, end_week: 0, end_reason: 'completed', status: 'DELIVERED',
+    forced: false, gate_completion_permille: 1000, aborted_week: null, penalty_paid: 0,
+    quality: { dims, mean: 70 }, quality_score: 70, rating: 'B',
     commercial_revenue: channelBreakdown.reduce((sum, line) => sum + line.revenue, 0),
     bd_gross: channelBreakdown.filter((line) => line.window === 'bd_dvd').reduce((sum, line) => sum + line.gross, 0),
     bd_revenue: channelBreakdown.filter((line) => line.window === 'bd_dvd').reduce((sum, line) => sum + line.net, 0),
     committee_pool: channelBreakdown.filter((line) => line.window !== 'bd_dvd').reduce((sum, line) => sum + line.net, 0),
     investor_share: 0, company_received: commercialShare,
     finance_summary: {
-      contract_received: 0, investment_paid: 0, commercial_share: commercialShare,
+      contract_received: 0, contract_refund: 0, investment_paid: 0, commercial_share: commercialShare,
       bd_revenue: channelBreakdown.filter((line) => line.window === 'bd_dvd').reduce((sum, line) => sum + line.net, 0),
       success_reward: 0, penalty: 0, costs: {}, total_costs: 0, profit: commercialShare
     },
@@ -1845,14 +1976,14 @@ test('INV-22：交付冻结完整 WorkRecord，财务口径不重复扣罚', () 
   state = ok('advance_week', { state }).state
   const record = state.archive.works[0]
   assert.deepEqual(Object.keys(record).sort(), [
-    'bd_gross', 'bd_revenue', 'channel_breakdown', 'commercial_revenue', 'committee_pool', 'company_received', 'end_reason', 'end_week',
-    'episodes', 'finance_summary', 'forced', 'gate_completion_permille', 'genre', 'id', 'investment_percent',
-    'investor_share', 'ip_id', 'mode', 'name', 'offer_id', 'quality', 'quality_score', 'rating', 'rules_status',
-    'scale', 'source', 'start_week', 'team'
+    'aborted_week', 'bd_gross', 'bd_revenue', 'channel_breakdown', 'commercial_revenue', 'committee_pool',
+    'company_received', 'end_reason', 'end_week', 'episodes', 'finance_summary', 'forced', 'gate_completion_permille',
+    'genre', 'id', 'investment_percent', 'investor_share', 'ip_id', 'mode', 'name', 'offer_id', 'penalty_paid',
+    'quality', 'quality_score', 'rating', 'rules_status', 'scale', 'source', 'start_week', 'status', 'team'
   ].sort())
   const finance = record.finance_summary
   assert.ok(finance.penalty > 0)
-  assert.equal(finance.profit, finance.contract_received + finance.commercial_share + finance.success_reward
+  assert.equal(finance.profit, finance.contract_received - finance.contract_refund + finance.commercial_share + finance.success_reward
     - finance.investment_paid - finance.total_costs)
   assert.equal(record.channel_breakdown.reduce((sum, line) => sum + line.revenue, 0), record.commercial_revenue)
   assert.equal(record.channel_breakdown.reduce((sum, line) => sum + line.company_received, 0), finance.commercial_share)

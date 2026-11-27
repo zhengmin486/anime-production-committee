@@ -88,11 +88,11 @@ SaveRecord { version: 4, savedAt: ISO8601, rules_version: string, state: GameSta
 | `Committee` | id, work_id, members, formed_week, status | closed_week | 一成员一渠道，bd 不挂成员 |
 | `MarketState` | heat, slots, refresh_week, competitors | custom_offer, proposal, last_competition_round | `market.slots ≤ 4`；初始生成 4 个企划，每周只补空槽；自定/提案为独立槽；Offer 生命周期字段见 §14.13 |
 | `Recruitment` | pool, pity, last_scout_week | — | Staff 唯一持有；pool 候选包装 `{staff, expires_week, origin}`；详见 §14.13 |
-| `Finance` | opening_funds, balance, entries, loans, solvency | — | balance = opening + Σentries ≥ 0；当前 `loans=[]`、`solvency.state="normal"`；两字段仅作后续更新预留，不授权危机或融资 |
+| `Finance` | opening_funds, balance, entries, loans, solvency | — | balance = opening + Σentries；running 时 balance ≥ 0，bankrupt 的 closing/ended 允许负余额；当前 `loans=[]`、`solvency.state="normal"`；两字段仅作后续更新预留，不授权危机或融资 |
 | `EventState` | pending[], last_event_week, per_work | pending 数组可为空 | 每条待处理事件带 work_id/event_id/triggered_week/viewed；viewed 缺失即非法输入，不静默当未查看（§14.12）；pending 中每项目至多一条；不同项目可同周各有事件；last_event_week 不得充当全局单槽 |
 | `Archive` | works: WorkRecord[], series: Series[] | company_result | WorkRecord 只追加；系列按 IP 追加作品并单调推进 last_week |
 
-**Archive 当前冻结口径**：`WorkRecord` 的 28 个根字段及其嵌套 `quality/channel_breakdown/finance_summary/episodes/team` 形状以 `docs/v4-contract-shape.json` 与 `docs/DATA_DICTIONARY_V4.md` §3.9 为准。系列来源链为 `OfferSnapshot.ip_id → Project.ip_id → WorkRecord.ip_id → Archive.series`；仅在 `completed/deadline/company_closed` 交付结算时与 WorkRecord 同次原子写入，`aborted` 不归档。首次交付冻结系列标题，后续同 IP 交付只追加 `works` 并更新 `last_week`；不同 IP 不按标题合并。`finance_summary.profit = contract_received + commercial_share + success_reward - investment_paid - total_costs`，不重复扣除已计入 `costs.penalty` 的扣罚。
+**Archive 当前冻结口径**：`WorkRecord` 的 31 个根字段及其嵌套 `quality/channel_breakdown/finance_summary/episodes/team` 形状以 `docs/v4-contract-shape.json` 与 `docs/DATA_DICTIONARY_V4.md` §3.9 为准。系列来源链为 `OfferSnapshot.ip_id → Project.ip_id → WorkRecord.ip_id → Archive.series`；`completed/deadline/company_closed` 交付结算与 WorkRecord 同次原子写入系列，`aborted` 保留 WorkRecord 但不写系列。首次交付冻结系列标题，后续同 IP 交付只追加 `works` 并更新 `last_week`；不同 IP 不按标题合并。`finance_summary.profit = contract_received - contract_refund + commercial_share + success_reward - investment_paid - total_costs`，不重复扣除已计入 `costs.penalty` 的扣罚。
 
 ---
 
@@ -121,10 +121,10 @@ SaveRecord { version: 4, savedAt: ISO8601, rules_version: string, state: GameSta
 | INV-19 | 同一供应商 `Σ active 合同 weekly_cap ≤ capacity_per_week` | CAPACITY_EXCEEDED |
 | INV-20 | 合同 `item_id` 属于同一 `work_id`；累计交付不超过该项 `work_total` | INVALID_STATE |
 | INV-21 | `running ⇒ week < 520`；`week` 只由 `advance_week` 改变 | INVALID_PHASE |
-| INV-22 | Archive 根字段齐全；WorkRecord 28 字段载荷、质量/评级、渠道与财务对账合法且按交付周追加、id 唯一；Series 的 ip_id 唯一，作品引用存在且 IP 一致、仅归属一个系列、按交付周追加，last_week 等于最后交付周；带 ip_id 的作品必须归属系列；company_result 与公司状态及 Archive 统计一致 | INVALID_STATE |
+| INV-22 | Archive 根字段齐全；WorkRecord 31 字段载荷、质量/评级、渠道与财务对账合法且按结束周追加、id 唯一；aborted 记录 status=ABORTED、aborted_week=end_week、penalty_paid 与 finance_summary.penalty 一致，且不进入 Series；Series 的 ip_id 唯一，作品引用存在且 IP 一致、仅归属一个系列、按交付周追加，last_week 等于最后交付周；带 ip_id 的已交付作品必须归属系列；company_result 与公司状态及 Archive 统计一致 | INVALID_STATE |
 | INV-23 | `events.pending[]` 可同时包含多个项目事件；每条带 `work_id/event_id/triggered_week/viewed`，pending 中每项目至多一条；同一项目每周最多触发一个；未查看事件阻塞推进，已查看未处理事件不阻塞；`last_event_week` 不得全局限流；事件不得覆盖/丢弃 | INVALID_STATE |
 | INV-24 | `market.slots ≤ 4`，初始生成 4；每周只补空槽且至少 2 个可立即承接；自定/提案槽与市场槽、历史 id 互斥；同一企划 id 终身唯一，不得删除后再生成绕过锁定历史 | INVALID_STATE |
-| INV-25 | `Finance.balance ≥ 0`；刚性支出预检不足时回滚并直接破产，不记录负现金欠付，不得以 `solvency.state="crisis"` 绕过 | INVALID_STATE |
+| INV-25 | `running` 时 `Finance.balance ≥ 0`；`bankrupt` 的 `closing/ended` 允许负余额以保留未豁免债务。刚性支出预检不足时回滚并直接破产，不记录负现金欠付，不得以 `solvency.state="crisis"` 绕过 | INVALID_STATE |
 | INV-26 | 存档中不含派生值（§2 列表）；加载时重算 | SAVE_CORRUPT |
 | INV-27 | 每个 producing 项目恰有一名已通过任职资格校验并已分配到该项目的监督；资格仅在任职/分配时校验，任职后不因属性波动撤销；不得出现监督空缺或重复 | INVALID_STATE |
 | INV-28 | forced_rest 员工保留原项目归属与岗位占位但不贡献产能；满期次周开局恢复原岗位；监督已被替补时原监督回归不得顶替现任监督 | INVALID_STATE |
@@ -150,7 +150,7 @@ SaveRecord { version: 4, savedAt: ISO8601, rules_version: string, state: GameSta
 | 8 | `hire_temporary(work_id, candidate_id)` | running ∧ 项目 producing ∧ 候选人存在 ∧ 现金 ≥ signing_fee | NOT_FOUND / INSUFFICIENT_FUNDS | 临时合同+Finance signing_fee 即时入账；weekly_salary 从后续周结算计提；归属合同项目 |
 | 9 | `sign_outsourcing(work_id, item_id, supplier_id, work_total, mode)` | 工作项已解锁 ∧ 专业匹配 ∧ 产能余量 ∧ 现金 | DEPENDENCY_UNMET / CAPACITY_EXCEEDED / INSUFFICIENT_FUNDS | 合同+费用+占用 |
 | 10 | `deliver_work(work_id)` | 全部门槛项 delivered ∧ 未过截止 ∧ 项目 producing | GATE_UNMET / INVALID_PHASE | 当次完成交付结算（周数不变） |
-| 11 | `abort_work(work_id)` | 项目 producing | NOT_FOUND | 终止+扣罚+释放占用 |
+| 11 | `abort_work(work_id)` | running ∧ 项目 producing ∧ 未过截止 ∧ 本项目无 pending | NOT_FOUND / INVALID_PHASE / COMPANY_ENDED | 中止结算、退款/违约金入账、声望重罚、委员会关闭、Archive 履历、人员/外包释放；负余额复用破产关闭 |
 | 12 | `create_custom_offer(name, source, scale, style)` | running ∧ 基础声望等草稿资格满足 ∧ 原创草稿槽可用；不检查全部投资资金 | INVALID_INPUT | 只创建原创草稿，不建立 Project、不扣全部投资资金；草稿开发费时点待确认 |
 | 13 | `adopt_proposal()` | 存在提案 ∧ running | NOT_FOUND | 提案→自定槽 |
 | 14 | `reject_proposal()` | 存在提案 | NOT_FOUND | 清空提案 |
@@ -598,8 +598,18 @@ PoolCandidate {
 6. 第 W 周锁定后 W/W+1 有效、W+2 开局失效；`start_work` 对自然到期或锁定到期的市场槽返回 `NOT_FOUND`；最后一周提示可由 `locked_until − week == 1` 派生。
 7. 定金锁定与签约抵扣后 `balance = opening + Σentries` 仍成立；`deposit_paid/locked_until` 必须与唯一规范定金流水对账，抵扣额从流水推导，定金不被计两次支出。
 8. 锁定到期未接单：定金不退、无自动退款流水，`lock_used` 仍为 true。
-9. 当前状态 `loans=[]`、`solvency.state="normal"`；非空 loans、`solvency.state="crisis"` 或负余额均被拒绝，任何命令不得借此绕过现金预检或破产规则。
+9. 当前状态 `loans=[]`、`solvency.state="normal"`；非空 loans、`solvency.state="crisis"` 均被拒绝。`running` 状态负余额被拒绝；`bankrupt` 的 `closing/ended` 允许负余额，任何命令不得借此绕过现金预检或破产规则。
 10. 企划市场固定4个槽位，开局4个；每周只补空槽，最多补至4。未过期企划保留，锁定企划继续占用原槽；企划过期或锁定释放后补充。至少2个企划可立即承接。IP上门企划占普通企划槽，自定企划独立入口不占市场槽。人才市场另有固定4个招聘候选人槽位，二者独立。企划 id 终身唯一，市场/自定/提案槽不得重复。
+
+### 14.14 项目中止（DEC-PROJECT-001 / DEC-REP-001）
+
+- `abort_work(work_id)` 是唯一中止入口；项目必须处于 `producing`、公司必须 `running`、不得晚于 `deadline_week`，且本项目不得有 pending 事件。失败时状态、账本、归属与 Archive 均不变。
+- 完成进度由项目全部权威工作项的 `Σwork_done / Σwork_total` 计算，不接受 UI 或调用方传入。承制项目进度 ≤50% 时收取合同制作费 15% 违约金；进度 >50% 时按 `contract_budget × (Σwork_total − Σwork_done) / Σwork_total` 退款，不再收 15% 违约金。当前整数除法向下截断，最终整数化仍由 #60 标定。
+- 委员会项目不收取中止违约金、不退款；已支付投资本金与已发生成本沉没。退款使用 `contract_refund` 账本类目，违约金使用 `penalty`。
+- 中止统一保留 `WorkRecord`：`end_reason="aborted"`、`status="ABORTED"`、`aborted_week=end_week`、`penalty_paid=finance_summary.penalty`；aborted 作品不进入 `Archive.series`。
+- 中止声望按变更前声望档位执行顶格重罚：标准 TV 基准 −35,000；`<600` 为 10%，`600–9,999` 为 70%，`10,000–59,999` 为 140%，`≥60,000` 为 220%；作品规模系数 short=350、ova=650、tv=1000、movie=1600。
+- 中止后临时员工解绑退出，核心员工只解绑；该项目外包合同移除并释放供应商产能，已发生费用不退。
+- 中止结算后现金 <0 时不封顶、不豁免，先按稳定顺序对其他项目 pending 执行默认保守分支，再复用 M2.5 破产关闭路径；不为中止新建独立破产分支。
 
 ---
 

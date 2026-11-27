@@ -25,13 +25,13 @@ function paths(value: unknown, select: (value: unknown) => boolean, prefix = '')
 function work(): V4WorkRecord {
   return {
     id: 'work_01', ip_id: null, offer_id: 'offer_01', name: '星海邮差', source: 'publisher', genre: 'sf', scale: 'tv',
-    mode: 'contract', investment_percent: 0, start_week: 0, end_week: 26, end_reason: 'completed', forced: false,
-    gate_completion_permille: 1000,
+    mode: 'contract', investment_percent: 0, start_week: 0, end_week: 26, end_reason: 'completed', status: 'DELIVERED', forced: false,
+    gate_completion_permille: 1000, aborted_week: null, penalty_paid: 0,
     quality: { dims: { story: 70, direction: 70, drawing: 70, animation: 70, art: 70, sound: 70 }, mean: 70 },
     quality_score: 70, rating: 'B', commercial_revenue: 100, bd_gross: 100, bd_revenue: 50, committee_pool: 0,
     investor_share: 0, company_received: 50,
     finance_summary: {
-      contract_received: 1000, investment_paid: 0, commercial_share: 50, bd_revenue: 50, success_reward: 0,
+      contract_received: 1000, contract_refund: 0, investment_paid: 0, commercial_share: 50, bd_revenue: 50, success_reward: 0,
       penalty: 0, costs: { production: 100 }, total_costs: 100, profit: 950
     },
     channel_breakdown: [{
@@ -40,6 +40,18 @@ function work(): V4WorkRecord {
     }],
     episodes: [{ id: 'ep01', quality: { dims: { story: 70, direction: 70, drawing: 70, animation: 70, art: 70, sound: 70 }, mean: 70 } }],
     team: [{ id: 'staff_dir', name: '导演', role: 'director' }], rules_status: 'placeholder'
+  }
+}
+
+function abortedWork(): V4WorkRecord {
+  return {
+    ...work(), ip_id: 'ip_01', end_reason: 'aborted', status: 'ABORTED', gate_completion_permille: 750,
+    aborted_week: 26, commercial_revenue: 0, bd_gross: 0, bd_revenue: 0, company_received: 0,
+    finance_summary: {
+      ...work().finance_summary, contract_refund: 250,
+      commercial_share: 0, bd_revenue: 0, profit: 650
+    },
+    channel_breakdown: []
   }
 }
 
@@ -131,6 +143,22 @@ describe('v4 完整 WorkRecord 契约', () => {
     expect(isV4WorkRecord(changed(work(), 'finance_summary.profit', 949))).toBe(false)
     expect(isV4WorkRecord({ ...work(), channel_breakdown: [...work().channel_breakdown, ...work().channel_breakdown] })).toBe(false)
   })
+
+  it('校验中止状态、周、实际违约金与退款利润', () => {
+    expect(isV4WorkRecord(abortedWork())).toBe(true)
+    expect(isV4WorkRecord(changed(abortedWork(), 'status', 'DELIVERED'))).toBe(false)
+    expect(isV4WorkRecord(changed(abortedWork(), 'aborted_week', 25))).toBe(false)
+    expect(isV4WorkRecord(changed(abortedWork(), 'aborted_week', null))).toBe(false)
+    expect(isV4WorkRecord(changed(abortedWork(), 'penalty_paid', 1))).toBe(false)
+    expect(isV4WorkRecord(changed(abortedWork(), 'finance_summary.contract_refund', 251))).toBe(false)
+    const penalized = abortedWork()
+    penalized.penalty_paid = 150
+    penalized.finance_summary.penalty = 150
+    penalized.finance_summary.costs.penalty = 150
+    penalized.finance_summary.total_costs = 250
+    penalized.finance_summary.profit = 500
+    expect(isV4WorkRecord(penalized)).toBe(true)
+  })
 })
 
 describe('v4 Archive 与系列引用契约', () => {
@@ -142,6 +170,19 @@ describe('v4 Archive 与系列引用契约', () => {
     value.series = [{ ip_id: 'ip_01', title: '星海邮差', works: ['work_01'], last_week: 26 }]
     expect(isV4Archive(value)).toBe(true)
     expect(isV4Archive(JSON.parse(JSON.stringify(value)))).toBe(true)
+  })
+
+  it('保留中止履历但拒绝将其写入系列', () => {
+    const value = archive()
+    value.works[0] = abortedWork()
+    expect(isV4Archive(value)).toBe(true)
+    value.series = [{ ip_id: 'ip_01', title: '星海邮差', works: ['work_01'], last_week: 26 }]
+    expect(isV4Archive(value)).toBe(false)
+  })
+
+  it('允许破产终局保留负现金', () => {
+    expect(isV4CompanyResult({ ...result(), reason: 'bankrupt', final_funds: -1 })).toBe(true)
+    expect(isV4CompanyResult({ ...result(), reason: 'voluntary', final_funds: -1 })).toBe(false)
   })
 
   it('拒绝缺失系列、重复归属、悬空引用和错误最后周', () => {

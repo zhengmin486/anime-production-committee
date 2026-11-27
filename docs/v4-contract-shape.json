@@ -551,6 +551,7 @@
     "categories_frozen": [
       "commercial_share_received",
       "contract_received",
+      "contract_refund",
       "development",
       "distribution",
       "events",
@@ -574,7 +575,8 @@
       "w{week}.salary.",
       "w{week}.operations",
       "w{week}.production.",
-      "w{week}.event."
+      "w{week}.event.",
+      "w{week}.refund."
     ],
     "future_only_categories": [
       "financing_in",
@@ -598,16 +600,19 @@
       "commercial_revenue",
       "commercial_share",
       "company_received",
+      "contract_refund",
       "end_reason",
       "forced",
       "gate_completion_permille",
       "investor_share",
       "net_received",
       "penalty",
+      "penalty_paid",
       "penalty_waived",
       "quality_score",
       "rating",
       "rules_status",
+      "status",
       "success_reward",
       "total_costs",
       "work_id"
@@ -644,6 +649,7 @@
       "works"
     ],
     "state.archive.works[]": [
+      "aborted_week",
       "bd_gross",
       "bd_revenue",
       "channel_breakdown",
@@ -664,6 +670,7 @@
       "mode",
       "name",
       "offer_id",
+      "penalty_paid",
       "quality",
       "quality_score",
       "rating",
@@ -671,6 +678,7 @@
       "scale",
       "source",
       "start_week",
+      "status",
       "team"
     ],
     "state.archive.works[].channel_breakdown[]": [
@@ -712,6 +720,7 @@
       "bd_revenue",
       "commercial_share",
       "contract_received",
+      "contract_refund",
       "costs",
       "investment_paid",
       "penalty",
@@ -1498,7 +1507,9 @@
     "crisis_state_allowed": false,
     "nondefault_solvency_fields_allowed": false,
     "future_ledger_categories_allowed": false,
-    "arrange_financing_export_allowed": false
+    "arrange_financing_export_allowed": false,
+    "abort_work_implemented": true,
+    "bankrupt_negative_balance_allowed": true
   },
   "vendor_contract": {
     "status_validation_implemented": true,
@@ -1521,12 +1532,12 @@
     "hash_normalizes_partner_and_committee_order": true
   },
   "archive_contract": {
-    "work_record_root_field_count": 28,
+    "work_record_root_field_count": 31,
     "work_record_shape": "state.archive.works[]",
     "series_source": "OfferSnapshot.ip_id -> Project.ip_id -> WorkRecord.ip_id -> Archive.series",
-    "series_write": "completed/deadline/company_closed 交付结算与 WorkRecord 同次原子提交；aborted 不归档",
+    "series_write": "completed/deadline/company_closed 交付结算与 WorkRecord 同次原子提交；aborted 保留 WorkRecord 但不写 series",
     "series_title": "首次交付冻结；同 IP 续作只追加 works 并更新 last_week",
-    "profit_formula": "contract_received + commercial_share + success_reward - investment_paid - total_costs",
+    "profit_formula": "contract_received - contract_refund + commercial_share + success_reward - investment_paid - total_costs",
     "cost_categories_are_dynamic_subset": true,
     "allowed_cost_categories": [
       "salary",
@@ -1539,6 +1550,31 @@
       "penalty",
       "development"
     ]
+  },
+  "project_abort_contract": {
+    "implemented": true,
+    "progress_source": "Project authoritative WorkItem work_done/work_total",
+    "contract_penalty_threshold_permille": 500,
+    "contract_penalty_permille": 150,
+    "above_threshold_refund_formula": "contract_budget * (work_total - work_done) / work_total",
+    "committee_penalty": 0,
+    "committee_refund": 0,
+    "reputation_base": -35000,
+    "reputation_tiers": [
+      { "min": 0, "max": 599, "percent": 10 },
+      { "min": 600, "max": 9999, "percent": 70 },
+      { "min": 10000, "max": 59999, "percent": 140 },
+      { "min": 60000, "percent": 220 }
+    ],
+    "scale_permille": {
+      "short": 350,
+      "ova": 650,
+      "tv": 1000,
+      "movie": 1600
+    },
+    "work_record_status": "ABORTED",
+    "series_write": false,
+    "negative_balance_reuses_bankruptcy": true
   },
   "schema_version": 1,
   "source": "docs/DATA_DICTIONARY_V4.md"

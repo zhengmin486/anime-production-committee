@@ -469,7 +469,7 @@ Market.offer ──(start_work)──▶ Project{ planning }
 | --- | --- |
 | 项目级状态（工作项进度、计划、风险） | 随 Project 移出活动集合；单集摘要与质量已进 Archive |
 | 事件冷却/延后事件 | 随项目归档，不再参与触发 |
-| 外包未完成合同 | 状态置为 `failed`，不退款（首版），不再产生产能占用 |
+| 外包未完成合同 | 删除该项目未完成合同并释放产能，不退款；历史交付/失败合同仍保留 |
 | 委员会 | `closed`，成员关系写回 Partnership |
 | 员工归属 | 清空 `assignment_work_id`，员工回到未分配 |
 | 临时员工 | 合同到期自动释放，档案从名册移除，历史快照留在 Archive |
@@ -786,7 +786,7 @@ WorkPlan.target: null
 | 周数 | 不变。交付不是一次时间推进 |
 | 生产 | 立即停止：此后该项目不再获得任何工作量与质量增量 |
 | 员工 | 归属自动清空，回到未分配；玩家需重新分配，否则这些人在下一次结算空转但仍计薪 |
-| 外包 | 未完成合同置 `failed`，不退款，释放供应商产能 |
+| 外包 | 未完成合同从活动聚合删除并释放供应商产能，不退款 |
 | 现金 | 阶段 2 预检只看快照现金；阶段 6 的商业收入与交付收入不得反向填补本周刚性支出 |
 | 触发条件 | 全部 `is_gate` 项 `delivered`；未达门槛时该命令被拒绝 |
 
@@ -867,7 +867,7 @@ Offer { id, name, source, genre, scale, contract_budget, duration_weeks, target_
 
 **Partnership 运行时现状（2026-11-27）**：`partners` / `committees` 根数组解析必填；Partner 精确 8 字段、history 精确 4 字段、Committee 精确 6 字段、member 精确 2 字段。INV-13 已断言成员/渠道唯一、伙伴渠道归属、BD 不挂成员、项目双向引用、active/closed 生命周期、关闭后 Archive 一致性及 history 归档引用。active Committee 允许指向 `delivering`，以覆盖 `end_company → finalize_delivery` 的合法中间态。`state_hash` 按 id 规范化 partners / committees，并排序 Partner.channels 与 Committee.members；history 保持追加顺序，不用排序掩盖乱序。
 
-上述状态约束不等于外包玩法已开放：`sign_outsourcing`、供应商默认目录、`weekly_cap` 推导、按周交付、费用支付、可靠性失败以及交付/中止时自动把未完成合同置 `failed` 均尚未实现。§6.4 / §7.3 中“未完成合同置 failed”是目标结算规则，当前 runtime 不得伪报已执行。
+上述状态约束不等于外包玩法已开放：`sign_outsourcing`、供应商默认目录、`weekly_cap` 推导、按周交付、费用支付和可靠性失败均尚未实现。项目交付/中止时删除其未完成 active 合同并释放产能，不退款；§6.4 / §7.3 的“未完成合同置 failed”目标语义已由该活动聚合清理实现，不得伪报未实际写入的终态合同。
 
 ### 7.5 Finance
 
@@ -883,7 +883,7 @@ Finance {
 }
 Entry { id, week, work_id: null|work_id, category, amount: signed, counterparty: null|partner|supplier, memo }
 
-流入（amount>0）：contract_received | commercial_share_received | success_reward_received
+流入（amount>0）：contract_received | contract_refund | commercial_share_received | success_reward_received
 流出（amount<0）：investment_paid | salary | operations | production | temporary
                   | outsourcing | events | extension | penalty | development | distribution
 
@@ -897,8 +897,8 @@ Entry { id, week, work_id: null|work_id, category, amount: signed, counterparty:
 2. 每笔 entry 只属于一个 category；同一笔现金不得产生两条 entry。
 3. `amount<0` 的 entry 必须有对应合同、事件或结算原因（memo 记录来源 id）。
 4. 项目归因视图：`Σ amount where work_id=w` 与该公司该项目的实际净贡献一致；不存在独立项目钱包。
-5. `commercial_share_received` 与 `success_reward_received` 只能在交付结算写入；`contract_received` 按立项契约在 `start_work` 时写入，不得中途重复入账。
-6. 当前存续经营状态下 `balance` 不得为负；预检不足时整周回滚并进入 `closing(bankrupt)`，不以负现金欠付继续经营。
+5. `commercial_share_received` 与 `success_reward_received` 只能在交付结算写入；`contract_received` 按立项契约在 `start_work` 时写入，`contract_refund` 只在承制中止退款时写入，均不得中途重复入账。
+6. running 状态下 `balance` 不得为负；预检不足时整周回滚并进入 `closing(bankrupt)`。中止扣罚/退款不封顶，若导致负余额则结清其他项目 pending 的默认保守分支后复用破产关闭路径；bankrupt 的 `closing/ended` 允许保留负余额，不以负现金继续经营。
 
 #### 7.5.1 贷款与限时危机（未来更新候选，当前不实现）
 
@@ -927,19 +927,19 @@ Archive {
 }
 
 WorkRecord { id, ip_id, offer_id, name, source, genre, scale, mode, investment_percent,
-             start_week, end_week, end_reason, forced, gate_completion_permille,
-             quality{dims{六维}, mean}, quality_score, rating,
+             start_week, end_week, end_reason, status, forced, aborted_week, gate_completion_permille,
+             quality{dims{六维}, mean}, quality_score, rating, penalty_paid,
              commercial_revenue, bd_gross, bd_revenue, committee_pool, investor_share, company_received,
-             finance_summary{contract_received, investment_paid, commercial_share, bd_revenue,
+             finance_summary{contract_received, contract_refund, investment_paid, commercial_share, bd_revenue,
                              success_reward, penalty, costs{}, total_costs, profit},
              channel_breakdown[], episodes[{id, quality}], team[{id, name, role}], rules_status }
 ```
 
-以上是当前 runtime 已冻结并输出的 28 字段载荷。`episode_count/occurrence_issues/commercial_rank/episode_summary/committee_snapshot/major_events` 属于未来扩展，尚未实现，不得伪装成当前字段。履历保留单集质量摘要而不保留全部工作项：`episodes[{id, quality}]` + 六维质量 + 团队快照足以支持分集复盘，同时避免存档随工作项数量线性膨胀。
+以上是当前 runtime 已冻结并输出的 31 字段载荷。`episode_count/occurrence_issues/commercial_rank/episode_summary/committee_snapshot/major_events` 属于未来扩展，尚未实现，不得伪装成当前字段。履历保留单集质量摘要而不保留全部工作项：`episodes[{id, quality}]` + 六维质量 + 团队快照足以支持分集复盘，同时避免存档随工作项数量线性膨胀。
 
 **写入时机与来源**
 - 来源链固定为 `OfferSnapshot.ip_id → Project.ip_id → WorkRecord.ip_id → Archive.series`；不按标题猜测续作，不恢复线性 `previous_work_id`。
-- completed/deadline/company_closed 交付结算时，WorkRecord 与 Series 在同一次状态提交中写入；aborted 不归档。
+- completed/deadline/company_closed 交付结算时，WorkRecord 与 Series 在同一次状态提交中写入；aborted 保留 WorkRecord 与 Finance 履历，但不写 Series。
 - 首次带 IP 交付创建 Series 并冻结 title；同 IP 续作只追加 works 并推进 last_week。不同 IP 即使同名也不合并。
 
 **不变式**
@@ -947,7 +947,7 @@ WorkRecord { id, ip_id, offer_id, name, source, genre, scale, mode, investment_p
 - WorkRecord.id 全局唯一、作品按交付周追加；Series.ip_id 唯一，works 引用存在且 IP 一致、仅归属一个系列、按交付周追加，last_week 等于最后交付周。
 - 带 ip_id 的作品必须且只能归属一个系列；series.works 允许分支，不要求线性。
 - channel_breakdown 满足 Σrevenue=commercial_revenue、Σcompany_received=commercial_share，并精确对账 BD、委员会池与投资者所得。
-- finance_summary.profit=contract_received+commercial_share+success_reward-investment_paid-total_costs；penalty 已计入 costs 时不重复扣除。
+- finance_summary.profit=contract_received-contract_refund+commercial_share+success_reward-investment_paid-total_costs；penalty 已计入 costs 时不重复扣除。
 
 ### 7.7 跨领域引用规则
 
@@ -1265,7 +1265,7 @@ advance_week → §22 八阶段原子结算
 6. Archive：同次原子追加 WorkRecord（单集质量摘要、团队快照、渠道对账）与 Series 作品引用
 7. Partnership：委员会 closed，关系值更新
 8. Company：声望变更（唯一入口，写日志）
-9. Project：status=settled，清空员工归属，释放临时人员，未完成外包置 failed
+9. Project：status=settled，清空员工归属，释放临时人员，删除该项目未完成外包合同并释放产能
 ```
 
 **顺序敏感点**：先算收入再入账，再写 Archive，最后改声望——这样任何一步失败都不会出现"有记录无收入"或"有声望无记录"。
@@ -1477,7 +1477,7 @@ SaveRecord { version: 4, savedAt: ISO8601, rules_version, state: GameState }
 | 内核性质 | allocation | 同一输入任意打乱项目顺序，结果逐字段相同；员工一周只出现一次；产能不超卖；分派顺序符合「门槛 → 阶段 → 方针 → id」 |
 | 制作图 | 工作项依赖 | 依赖图无环；跨容器依赖合法（公共→单集）；门槛达成即解锁、未达成不解锁；达到门槛后仍可继续完善且不重复解锁；**蓝图样例通过 `validate:blueprint`，五类破坏用例均被拒绝** |
 | 磨合 | 判定与扣减（工作项粒度） | 接手**已开工工作项**触发一次；接手**未开工工作项**不触发，即使同集其他项已有进度；同集不同项之间不误判；员工继续自己参与过的项不重复触发；只扣工作量不改质量；扣减不超过该项本周产出；**经历危机后恢复生产不因停工触发磨合** |
-| 交付 | deliver_work | 门槛未达被拒绝；达标后当次提交完成结算、周数不变；交付后该项目不再产出；员工归属清空、外包置 failed；收入可用于当周预检 |
+| 交付 | deliver_work | 门槛未达被拒绝；达标后当次提交完成结算、周数不变；交付后该项目不再产出；员工归属清空、删除未完成外包合同；收入可用于当周预检 |
 | 领域单元 | 各领域命令 | 守卫拒绝时状态不变；不变式在每次命令后成立 |
 | 结算集成 | 13 阶段 | 步骤 7 注入失败 → 状态与结算前完全一致（哈希相等） |
 | 财务恒等 | Finance | 余额 = 期初 + Σ流水；同一笔不入两类；项目归因之和 = 公司净变化 − 期间外成本；正常经营状态不得出现负余额 |
