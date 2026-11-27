@@ -186,6 +186,7 @@ bool instantiate(const Json& blueprint, const std::string& work_id, int opened_w
         item.work_total = raw.value("work_total", 0);
         item.deliver_at = raw.value("deliver_at", 1000);
         item.outsourceable = raw.value("outsourceable", false);
+        item.quality_weight_permille = raw.value("quality_weight_permille", 0);
         for (const auto& dep : raw.value("deps", Json::array())) {
             if (dep.is_string()) item.deps.push_back(map_dep(dep.get<std::string>(), std::string{}));
         }
@@ -223,6 +224,7 @@ bool instantiate(const Json& blueprint, const std::string& work_id, int opened_w
             item.deliver_at = raw.value("deliver_at", 1000);
             item.is_gate = raw.value("is_gate", false);
             item.outsourceable = raw.value("outsourceable", false);
+            item.quality_weight_permille = raw.value("quality_weight_permille", 0);
             for (const auto& dep : raw.value("deps", Json::array())) {
                 if (dep.is_string()) item.deps.push_back(map_dep(dep.get<std::string>(), prefix));
             }
@@ -354,13 +356,13 @@ GameState decode_state(const Json& request) {
     }
     const auto require_item = [&require](const Json& item) {
         for (const char* key : {"id", "key", "ability", "work_total", "work_done", "deliver_at", "deps",
-                                "is_gate", "outsourceable", "quality", "contributors"}) {
+                                "is_gate", "outsourceable", "quality_weight_permille", "quality", "contributors"}) {
             require(item, key, "item");
         }
         for (const char* key : {"id", "key", "ability"}) {
             if (!item.at(key).is_string()) throw Json::type_error::create(302, "item." + std::string(key) + " 必须是字符串", nullptr);
         }
-        for (const char* key : {"work_total", "work_done", "deliver_at"}) {
+        for (const char* key : {"work_total", "work_done", "deliver_at", "quality_weight_permille"}) {
             if (!item.at(key).is_number_integer()) throw Json::type_error::create(302, "item." + std::string(key) + " 必须是整数", nullptr);
         }
         if (!item.at("is_gate").is_boolean() || !item.at("outsourceable").is_boolean() ||
@@ -1713,8 +1715,18 @@ std::vector<std::string> validate(const GameState& state) {
             if (item.work_done == 0 && !item.contributors.empty()) {
                 error("INV-12 未开工工作项不能有参与者: " + item.id);
             }
+            if (item.quality_weight_permille < 0 || item.quality_weight_permille > 1000) {
+                error("INV-01 quality_weight_permille 越界: " + item.id);
+            }
         };
-        for (const auto& item : work.common.items) check_item(item);
+        // INV-30：全片质量权重。公共层与单集各自成组，Σcommon + Σepisode = 1000‰，
+        // 每个单集的权重和必须相同——否则作品质量会随"先做哪集"漂移（DEC-STAFF-008）。
+        int common_weight = 0;
+        for (const auto& item : work.common.items) {
+            check_item(item);
+            common_weight += item.quality_weight_permille;
+        }
+        int episode_weight = -1;
 
         for (const auto& episode : work.episodes) {
             if (episode.stages.size() != static_cast<std::size_t>(kStageCount)) {
@@ -1737,6 +1749,19 @@ std::vector<std::string> validate(const GameState& state) {
                 }
             }
             if (gate_count == 0) error("INV-07 单集缺少门槛项: " + work.id + "/" + episode.id);
+            int episode_sum = 0;
+            for (const auto& stage : episode.stages) {
+                for (const auto& item : stage.items) episode_sum += item.quality_weight_permille;
+            }
+            if (episode_weight < 0) {
+                episode_weight = episode_sum;
+            } else if (episode_sum != episode_weight) {
+                error("INV-30 单集质量权重和不一致: " + work.id + "/" + episode.id);
+            }
+        }
+        if (episode_weight <= 0) error("INV-30 单集质量权重必须为正: " + work.id);
+        if (common_weight + episode_weight != 1000) {
+            error("INV-30 公共层与单集质量权重合计必须为 1000‰: " + work.id);
         }
 
         // 计划取值与定向目标（非法枚举会让排序静默退回默认行为，必须在这里拦住）
@@ -2355,6 +2380,18 @@ struct SettlementOutcome {
     Json report = Json::object();
 };
 
+// 工作项所属阶段 key：外包的维度权重按阶段 + 驱动能力取，与社内同一条表。
+std::string stage_key_of(const Project& work, const std::string& item_id) {
+    for (const auto& episode : work.episodes) {
+        for (const auto& stage : episode.stages) {
+            for (const auto& item : stage.items) {
+                if (item.id == item_id) return stage.key;
+            }
+        }
+    }
+    return std::string{};
+}
+
 int outsource_roll_permille(std::uint32_t seed, int week, const std::string& contract_id) {
     const std::uint32_t roll = kernel::draw(seed, week, kernel::Stream::production,
                                             kernel::hash_text(contract_id), kernel::hash_text("outsource_tick"));
@@ -2427,6 +2464,7 @@ void advance_outsourcing(GameState& state, int week) {
             std::int64_t amount;
             std::int64_t remainder;
             bool capped;
+            int supplier_quality;
         };
         std::vector<Share> shares;
         __int128 total_weight = 0;
@@ -2437,7 +2475,15 @@ void advance_outsourcing(GameState& state, int week) {
             const auto desired = std::min({remaining, contract->at("weekly_cap").get<std::int64_t>(),
                                            static_cast<std::int64_t>(item->remaining())});
             if (desired <= 0) continue;
-            shares.push_back(Share{contract, remaining, desired, 0, 0, false});
+            int supplier_quality = 0;
+            for (const auto& candidate : state.suppliers) {
+                if (candidate.is_object() &&
+                    candidate.value("id", std::string{}) == contract->at("supplier_id").get<std::string>()) {
+                    supplier_quality = candidate.value("quality", 0);
+                    break;
+                }
+            }
+            shares.push_back(Share{contract, remaining, desired, 0, 0, false, supplier_quality});
             total_weight += remaining;
             total_desired += desired;
         }
@@ -2477,10 +2523,18 @@ void advance_outsourcing(GameState& state, int week) {
             ++share->amount;
             --leftover;
         }
+        // 外包交付同样要写质量：供应商 quality 作为样本，通道与社内同构。
+        // 不写质量会让"72% 的活由协力完成"在作品分里完全消失，v0.5 的质量线就永远够不到。
+        const std::string stage_key = stage_key_of(*owner, item_id);
+        const auto caps = kernel::quality_caps(*owner, *item);
         for (auto& share : shares) {
             if (share.amount <= 0) continue;
             share.contract->at("work_done") = share.contract->at("work_done").get<std::int64_t>() + share.amount;
             item->work_done += static_cast<int>(share.amount);
+            if (share.supplier_quality > 0) {
+                kernel::apply_outsourced_quality(*item, share.supplier_quality, state.seed, week, stage_key,
+                                                 share.contract->at("id").get<std::string>(), caps);
+            }
         }
     }
 

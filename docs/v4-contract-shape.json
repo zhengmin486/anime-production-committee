@@ -552,7 +552,8 @@
       "INV-24",
       "INV-25",
       "INV-27",
-      "INV-29"
+      "INV-29",
+      "INV-30"
     ],
     "declared_total": 29,
     "source": "packages/game-core/src/v4/runtime.cpp"
@@ -1265,6 +1266,7 @@
       "key",
       "outsourceable",
       "quality",
+      "quality_weight_permille",
       "work_done",
       "work_total"
     ],
@@ -1295,6 +1297,7 @@
       "key",
       "outsourceable",
       "quality",
+      "quality_weight_permille",
       "work_done",
       "work_total"
     ],

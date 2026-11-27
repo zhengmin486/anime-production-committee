@@ -149,6 +149,16 @@ int quality_sample(const Staff& staff, const std::string& ability, std::uint32_t
     return clamp(base + fit + static_cast<int>(jitter) - 5, 0, kQualityMax);
 }
 
+// 工作项是否已经形成过质量。首次接触会把整项基准铺到六维，
+// 之后每周只精修一个维度——否则一集十来个工作项各被碰一次后，
+// 六维里只有一两维有值，作品分被摊成 1/6，永远够不到 Q_min。
+bool item_exposed(const WorkItem& item) {
+    for (int i = 0; i < kDimensionCount; ++i) {
+        if (item.quality.dims[static_cast<std::size_t>(i)] > 0) return true;
+    }
+    return false;
+}
+
 // 按权重抽取维度：700/300 真的按 7:3，不是"在非零维度里等概率"。
 int weighted_dimension(const std::array<int, kDimensionCount>& weights, int roll) {
     for (int i = 0; i < kDimensionCount; ++i) {
@@ -272,6 +282,39 @@ std::array<int, kDimensionCount> dimension_weights(const std::string& stage_key,
     return weights;
 }
 
+int apply_outsourced_quality(WorkItem& item, int supplier_quality, std::uint32_t seed, int week,
+                             const std::string& stage_key, const std::string& contract_id,
+                             const std::array<int, kDimensionCount>& caps) {
+    const auto weights = dimension_weights(stage_key, item.ability);
+    int total_weight = 0;
+    for (int i = 0; i < kDimensionCount; ++i) total_weight += std::max(weights[static_cast<std::size_t>(i)], 0);
+    if (total_weight <= 0) return 0;
+
+    const std::uint32_t purpose = hash_text(contract_id);
+    const int roll = static_cast<int>(draw_below(seed, week, Stream::quality, purpose, 0,
+                                                 static_cast<std::uint32_t>(total_weight)));
+    const int dim = weighted_dimension(weights, roll);
+    if (dim < 0) return 0;
+
+    const std::uint32_t jitter =
+        draw_below(seed, week, Stream::quality, purpose, static_cast<std::uint32_t>(dim + 1), 11);
+    const int sample = clamp(supplier_quality + static_cast<int>(jitter) - 5, 0, kQualityMax);
+    if (!item_exposed(item)) {
+        int gain = 0;
+        for (int i = 0; i < kDimensionCount; ++i) {
+            const int seeded = clamp(sample, 0, std::min(caps[static_cast<std::size_t>(i)], kQualityMax));
+            item.quality.dims[static_cast<std::size_t>(i)] = seeded;
+            gain += seeded;
+        }
+        return gain;
+    }
+    const int before = item.quality.dims[static_cast<std::size_t>(dim)];
+    const int after = clamp(before + (sample - before) * kQualityApproach / 1000, 0,
+                            std::min(caps[static_cast<std::size_t>(dim)], kQualityMax));
+    item.quality.dims[static_cast<std::size_t>(dim)] = after;
+    return after - before;
+}
+
 ProductionResult apply_production(WorkItem& item, const Staff& staff, int points, bool hands_over,
                                   std::uint32_t seed, int week, const std::string& stage_key,
                                   const std::array<int, kDimensionCount>& caps) {
@@ -305,11 +348,19 @@ ProductionResult apply_production(WorkItem& item, const Staff& staff, int points
     if (dim < 0) return result;
 
     const int sample = quality_sample(staff, item.ability, seed, week, purpose, dim);
+    if (!item_exposed(item)) {
+        // 首次接触：整项基准 = 本次样本（逐维受依赖上限约束）
+        for (int i = 0; i < kDimensionCount; ++i) {
+            const int seeded = clamp(sample, 0, std::min(caps[static_cast<std::size_t>(i)], kQualityMax));
+            item.quality.dims[static_cast<std::size_t>(i)] = seeded;
+            result.quality_by_dim[static_cast<std::size_t>(i)] = seeded;
+            result.quality_gain += seeded;
+        }
+        return result;
+    }
     const int before = item.quality.dims[static_cast<std::size_t>(dim)];
-    int after = before <= 0
-                    ? sample
-                    : before + (sample - before) * kQualityApproach / 1000;
-    after = clamp(after, 0, std::min(caps[static_cast<std::size_t>(dim)], kQualityMax));
+    const int after = clamp(before + (sample - before) * kQualityApproach / 1000, 0,
+                            std::min(caps[static_cast<std::size_t>(dim)], kQualityMax));
     item.quality.dims[static_cast<std::size_t>(dim)] = after;
     result.quality_by_dim[static_cast<std::size_t>(dim)] = after - before;
     result.quality_gain = after - before;
@@ -369,15 +420,21 @@ int mean_of(const std::array<int, kDimensionCount>& dims) {
 
 }  // namespace
 
-AggregatedQuality aggregate_stage(const EpisodeStage& stage) {
+
+AggregatedQuality aggregate_episode(const Episode& episode) {
     AggregatedQuality result;
+    // DEC-STAFF-008：单集内按工作项的 quality_weight_permille 加权，不再按阶段等权。
+    // 权重由蓝图给出并在 validate 里保证每集合计相同，所以"先做哪一集"不影响单集分。
     int weight_total = 0;
-    for (const auto& item : stage.items) {
-        const int weight = std::max(item.work_total, 0);
-        weight_total += weight;
-        for (int i = 0; i < kDimensionCount; ++i) {
-            result.dims[static_cast<std::size_t>(i)] +=
-                item.quality.dims[static_cast<std::size_t>(i)] * weight;
+    for (const auto& stage : episode.stages) {
+        for (const auto& item : stage.items) {
+            const int weight = std::max(item.quality_weight_permille, 0);
+            if (weight == 0) continue;
+            weight_total += weight;
+            for (int i = 0; i < kDimensionCount; ++i) {
+                result.dims[static_cast<std::size_t>(i)] +=
+                    item.quality.dims[static_cast<std::size_t>(i)] * weight;
+            }
         }
     }
     if (weight_total > 0) {
@@ -390,38 +447,45 @@ AggregatedQuality aggregate_stage(const EpisodeStage& stage) {
     return result;
 }
 
-AggregatedQuality aggregate_episode(const Episode& episode) {
-    AggregatedQuality result;
-    // M1 用阶段等权；六阶段模板权重属于内容配置，等平衡阶段再定
-    if (episode.stages.empty()) return result;
-    for (const auto& stage : episode.stages) {
-        const auto stage_quality = aggregate_stage(stage);
-        for (int i = 0; i < kDimensionCount; ++i) {
-            result.dims[static_cast<std::size_t>(i)] += stage_quality.dims[static_cast<std::size_t>(i)];
-        }
-    }
-    const int count = static_cast<int>(episode.stages.size());
-    for (int i = 0; i < kDimensionCount; ++i) {
-        result.dims[static_cast<std::size_t>(i)] =
-            (result.dims[static_cast<std::size_t>(i)] + count / 2) / count;
-    }
-    result.mean = mean_of(result.dims);
-    return result;
-}
-
 AggregatedQuality aggregate_work(const Project& work) {
     AggregatedQuality result;
     if (work.episodes.empty()) return result;
+    // 公共层与单集层各自归一到 1000‰，再按层权重合成：
+    // 作品 = 公共层 × W_common + 单集均分 × W_episode（DEC-STAFF-008 的 20% / 80%）。
+    // 层权重取自蓝图：Σcommon 与 每集 Σepisode，validate 保证两者之和为 1000‰。
+    int common_weight = 0;
+    std::array<int, kDimensionCount> common_dims{};
+    for (const auto& item : work.common.items) {
+        const int weight = std::max(item.quality_weight_permille, 0);
+        if (weight == 0) continue;
+        common_weight += weight;
+        for (int i = 0; i < kDimensionCount; ++i) {
+            common_dims[static_cast<std::size_t>(i)] +=
+                item.quality.dims[static_cast<std::size_t>(i)] * weight;
+        }
+    }
+    int episode_weight = 0;
+    std::array<int, kDimensionCount> episode_dims{};
     for (const auto& episode : work.episodes) {
         const auto episode_quality = aggregate_episode(episode);
         for (int i = 0; i < kDimensionCount; ++i) {
-            result.dims[static_cast<std::size_t>(i)] += episode_quality.dims[static_cast<std::size_t>(i)];
+            episode_dims[static_cast<std::size_t>(i)] += episode_quality.dims[static_cast<std::size_t>(i)];
         }
+    }
+    for (const auto& stage : work.episodes.front().stages) {
+        for (const auto& item : stage.items) episode_weight += std::max(item.quality_weight_permille, 0);
     }
     const int count = static_cast<int>(work.episodes.size());
     for (int i = 0; i < kDimensionCount; ++i) {
+        const int episode_mean = (episode_dims[static_cast<std::size_t>(i)] + count / 2) / count;
+        const int common_normalized =
+            common_weight > 0 ? (common_dims[static_cast<std::size_t>(i)] + common_weight / 2) / common_weight : 0;
+        const int total_weight = common_weight + episode_weight;
         result.dims[static_cast<std::size_t>(i)] =
-            (result.dims[static_cast<std::size_t>(i)] + count / 2) / count;
+            total_weight > 0
+                ? (common_normalized * common_weight + episode_mean * episode_weight + total_weight / 2) /
+                      total_weight
+                : 0;
     }
     result.mean = mean_of(result.dims);
     return result;

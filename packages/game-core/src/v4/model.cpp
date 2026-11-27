@@ -184,6 +184,7 @@ void to_json(Json& j, const WorkItem& value) {
              {"deps", value.deps},
              {"is_gate", value.is_gate},
              {"outsourceable", value.outsourceable},
+             {"quality_weight_permille", value.quality_weight_permille},
              {"quality", dims_to_json(value.quality.dims)},
              {"contributors", value.contributors}};
 }
@@ -198,6 +199,7 @@ void from_json(const Json& j, WorkItem& value) {
     value.deps = strings_from_json(j.value("deps", Json::array()));
     value.is_gate = j.value("is_gate", false);
     value.outsourceable = j.value("outsourceable", false);
+    value.quality_weight_permille = j.value("quality_weight_permille", 0);
     value.quality.dims = dims_from_json(j.value("quality", Json::object()));
     value.contributors = strings_from_json(j.value("contributors", Json::array()));
 }

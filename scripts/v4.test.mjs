@@ -25,14 +25,14 @@ const tiny = {
   scale: 'short',
   episode_count: 1,
   work_unit: 'centi_staff_week',
-  common: [{ key: 'series_comp', name: '系列构成', ability: 'planning', work_total: 100, deliver_at: 1000, deps: [] }],
+  common: [{ key: 'series_comp', name: '系列构成', ability: 'planning', work_total: 100, deliver_at: 1000, deps: [], quality_weight_permille: 200 }],
   episode: [
-    { key: 'script', stage: 'content_design', name: '脚本', ability: 'planning', work_total: 100, deliver_at: 1000, deps: [] },
-    { key: 'storyboard', stage: 'storyboard_key_animation', name: '分镜', ability: 'direction', work_total: 100, deliver_at: 1000, deps: ['script'] },
-    { key: 'inbetween', stage: 'animation', name: '动画', ability: 'animation', work_total: 100, deliver_at: 1000, deps: ['storyboard'], outsourceable: true },
-    { key: 'background', stage: 'art_visual', name: '背景', ability: 'drawing', work_total: 100, deliver_at: 1000, deps: ['storyboard'] },
-    { key: 'composite', stage: 'photography_editing', name: '摄影', ability: 'postproduction', work_total: 100, deliver_at: 1000, deps: ['inbetween', 'background'] },
-    { key: 'master', stage: 'sound_delivery', name: '母版', ability: 'postproduction', work_total: 100, deliver_at: 1000, is_gate: true, deps: ['composite'] }
+    { key: 'script', stage: 'content_design', name: '脚本', ability: 'planning', work_total: 100, deliver_at: 1000, deps: [], quality_weight_permille: 140 },
+    { key: 'storyboard', stage: 'storyboard_key_animation', name: '分镜', ability: 'direction', work_total: 100, deliver_at: 1000, deps: ['script'], quality_weight_permille: 140 },
+    { key: 'inbetween', stage: 'animation', name: '动画', ability: 'animation', work_total: 100, deliver_at: 1000, deps: ['storyboard'], outsourceable: true, quality_weight_permille: 140 },
+    { key: 'background', stage: 'art_visual', name: '背景', ability: 'drawing', work_total: 100, deliver_at: 1000, deps: ['storyboard'], quality_weight_permille: 140 },
+    { key: 'composite', stage: 'photography_editing', name: '摄影', ability: 'postproduction', work_total: 100, deliver_at: 1000, deps: ['inbetween', 'background'], quality_weight_permille: 140 },
+    { key: 'master', stage: 'sound_delivery', name: '母版', ability: 'postproduction', work_total: 100, deliver_at: 1000, is_gate: true, deps: ['composite'], quality_weight_permille: 100 }
   ]
 }
 
@@ -137,16 +137,15 @@ test('首周产出与独立手算逐项一致', () => {
     staff_post: 0
   })
 
-  // 质量是评级，不是点数换算：公共项按能力落到 story，脚本只允许 story/direction。
+  // 质量是评级：首次接触把整项基准铺满六维，之后每次投入只精修一个维度。
   // 旧公式（点数 × ability_q）会得到 58 / 62；新模型下质量与点数无关，由人和随机决定。
-  const commonDims = Object.entries(common.quality).filter(([, value]) => value > 0)
-  assert.equal(commonDims.length, 1, '公共项本周只写入一个质量维度')
-  assert.equal(commonDims[0][0], 'story', '公共制作按 planning 落到 story')
-  assert.ok(commonDims[0][1] >= 0 && commonDims[0][1] <= 105, '质量是 0..105 的评级')
+  const commonDims = Object.values(common.quality)
+  assert.equal(commonDims.filter((value) => value > 0).length, 6, '首次接触应铺满六维')
+  assert.ok(commonDims.every((value) => value >= 0 && value <= 105), '质量是 0..105 的评级')
 
-  const scriptDims = Object.entries(script.quality).filter(([, value]) => value > 0)
-  assert.ok(scriptDims.length >= 1 && scriptDims.length <= 2, '脚本只应落在 content_design 的两个维度')
-  for (const [dim] of scriptDims) assert.ok(['story', 'direction'].includes(dim), `意外维度 ${dim}`)
+  const scriptDims = Object.values(script.quality)
+  assert.equal(scriptDims.filter((value) => value > 0).length, 6, '脚本同样先铺满六维')
+  assert.ok(new Set(scriptDims).size <= 2, '第二笔投入最多只精修一个维度')
 
   // 周结算同时记账：四人工资 786000 + 运营 30000 + 制作 60000 = 876000
   assert.equal(advanced.report.funds.costs.salary, 786000)
@@ -164,7 +163,7 @@ test('首周产出与独立手算逐项一致', () => {
   const aggregated = advanced.report.works[0].quality
   const aggregatedSum = Object.values(aggregated.dims).reduce((sum, value) => sum + value, 0)
   assert.ok(aggregatedSum > 0, '作品层质量不应为空')
-  assert.ok(Object.values(aggregated.dims).filter((value) => value > 0).length <= 2, '只有脚本产出了质量')
+  assert.equal(Object.values(aggregated.dims).filter((value) => value > 0).length, 6, '公共与脚本都产出了六维质量')
   assert.equal(aggregated.mean, Math.round(aggregatedSum / 6))
 
   const fatigue = Object.fromEntries(advanced.state.staff.map((member) => [member.id, member.fatigue]))
@@ -356,7 +355,7 @@ test('门槛优先级高于质量取向（回归：已过门槛的项不得吸�
   const big = {
     ...tiny,
     id: 'test_gate_priority',
-    common: [{ key: 'series_comp', name: '系列构成', ability: 'planning', work_total: 1000, deliver_at: 150, deps: [] }]
+    common: [{ key: 'series_comp', name: '系列构成', ability: 'planning', work_total: 1000, deliver_at: 150, deps: [], quality_weight_permille: 200 }]
   }
   for (const focus of ['quality', 'schedule', 'cost']) {
     let state = ok('initialize', { seed: 7 }).state
@@ -633,14 +632,13 @@ test('随机性进入制作结果：换 seed 改变质量落维，同 seed 可�
     }
     const advanced = ok('advance_week', { state })
     const script = findItem(advanced.state, 'work_01', 'ep01.script')
-    const dim = Object.entries(script.quality).find(([, value]) => value > 0)?.[0]
-    return { dim, hash: ok('hash_state', { state: advanced.state }).hash }
+    return { quality: { ...script.quality }, hash: ok('hash_state', { state: advanced.state }).hash }
   }
   const first = run(21)
   assert.deepEqual(run(21), first, '同 seed 必须逐字段复现')
-  const dims = new Set()
-  for (let seed = 0; seed < 12; seed++) dims.add(run(seed).dim)
-  assert.ok(dims.size > 1, '不同 seed 应落到不同质量维度，否则随机性没有进入结果')
+  const variants = new Set()
+  for (let seed = 0; seed < 12; seed++) variants.add(JSON.stringify(run(seed).quality))
+  assert.ok(variants.size > 1, '不同 seed 应产出不同质量，否则随机性没有进入结果')
 })
 
 // ---- 2026-11-25 复审修正：质量模型、不变式、输入边界 ----
@@ -665,7 +663,7 @@ function singleItemBlueprint(workTotal, overrides = {}) {
   return {
     ...tiny,
     id: `single_${workTotal}`,
-    common: [{ key: 'series_comp', name: '系列构成', ability: 'planning', work_total: workTotal, deliver_at: 1000, deps: [] }],
+    common: [{ key: 'series_comp', name: '系列构成', ability: 'planning', work_total: workTotal, deliver_at: 1000, deps: [], quality_weight_permille: 200 }],
     ...overrides
   }
 }
@@ -721,8 +719,9 @@ test('质量：未开工为 0，部分完成是评级，完成后不越界', () 
   state = ok('advance_week', { state }).state
   const partial = findItem(state, 'work_01', 'common.series_comp')
   assert.ok(partial.work_done > 0 && partial.work_done < partial.work_total, '第一周应为部分完成')
-  const partialQuality = Object.values(partial.quality).reduce((sum, value) => sum + value, 0)
-  assert.ok(partialQuality > 0 && partialQuality <= 100, '部分完成时质量应是 0..100 的评级')
+  const partialDims = Object.values(partial.quality)
+  assert.ok(partialDims.some((value) => value > 0), '部分完成时应已形成质量')
+  assert.ok(partialDims.every((value) => value >= 0 && value <= 100), '部分完成时每维应是 0..100 的评级')
 
   // 同一员工跨专业投入按 800‰ 折算，需要几周才能做满；逐周确认质量始终是评级。
   for (let guard = 0; guard < 6; guard++) {
@@ -741,16 +740,51 @@ test('质量：维度权重按 700/300 生效', () => {
     let state = ok('initialize', { seed }).state
     state = ok('instantiate_work', { state, blueprint: tiny, work_id: 'work_01', duration_weeks: 26 }).state
     state = ok('set_plan', { state, work_id: 'work_01', plan: { target: { kind: 'episode', id: 'ep01' } } }).state
+    // 先给一个统一基准，这样"本周精修了哪一维"可以被观察（首次接触会铺满六维并掩盖抽样）
+    for (const item of allItems(state, 'work_01')) {
+      for (const dim of Object.keys(item.quality)) item.quality[dim] = 40
+    }
     state = assign(state, 'staff_dir')
     const advanced = ok('advance_week', { state })
     const script = findItem(advanced.state, 'work_01', 'ep01.script')
-    const dims = Object.entries(script.quality).filter(([, value]) => value > 0).map(([dim]) => dim)
-    assert.equal(dims.length, 1, `seed=${seed} 应只写入一个维度`)
+    const dims = Object.entries(script.quality).filter(([, value]) => value !== 40).map(([dim]) => dim)
+    assert.equal(dims.length, 1, `seed=${seed} 应只精修一个维度`)
     counts[dims[0]] += 1
   }
   assert.ok(counts.direction > 0, `direction 也应能出现：${JSON.stringify(counts)}`)
   assert.ok(counts.story >= 20, `700‰ 权重下 story 至少应占一半：${JSON.stringify(counts)}`)
   assert.ok(counts.story > counts.direction, `story 应多于 direction：${JSON.stringify(counts)}`)
+})
+
+test('质量：全片按公共 200‰ / 单集 800‰ 合成，单集内按工作项权重', () => {
+  const meanOf = (mutate) => {
+    let state = ok('initialize', { seed: 11 }).state
+    state = ok('instantiate_work', { state, blueprint: tiny, work_id: 'work_01', duration_weeks: 26 }).state
+    const work = state.works[0]
+    for (const item of allItems(state, 'work_01')) {
+      item.work_done = item.work_total   // 全部完成，避免本周产能改变质量
+      for (const dim of Object.keys(item.quality)) item.quality[dim] = 0
+    }
+    mutate(work)
+    state = assign(state, 'staff_ka')
+    const advanced = ok('advance_week', { state })
+    return advanced.report.works[0].quality.mean
+  }
+  const commonOnly = meanOf((work) => {
+    for (const item of work.common.items) for (const dim of Object.keys(item.quality)) item.quality[dim] = 100
+  })
+  const episodeOnly = meanOf((work) => {
+    for (const episode of work.episodes) for (const stage of episode.stages) {
+      for (const item of stage.items) for (const dim of Object.keys(item.quality)) item.quality[dim] = 100
+    }
+  })
+  const oneWeight = meanOf((work) => {
+    const item = work.episodes[0].stages.flatMap((stage) => stage.items).find((entry) => entry.key === 'inbetween')
+    for (const dim of Object.keys(item.quality)) item.quality[dim] = 100
+  })
+  assert.equal(commonOnly, 20, '公共层 200‰ 全 100 分应只贡献 20 分')
+  assert.equal(episodeOnly, 80, '单集层 800‰ 全 100 分应贡献 80 分')
+  assert.equal(oneWeight, 14, '单集内单个 140‰ 工作项满分应贡献 14 分')
 })
 
 test('质量：公共制作通过依赖上限影响下游与作品层', () => {
@@ -1378,6 +1412,12 @@ test('事件结算：选项 cost 与 funds 效果同周入账时账本 id 不冲
 
 function completeWork(state, workId, quality = 80, gatesOnly = false) {
   const work = state.works.find((entry) => entry.id === workId)
+  // 公共层现在参与全片质量（200‰），夹具也要给它质量，否则作品分被 0 拉低。
+  if (!gatesOnly) {
+    for (const item of work.common.items) {
+      for (const dim of Object.keys(item.quality)) item.quality[dim] = quality
+    }
+  }
   for (const episode of work.episodes) {
     for (const stage of episode.stages) {
       for (const item of stage.items) {
@@ -2390,6 +2430,29 @@ test('外包返工不得把已开工工作项扣成 0（INV-12 回归）', () =>
   assert.equal(findItem(result.state, 'work_01', 'ep01.inbetween').work_done, 1)
   assert.equal(result.state.contracts[0].work_done, 1)
   assert.equal(result.report.works[0].items.find((entry) => entry.item_id === item.id).points, -1)
+})
+
+test('外包周交付写入质量：样本来自供应商 quality，并受依赖上限约束', () => {
+  // 案例 A：上游分镜质量 100 → 上限 100，供应商 70 分的样本应原样写入（65–75 区间）
+  const build = (upstreamQuality) => {
+    const state = outsourceTickState('contract_quality', 100)
+    const upstream = findItem(state, 'work_01', 'ep01.storyboard')
+    upstream.work_done = upstream.work_total
+    for (const dim of Object.keys(upstream.quality)) upstream.quality[dim] = upstreamQuality
+    findItem(state, 'work_01', 'ep01.inbetween').work_done = 0
+    return state
+  }
+  const high = ok('advance_week', { state: build(100) })
+  const highItem = findItem(high.state, 'work_01', 'ep01.inbetween')
+  const highDims = Object.values(highItem.quality)
+  assert.equal(highDims.filter((value) => value > 0).length, 6, '首次接触铺满六维')
+  assert.ok(highDims.every((value) => value >= 65 && value <= 75), `供应商 70 分应落 65–75：${JSON.stringify(highDims)}`)
+
+  // 案例 B：上游质量 0 → 上限 40，供应商再高也压不破这条线
+  const low = ok('advance_week', { state: build(0) })
+  const lowItem = findItem(low.state, 'work_01', 'ep01.inbetween')
+  const lowDims = Object.values(lowItem.quality)
+  assert.ok(lowDims.every((value) => value === 40), `依赖质量 0 时上限为 40：${JSON.stringify(lowDims)}`)
 })
 
 test('外包周结算：同项按剩余需求比例、最大余数及 weekly_cap 分配', () => {
@@ -4081,6 +4144,9 @@ function runTvTenEpisode(seed) {
     outsourcePoints: metrics.outsourcePoints,
     outsourceSpend: metrics.outsourceSpend,
     outsource_by_item: Object.fromEntries(Object.entries(outsourceByItem).filter(([, value]) => value.inhouse > 0)),
+    quality_mean: state.archive.works[0]?.quality?.mean ?? null,
+    quality_score: state.archive.works[0]?.quality_score ?? null,
+    rating: state.archive.works[0]?.rating ?? null,
     events: metrics.events,
     weekly: metrics.weekly,
     weeks: metrics.weeks
@@ -4140,6 +4206,10 @@ test('M2 v0.5：固定 seed 真实推进十集、事件、外包、交付、Fina
   assert.deepEqual(first.state.contracts, [])
 
   const record = first.state.archive.works[0]
+  // v0.5 基线质量：权重制 + 外包质量的首次可复现锚点（全外包、四人混合派工）
+  assert.equal(first.diagnostics.quality_mean, 56, detail)
+  assert.equal(first.diagnostics.quality_score, 56, detail)
+  assert.equal(first.diagnostics.rating, 'C', detail)
   assert.equal(record.episodes.length, 10)
   assert.equal(record.start_week, 0)
   assert.equal(record.end_week, 52)

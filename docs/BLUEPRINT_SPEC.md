@@ -58,8 +58,11 @@
 | `deps` | 全部 | 依赖 key 数组；跨容器写 `common:<key>` |
 | `is_gate` | 仅单集项 | 是否为作品交付门槛项；至少一个，且建议 `deliver_at=1000` |
 | `outsourceable` | 全部，必填布尔 | 公共制作与 gate 必须为 false；只有 episode 非 gate 项可外包 |
+| `quality_weight_permille` | 全部，必填整数 | 全片质量权重，0–1000‰；`Σcommon + Σepisode = 1000‰`，且每个单集的权重和必须相同（DEC-STAFF-008） |
 
 `WorkItem.outsourceable` 在实例化时写入 Project，并随存档序列化；不能用阶段名或 gate 状态在运行时临时替代该字段。
+
+`WorkItem.quality_weight_permille` 决定这个工作项在"作品分"里占多大权重：公共层与单集层各自归一后再按层权重合成（v0.5 为公共 200‰ / 单集 800‰），所以单集数量变化不需要重写权重。实例化写入 Project 并随存档序列化，运行时不按阶段名硬编码权重。
 
 ### 2.2 阶段键（顺序固定）
 

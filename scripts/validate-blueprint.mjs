@@ -69,6 +69,9 @@ for (const [i, item] of doc.common.entries()) {
   if (!Array.isArray(item.deps)) fail(where, 'deps 必须是数组')
   if (typeof item.outsourceable !== 'boolean') fail(where, 'outsourceable 必须是布尔值')
   if (item.outsourceable !== false) fail(where, '公共制作不可外包')
+  if (!isInt(item.quality_weight_permille) || item.quality_weight_permille < 0 || item.quality_weight_permille > 1000) {
+    fail(where, 'quality_weight_permille 必须是 0–1000 的整数（全片质量权重，DEC-STAFF-008）')
+  }
   common.set(item.key, item)
 }
 
@@ -86,6 +89,9 @@ for (const [i, item] of doc.episode.entries()) {
   }
   if (!Array.isArray(item.deps)) fail(where, 'deps 必须是数组')
   if (typeof item.outsourceable !== 'boolean') fail(where, 'outsourceable 必须是布尔值')
+  if (!isInt(item.quality_weight_permille) || item.quality_weight_permille < 0 || item.quality_weight_permille > 1000) {
+    fail(where, 'quality_weight_permille 必须是 0–1000 的整数（全片质量权重，DEC-STAFF-008）')
+  }
   if (item.is_gate === true && item.outsourceable === true) fail(where, '交付门槛不可外包')
   if (item.is_gate === true && item.deliver_at !== 1000) {
     warn(where, `门槛项建议 deliver_at=1000（当前 ${item.deliver_at}），否则作品可在未完成时交付`)
@@ -94,6 +100,15 @@ for (const [i, item] of doc.episode.entries()) {
 }
 
 if (errors.length > 0) report()
+
+// ---------- 全片质量权重（DEC-STAFF-008）----------
+const commonWeight = doc.common.reduce((sum, item) => sum + (item.quality_weight_permille ?? 0), 0)
+const episodeWeight = doc.episode.reduce((sum, item) => sum + (item.quality_weight_permille ?? 0), 0)
+if (commonWeight <= 0) fail('common', '公共层质量权重必须为正：公共制作参与全片质量分')
+if (episodeWeight <= 0) fail('episode', '单集质量权重必须为正')
+if (commonWeight + episodeWeight !== 1000) {
+  fail('root', `公共层(${commonWeight}‰) + 单集(${episodeWeight}‰) 必须等于 1000‰`)
+}
 
 if (doc.id === 'tv_standard') {
   const commonTotal = doc.common.reduce((sum, item) => sum + item.work_total, 0)
@@ -105,6 +120,8 @@ if (doc.id === 'tv_standard') {
   if (episodeTotal !== 2100) fail('episode', `v0.5 单集必须为 2100 点，当前 ${episodeTotal}`)
   if (coreTotal !== 580) fail('episode', `v0.5 单集不可外包必须为 580 点，当前 ${coreTotal}`)
   if (outsourceTotal !== 1520) fail('episode', `v0.5 单集可外包必须为 1520 点，当前 ${outsourceTotal}`)
+  if (commonWeight !== 200) fail('common', `v0.5 公共层质量权重必须为 200‰，当前 ${commonWeight}‰`)
+  if (episodeWeight !== 800) fail('episode', `v0.5 单集质量权重必须为 800‰，当前 ${episodeWeight}‰`)
 }
 
 // ---------- 阶段覆盖 ----------
@@ -305,6 +322,7 @@ console.log(`单集工作项: ${doc.episode.length} 个, ${episodeWork} 点 (${(
 console.log(`公共制作项: ${doc.common.length} 个, ${commonWork} 点 (${(commonWork / POINTS_PER_STAFF_WEEK).toFixed(2)} 人周)`)
 console.log(`实例化后: ${doc.episode.length * doc.episode_count + doc.common.length} 个工作项, ${perInstance} 点 (${(perInstance / POINTS_PER_STAFF_WEEK).toFixed(1)} 人周)`)
 console.log(`公共制作占总量: ${((commonWork / perInstance) * 100).toFixed(1)}%`)
+console.log(`全片质量权重: 公共 ${commonWeight}‰ / 单集 ${episodeWeight}‰`)
 console.log(`关键路径最重链: ${criticalPath} 点 (${(criticalPath / POINTS_PER_STAFF_WEEK).toFixed(2)} 人周，单集内)`)
 console.log('')
 console.log('阶段分布:')

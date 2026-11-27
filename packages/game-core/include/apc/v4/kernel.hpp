@@ -91,6 +91,14 @@ ProductionResult apply_production(WorkItem& item, const Staff& staff, int points
                                   std::uint32_t seed, int week, const std::string& stage_key,
                                   const std::array<int, kDimensionCount>& caps);
 
+// 外包协力质量：样本来自供应商 quality（不是员工能力），其余与社内同构——
+// 同一条维度权重抽取、同样的 30% 靠拢、同样的依赖上限。工作量本身仍不进质量公式。
+// 随机坐标取 (seed, week, quality, hash(contract_id), 维度+1)，与合同遍历顺序无关。
+// 返回该维度的质量增量（0 表示本周没有写入）。
+int apply_outsourced_quality(WorkItem& item, int supplier_quality, std::uint32_t seed, int week,
+                             const std::string& stage_key, const std::string& contract_id,
+                             const std::array<int, kDimensionCount>& caps);
+
 // ---- 磨合 ----
 bool is_supervisor(const std::string& role);
 // 判定是否"接手他人已开工的工作"：只看本周开始前的进度与参与者，避免同周多人协作被误判。
@@ -102,17 +110,16 @@ int supervisor_switch_penalty(int points);
 // 系数只在这里定义一次，避免 runtime 与内核各写一份而漂移。
 int team_capacity_permille(bool supervisor_switched_in);
 
-// ---- 质量聚合（§7.3.4）----
-// 工作项 → 阶段（按 work_total 加权）→ 单集（阶段等权）→ 作品（单集等权）。
+// ---- 质量聚合（§7.3.4 / DEC-STAFF-008）----
+// 工作项（按 quality_weight_permille 加权）→ 单集（层内归一）→ 作品（公共层 W_common + 单集均分 W_episode）。
 // 未接触过的工作项质量记 0，所以开发中期的作品质量会随覆盖面扩大而上升；
 // 这是"目前这部作品的质量档案"，不是"已投入部分的平均"。
-// 公共制作不单独出作品分：它通过依赖门槛与 quality_caps 影响下游工作项上限。
+// 公共制作现在参与作品分（v0.5 起 W_common=200‰），不再只通过依赖门槛间接影响。
 struct AggregatedQuality {
     std::array<int, kDimensionCount> dims{};
     int mean = 0;   // 六维均值，供总览显示；最终评级由 evaluation 决定（M5）
 };
 
-AggregatedQuality aggregate_stage(const EpisodeStage& stage);
 AggregatedQuality aggregate_episode(const Episode& episode);
 AggregatedQuality aggregate_work(const Project& work);
 

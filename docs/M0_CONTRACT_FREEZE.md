@@ -15,7 +15,7 @@
 | 类别 | 内容 | 变更成本 |
 | --- | --- | --- |
 | 状态形状 | `GameState v4` 的聚合、字段、可空规则 | 高：影响校验器、存档、全部读模型 |
-| 不变式 | INV-01 – INV-29 | 高：每条都要有对应断言 |
+| 不变式 | INV-01 – INV-30 | 高：每条都要有对应断言 |
 | 命令面 | 23 个命令的输入、守卫、错误码 | 中：影响 UI 与测试 |
 | 回执形状 | 命令返回键与 `advance_week.report` 键树 | 中：UI 按回执渲染（字段级见数据字典 §5） |
 | 错误码 | 16 个稳定码 | 中：UI 按码分支 |
@@ -80,7 +80,7 @@ SaveRecord { version: 4, savedAt: ISO8601, rules_version: string, state: GameSta
 | `Project` | id, offer, mode, investment, channels, opened_week, deadline_week, extension, status, supervisor_staff_id, common, episodes, plan | ip_id, committee_id, tv_service, delivery | committee 模式才可有 committee_id；episodes 长度 = offer.episode_count |
 | `CommonProduction` | id, items | — | items 非空 |
 | `EpisodeProduction` | id, index, stages | — | stages 恰 6 个，顺序固定；实现为 6 元素数组，每元素带 `key`（非 JSON 对象键），见数据字典 §3.4 |
-| `WorkItem` | id, key, ability, work_total, work_done, deliver_at, deps, is_gate, outsourceable, quality, contributors | — | 0 ≤ work_done ≤ work_total；deliver_at ∈ [1,1000]；outsourceable 为布尔值，公共制作与门槛项不得外包 |
+| `WorkItem` | id, key, ability, work_total, work_done, deliver_at, deps, is_gate, outsourceable, quality_weight_permille, quality, contributors | — | 0 ≤ work_done ≤ work_total；deliver_at ∈ [1,1000]；outsourceable 为布尔值，公共制作与门槛项不得外包；quality_weight_permille ∈ [0,1000] 且满足 INV-30 |
 | `WorkPlan` | intensity, focus, outsourcing, overtime, target | — | target 至多一个，引用本项目单集/阶段 |
 | `Supplier` | id, name, specialties, capacity_per_week, quality, speed, price_per_unit, reliability, unlocked_week | — | 目录只增不改 |
 | `OutsourceContract` | id, supplier_id, work_id, episode_id, item_id, ability, mode, work_total, work_done, weekly_cap, fee_total, fee_paid, signed_week, due_week, status | — | item 属于同一 work，且只能是 `outsourceable=true` 的 episode 非 gate 项；Σactive weekly_cap ≤ supplier 容量 |
@@ -129,6 +129,7 @@ SaveRecord { version: 4, savedAt: ISO8601, rules_version: string, state: GameSta
 | INV-27 | 每个 producing 项目恰有一名已通过任职资格校验并已分配到该项目的监督；资格仅在任职/分配时校验，任职后不因属性波动撤销；不得出现监督空缺或重复 | INVALID_STATE |
 | INV-28 | forced_rest 员工保留原项目归属与岗位占位但不贡献产能；满期次周开局恢复原岗位；监督已被替补时原监督回归不得顶替现任监督 | INVALID_STATE |
 | INV-29 | 限时事件触发周计入有效期；仅已查看且仍未处理的限时事件可随周推进倒计时，阶段 7 到期执行默认分支或一次性升级；升级事件再次超时执行违约分支；未查看事件阻塞推进；超时处理不得丢失其他项目 pending | INVALID_STATE |
+| INV-30 | 每个工作项 `quality_weight_permille ∈ [0,1000]`；`Σcommon + Σepisode = 1000‰`，且各单集的权重和必须相同（DEC-STAFF-008 的全片质量权重） | INVALID_STATE |
 
 ---
 

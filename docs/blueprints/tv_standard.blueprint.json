@@ -14,7 +14,8 @@
       "work_total": 1500,
       "deliver_at": 850,
       "deps": [],
-      "outsourceable": false
+      "outsourceable": false,
+      "quality_weight_permille": 63
     },
     {
       "key": "character_design",
@@ -23,7 +24,8 @@
       "work_total": 1000,
       "deliver_at": 900,
       "deps": [],
-      "outsourceable": false
+      "outsourceable": false,
+      "quality_weight_permille": 42
     },
     {
       "key": "art_setting",
@@ -32,7 +34,8 @@
       "work_total": 500,
       "deliver_at": 850,
       "deps": ["common:character_design"],
-      "outsourceable": false
+      "outsourceable": false,
+      "quality_weight_permille": 21
     },
     {
       "key": "op_ed",
@@ -41,7 +44,8 @@
       "work_total": 900,
       "deliver_at": 800,
       "deps": [],
-      "outsourceable": false
+      "outsourceable": false,
+      "quality_weight_permille": 37
     },
     {
       "key": "music",
@@ -50,7 +54,8 @@
       "work_total": 900,
       "deliver_at": 800,
       "deps": [],
-      "outsourceable": false
+      "outsourceable": false,
+      "quality_weight_permille": 37
     }
   ],
   "episode": [
@@ -62,7 +67,8 @@
       "work_total": 100,
       "deliver_at": 900,
       "deps": ["common:series_composition"],
-      "outsourceable": false
+      "outsourceable": false,
+      "quality_weight_permille": 100
     },
     {
       "key": "episode_direction_plan",
@@ -72,7 +78,8 @@
       "work_total": 100,
       "deliver_at": 850,
       "deps": ["script"],
-      "outsourceable": false
+      "outsourceable": false,
+      "quality_weight_permille": 100
     },
     {
       "key": "layout",
@@ -82,7 +89,8 @@
       "work_total": 260,
       "deliver_at": 850,
       "deps": ["episode_direction_plan", "common:character_design"],
-      "outsourceable": false
+      "outsourceable": false,
+      "quality_weight_permille": 119
     },
     {
       "key": "key_animation",
@@ -92,7 +100,8 @@
       "work_total": 220,
       "deliver_at": 900,
       "deps": ["layout"],
-      "outsourceable": true
+      "outsourceable": true,
+      "quality_weight_permille": 101
     },
     {
       "key": "inbetween",
@@ -102,7 +111,8 @@
       "work_total": 650,
       "deliver_at": 900,
       "deps": ["key_animation"],
-      "outsourceable": true
+      "outsourceable": true,
+      "quality_weight_permille": 100
     },
     {
       "key": "background",
@@ -112,7 +122,8 @@
       "work_total": 300,
       "deliver_at": 850,
       "deps": ["layout", "common:art_setting"],
-      "outsourceable": true
+      "outsourceable": true,
+      "quality_weight_permille": 130
     },
     {
       "key": "coloring",
@@ -122,7 +133,8 @@
       "work_total": 230,
       "deliver_at": 900,
       "deps": ["inbetween", "background"],
-      "outsourceable": true
+      "outsourceable": true,
+      "quality_weight_permille": 50
     },
     {
       "key": "composite",
@@ -132,7 +144,8 @@
       "work_total": 80,
       "deliver_at": 900,
       "deps": ["coloring"],
-      "outsourceable": false
+      "outsourceable": false,
+      "quality_weight_permille": 34
     },
     {
       "key": "sound_mix",
@@ -142,7 +155,8 @@
       "work_total": 20,
       "deliver_at": 900,
       "deps": ["composite"],
-      "outsourceable": false
+      "outsourceable": false,
+      "quality_weight_permille": 8
     },
     {
       "key": "editing",
@@ -152,7 +166,8 @@
       "work_total": 20,
       "deliver_at": 900,
       "deps": ["composite"],
-      "outsourceable": true
+      "outsourceable": true,
+      "quality_weight_permille": 8
     },
     {
       "key": "sound_control",
@@ -162,7 +177,8 @@
       "work_total": 100,
       "deliver_at": 900,
       "deps": ["editing", "sound_mix", "common:music"],
-      "outsourceable": true
+      "outsourceable": true,
+      "quality_weight_permille": 42
     },
     {
       "key": "delivery_master",
@@ -173,7 +189,8 @@
       "deliver_at": 1000,
       "deps": ["sound_control", "sound_mix", "common:op_ed"],
       "is_gate": true,
-      "outsourceable": false
+      "outsourceable": false,
+      "quality_weight_permille": 8
     }
   ]
 }
