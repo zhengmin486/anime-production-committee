@@ -153,6 +153,7 @@ GameState {
 - 四段修型与全片合成逐位镜像 `scripts/lib/quality-oracle.mjs`（规则样本）；`test:v4` 里有 C++ 与 Oracle 的对拍用例，改公式必须两边同时改。
 - `core_aesthetic` 标记该工作项是否为核心审美工序（DEC-STAFF-008）。只有标记为 true 且 `S_sup>70、Q_item>70` 的工作项参与核心审美奖励，奖励按核心审美权重加权平均后加到基础分，最高 +5 分。
 - `quality_weight_permille` 是全片质量权重（INV-30）。作品分 = 公共层 × Σcommon + 单集均分 × Σepisode，两层各自归一后再合成；v0.5 为 200‰ / 800‰，与 DEC-STAFF-008 的 20 / 20 / 22 / 10 / 13 / 5 / 10 对应。
+- 六维 `quality` 仅用于展示与逐维复盘；**作品验收与评级走 `Q_final`**（四段修型 + 权重加权 + 核心审美奖励），归档里 `quality.mean` 与 `quality_score` 因此可以不同，两者不是同一把尺。
 - 质量写入语义：**首次接触**把整项基准铺满六维（样本以能力或供应商 quality 为准，逐维受依赖上限约束），之后每次投入只精修一个维度（700/300 加权抽取、30% 靠拢）。外包交付同样写质量，样本取 `Supplier.quality`，不写会让"多数工作量由协力完成"在作品分里消失。
 - `contributors` 是员工 id 字符串数组；`deps` 是工作项 id 字符串数组。
 - `WorkItem.ability` 是能力名字符串，不是下标。
