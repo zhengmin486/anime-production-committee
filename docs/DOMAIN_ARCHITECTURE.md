@@ -776,7 +776,8 @@ WorkPlan.target: null
 ```text
 可交付（全部 is_gate 项 delivered）
   ⇒ 玩家可 deliver_work：当次提交内完成交付结算，立即停止生产
-  ⇒ 或继续投入直到 deadline_week；截止周生产与外包交付完成后自动结算
+  ⇒ 或继续投入直到 deadline_week − 1（最后一个生产周）；该周生产与外包交付完成后，
+    结算记在 deadline_week 名下自动完成
 不可交付 且 已结算周达到 deadline_week
   ⇒ 强制交付：按当前完成度结算，扣罚与声望损失
 ```

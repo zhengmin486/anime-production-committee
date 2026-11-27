@@ -117,6 +117,10 @@ GameState {
 
 **v0.5 开局基线**：现金 `opening_funds=balance=14,000,000`，核心编制 4。当前名册为 `staff_dir`（林监督，周薪 238,000）、`staff_ka`（陈原画，208,000）、`staff_anim`（许动画，170,000）、`staff_post`（周摄影，170,000），周薪合计 786,000。对应能力锚点为 S=75/70/60/60；S 到六维 `abilities` 的正式映射仍未冻结，当前六维夹具值不得宣称为该映射结论。任一在任监督的执行预算按普通预算的 50% 计算，与监督换项目的团队系数独立叠乘。
 
+**疲劳与士气在 v0.5 没有机械后果**：DEC-STAFF-008 的产能只读 `abilities`（S_eff），`fatigue`/`morale` 仍每周记账、仍可在事件里被修改、仍出现在周回执 `report.staff[]`，但不参与产能也不参与质量。它们何时、以何种方式接回（质量抖动 / 事件权重 / 红灯阈值）尚未裁决，因此事件卡文案与前端不得暗示"疲劳会拖慢产量"。
+
+**S_eff 值域缺口**：DEC-STAFF-008 声明能力输入域为 30–100 且越界属于非法状态；当前 `kernel::capacity_permille` 对 S_eff < 30 仍做线性外推（招聘生成会产出低能力候选，非主能力 5–45），既未判红也未截断。该项缺口登记在 #53，实现前不得当作已收口。
+
 ### 3.3 `Project`
 
 实测键：`channels, committee_id, common, deadline_week, delivery, episodes, extension, id, investment, ip_id, mode, offer, opened_week, plan, status, supervisor_staff_id, tv_service`。
@@ -170,6 +174,8 @@ GameState {
 | `entries[]` 形状 | `实现` | `{id, week, work_id\|null, category, amount, counterparty\|null, memo}` | 与 DA §7.5 一致 |
 
 **版本边界**：`loans/solvency` 是后续更新预留，不是废弃设计，也不是非法扩展。当前不产生 `Loan` 实体，不启用借款、利息、还款、`arrange_financing`、危机周推进或危机结算。`financing_in/loan_repayment/loan_interest` 属于未来机制候选，不是当前冻结账本类目。未来恢复融资必须作为独立规则变更重新评审。
+
+**周回执 `report.funds.costs` 口径**：固定四桶 `{salary, temporary, operations, production}`，与账本类目一一对应——核心员工周薪进 `salary`，项目临时员工周薪进 `temporary`，不再把临时工资并进 `salary`。刚性预检用的合计数是四桶之和；`delta` 仍取余额差，因此与四桶之和的差额只能来自结算、事件等非刚性收支。
 
 ### 3.7 `LedgerEntry.id` 与 `category` 约定
 
