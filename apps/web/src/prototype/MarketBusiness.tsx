@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { channelNames, deliveredEpisodes, heatNames, modeNames, offerOriginNames, projectCompletion, scaleNames, sourceNames } from './model'
+import { channelNames, heatNames, modeNames, offerOriginNames, scaleNames, sourceNames } from './model'
 import type { Project, PrototypeData } from './model'
 import { Bar, Panel, Stat, signedYuan, yuan } from './bits'
 import { FinanceArchive } from './FinanceArchive'
@@ -10,8 +10,7 @@ const projectStatusNames: Record<Project['status'], string> = {
   wrapping: '收尾与结算中',
 }
 
-export function MarketOffers({ data }: { data: PrototypeData }) {
-  const [selectedId, setSelectedId] = useState(data.marketOffers[0].id)
+export function MarketOffers({ data, selectedId, onSelect }: { data: PrototypeData; selectedId: string; onSelect: (id: string) => void }) {
   const selected = data.marketOffers.find((offer) => offer.id === selectedId) ?? data.marketOffers[0]
 
   return <div className="proto-screen">
@@ -19,7 +18,7 @@ export function MarketOffers({ data }: { data: PrototypeData }) {
       note="业务公告板与接待柜台共用这份企划信息。静态原型只展示承接条件，不创建新项目、不扣现金，也不推进周次。">
       <div className="market-offer-workspace">
         <div className="market-offer-selector" role="group" aria-label="企划列表">
-          {data.marketOffers.map((offer) => <button key={offer.id} className={offer.id === selected.id ? 'is-active' : ''} aria-pressed={offer.id === selected.id} onClick={() => setSelectedId(offer.id)}>
+          {data.marketOffers.map((offer) => <button key={offer.id} className={offer.id === selected.id ? 'is-active' : ''} aria-pressed={offer.id === selected.id} onClick={() => onSelect(offer.id)}>
             <span><strong>{offer.title}</strong><small>{offerOriginNames[offer.origin]} · {scaleNames[offer.scale]}</small></span>
             <b>{yuan(offer.budget)}</b>
           </button>)}
@@ -36,7 +35,8 @@ export function MarketOffers({ data }: { data: PrototypeData }) {
             <div><dt>声望门槛</dt><dd>{selected.minReputation}</dd></div>
             <div><dt>当前条件</dt><dd>{selected.blockedBy ?? '可进入承接评估'}</dd></div>
           </dl>
-          <button className="button primary" disabled>承接企划（原型）</button>
+          <button className="button primary" disabled aria-describedby="offer-action-reason">承接企划（原型）</button>
+          <p className="disabled-reason" id="offer-action-reason">不可用：F1 只评估企划，不创建项目、不扣现金，也不推进周次。{selected.blockedBy ? ` 当前条件：${selected.blockedBy}。` : ''}</p>
           <p className="proto-footnote">承接动作属于正式经营流程；本场景不新增独立市场模拟机制。</p>
         </article>
       </div>
@@ -54,11 +54,16 @@ export function MarketOffers({ data }: { data: PrototypeData }) {
 }
 
 export function ReleaseStatus({ data, onOpen }: { data: PrototypeData; onOpen: (projectId: string) => void }) {
+  const [filter, setFilter] = useState<'all' | 'producing' | 'delivered'>('all')
+  const projects = data.projects.filter((project) => filter === 'all' || (filter === 'delivered' ? project.deliveredEpisodeCount > 0 : project.status !== 'wrapping'))
   return <div className="proto-screen">
     <Panel eyebrow="RELEASE / 作品发行" title="作品发行情况与观众反馈" marks={['confirmed', 'sample']}
       note="发行显示屏汇总现有制作与交付数据；不在这里新增发行数值或自动结算。">
-      <div className="portfolio-grid">{data.projects.map((project) => {
-        const completion = projectCompletion(project)
+      <div className="filter-chips" role="group" aria-label="发行作品筛选">
+        {([['all', '全部作品'], ['producing', '在制作品'], ['delivered', '已有交付单集']] as const).map(([value, label]) => <button key={value} className={filter === value ? 'is-active' : ''} aria-pressed={filter === value} onClick={() => setFilter(value)}>{label}</button>)}
+      </div>
+      <div className="portfolio-grid">{projects.map((project) => {
+        const completion = project.completion
         return <article className="portfolio-card" key={project.id}>
           <p className="eyebrow">{scaleNames[project.scale]} · {modeNames[project.mode]}</p>
           <h3>{project.title}</h3>
@@ -66,13 +71,14 @@ export function ReleaseStatus({ data, onOpen }: { data: PrototypeData; onOpen: (
           <Bar value={completion} tone="neutral" />
           <dl className="portfolio-facts">
             <div><dt>完成度</dt><dd>{completion}%</dd></div>
-            <div><dt>已交付单集</dt><dd>{deliveredEpisodes(project)} / {project.episodeCount} 集</dd></div>
+            <div><dt>已交付单集</dt><dd>{project.deliveredEpisodeCount} / {project.episodeCount} 集</dd></div>
             <div><dt>截止周</dt><dd>第 {project.deadlineWeek} 周</dd></div>
             <div><dt>商业预估</dt><dd>{project.account.projectedCommercial}</dd></div>
           </dl>
           <button className="button secondary" onClick={() => onOpen(project.id)}>查看作品详情</button>
         </article>
       })}</div>
+      {projects.length === 0 && <p className="proto-inline-note">当前筛选下没有作品。</p>}
     </Panel>
 
     <Panel eyebrow="AUDIENCE / 已发行作品" title="观众与商业反馈" marks={['sample']}
