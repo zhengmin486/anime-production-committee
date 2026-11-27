@@ -31,14 +31,12 @@ std::uint32_t draw_below(std::uint32_t seed, int week, Stream stream, std::uint3
 std::uint32_t hash_text(const std::string& text);
 
 // ---- 产能 ----
-// 员工某能力方向上的周产能，单位千分比（1000 = 1 人周）。
+// 工序有效能力 S_eff 对应的周产能倍率，单位千分比。
 int capacity_permille(const Staff& staff, const std::string& ability);
-// 产能换算为工作点：1 人周 = 100 点。
+// 产能换算为工作点：1 人周 = 70 点。
 int points_from_capacity(int capacity_permille_value);
 // 员工主专业（由岗位推导，未知岗位按最高能力兜底）
 std::string staff_specialty(const Staff& staff);
-// 专业匹配系数：匹配 1000，不匹配 800
-int fit_permille(const Staff& staff, const std::string& ability);
 
 // ---- 分派 ----
 struct ItemAssignment {
@@ -48,7 +46,7 @@ struct ItemAssignment {
     std::string stage_key;       // 公共制作填空串
     std::string staff_id;
     std::string ability;         // 该工作项驱动能力
-    int points = 0;              // 本周投入该工作项的点数（已按专业匹配缩放）
+    int points = 0;              // 本周投入该工作项的点数（已受工序周产能上限约束）
 };
 
 struct ItemCandidate {
@@ -95,6 +93,18 @@ ProductionResult apply_production(WorkItem& item, const Staff& staff, int points
                                   std::uint32_t seed, int week, const std::string& stage_key,
                                   const std::array<int, kDimensionCount>& caps);
 
+// 外包协力质量：样本来自供应商 quality（不是员工能力），其余与社内同构——
+// 同一条维度权重抽取、同样的 30% 靠拢、同样的依赖上限。工作量本身仍不进质量公式。
+// 随机坐标取 (seed, week, quality, hash(contract_id), 维度+1)，与合同遍历顺序无关。
+// 返回该维度的质量增量（0 表示本周没有写入）。
+int apply_outsourced_quality(WorkItem& item, int supplier_quality, int points, std::uint32_t seed, int week,
+                             const std::string& stage_key, const std::string& contract_id,
+                             const std::array<int, kDimensionCount>& caps);
+
+void adjust_quality(Project& work, const std::string& stage_key, int delta);
+int add_work_points(Project& work, const std::string& stage_key, int points);
+void adjust_staff_condition(Staff& staff, int fatigue_delta, int morale_delta);
+
 // ---- 磨合 ----
 bool is_supervisor(const std::string& role);
 // 判定是否"接手他人已开工的工作"：只看本周开始前的进度与参与者，避免同周多人协作被误判。
@@ -106,19 +116,35 @@ int supervisor_switch_penalty(int points);
 // 系数只在这里定义一次，避免 runtime 与内核各写一份而漂移。
 int team_capacity_permille(bool supervisor_switched_in);
 
-// ---- 质量聚合（§7.3.4）----
-// 工作项 → 阶段（按 work_total 加权）→ 单集（阶段等权）→ 作品（单集等权）。
+// ---- 质量聚合（§7.3.4 / DEC-STAFF-008）----
+// 工作项（按 quality_weight_permille 加权）→ 单集（层内归一）→ 作品（公共层 W_common + 单集均分 W_episode）。
 // 未接触过的工作项质量记 0，所以开发中期的作品质量会随覆盖面扩大而上升；
 // 这是"目前这部作品的质量档案"，不是"已投入部分的平均"。
-// 公共制作不单独出作品分：它通过依赖门槛与 quality_caps 影响下游工作项上限。
+// 公共制作现在参与作品分（v0.5 起 W_common=200‰），不再只通过依赖门槛间接影响。
 struct AggregatedQuality {
     std::array<int, kDimensionCount> dims{};
     int mean = 0;   // 六维均值，供总览显示；最终评级由 evaluation 决定（M5）
 };
 
-AggregatedQuality aggregate_stage(const EpisodeStage& stage);
 AggregatedQuality aggregate_episode(const Episode& episode);
 AggregatedQuality aggregate_work(const Project& work);
+
+// ---- 全片最终质量（DEC-STAFF-008）----
+// 基础分 = Σ(全片质量权重 × Q_item)；核心审美奖励按核心审美权重加权平均后相加。
+// Q_item 取该工作项「已形成维度」的均值（Q_base/Q_sup/Q_cap/Q_ext_cap 尚未实现，见 DEC 状态）。
+// supervisor 为项目在任监督，null 时 S_sup 记 0（不产生奖励）。
+// 返回千分之一分精度；上限 105000（105 分），对接 quality_factor(105)=1040‰。
+int final_quality_milli(const Project& work, const Staff* supervisor);
+// 监督能力 S_sup（百分之一分精度）：天然监督系 70/30，转任系 50/25/25。
+int supervisor_ability_centi(const Staff& staff);
+
+// 工序有效能力 S_eff（百分之一分精度，DEC-STAFF-008）：
+// floor((85*S_primary + 3*Σ其他五维)/100)，不做中间截断。
+int effective_ability_centi(const Staff& staff, const std::string& ability);
+
+// 工作项最终质量 Q_item（千分之一分），按 DEC-STAFF-008 的四段修型：
+// Q_base（贡献加权）→ Q_sup（监督修型）→ Q_cap（主责上限）→ Q_ext_cap（协力木桶）取最小。
+int item_quality_milli(const WorkItem& item, std::int64_t supervisor_milli);
 
 // ---- 费用（周结算的强制成本，[PLACEHOLDER] 数值）----
 int64_t weekly_operations_cost();

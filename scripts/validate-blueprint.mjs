@@ -18,6 +18,7 @@ const SCALES = ['ova', 'short', 'tv', 'movie']
 const EPISODE_RANGE = { ova: [1, 1], short: [1, 3], tv: [1, 13], movie: [1, 1] }
 const KEY = /^[a-z][a-z0-9_]{1,39}$/
 const COMMON_PREFIX = 'common:'
+const POINTS_PER_STAFF_WEEK = 70
 
 const errors = []
 const warnings = []
@@ -42,7 +43,7 @@ if (!isText(doc.id) || !KEY.test(doc.id)) fail('root.id', '必须是小写 snake
 if (!SCALES.includes(doc.scale)) fail('root.scale', `必须是 ${SCALES.join('/')}`)
 if (!isInt(doc.episode_count) || doc.episode_count < 1) fail('root.episode_count', '必须是正整数')
 if (doc.work_unit !== 'centi_staff_week') {
-  fail('root.work_unit', '必须声明 work_unit=centi_staff_week（1 点 = 1/100 人周），否则 work_total 无法解读')
+  fail('root.work_unit', '必须声明冻结枚举 work_unit=centi_staff_week；当前 v0.5 runtime 按 1 人周 = 70 工作点换算')
 }
 if (Array.isArray(doc.common) === false || doc.common.length === 0) fail('root.common', '必须是非空数组')
 if (Array.isArray(doc.episode) === false || doc.episode.length === 0) fail('root.episode', '必须是非空数组')
@@ -66,6 +67,14 @@ for (const [i, item] of doc.common.entries()) {
     fail(where, 'deliver_at 必须是 1–1000 的整数（占 work_total 的千分比）')
   }
   if (!Array.isArray(item.deps)) fail(where, 'deps 必须是数组')
+  if (typeof item.outsourceable !== 'boolean') fail(where, 'outsourceable 必须是布尔值')
+  if (item.outsourceable !== false) fail(where, '公共制作不可外包')
+  if (!isInt(item.quality_weight_permille) || item.quality_weight_permille < 0 || item.quality_weight_permille > 1000) {
+    fail(where, 'quality_weight_permille 必须是 0–1000 的整数（全片质量权重，DEC-STAFF-008）')
+  }
+  if (typeof item.core_aesthetic !== 'boolean') {
+    fail(where, 'core_aesthetic 必须是布尔值（DEC-STAFF-008 核心审美工序）')
+  }
   common.set(item.key, item)
 }
 
@@ -82,6 +91,14 @@ for (const [i, item] of doc.episode.entries()) {
     fail(where, 'deliver_at 必须是 1–1000 的整数')
   }
   if (!Array.isArray(item.deps)) fail(where, 'deps 必须是数组')
+  if (typeof item.outsourceable !== 'boolean') fail(where, 'outsourceable 必须是布尔值')
+  if (!isInt(item.quality_weight_permille) || item.quality_weight_permille < 0 || item.quality_weight_permille > 1000) {
+    fail(where, 'quality_weight_permille 必须是 0–1000 的整数（全片质量权重，DEC-STAFF-008）')
+  }
+  if (typeof item.core_aesthetic !== 'boolean') {
+    fail(where, 'core_aesthetic 必须是布尔值（DEC-STAFF-008 核心审美工序）')
+  }
+  if (item.is_gate === true && item.outsourceable === true) fail(where, '交付门槛不可外包')
   if (item.is_gate === true && item.deliver_at !== 1000) {
     warn(where, `门槛项建议 deliver_at=1000（当前 ${item.deliver_at}），否则作品可在未完成时交付`)
   }
@@ -89,6 +106,29 @@ for (const [i, item] of doc.episode.entries()) {
 }
 
 if (errors.length > 0) report()
+
+// ---------- 全片质量权重（DEC-STAFF-008）----------
+const commonWeight = doc.common.reduce((sum, item) => sum + (item.quality_weight_permille ?? 0), 0)
+const episodeWeight = doc.episode.reduce((sum, item) => sum + (item.quality_weight_permille ?? 0), 0)
+if (commonWeight <= 0) fail('common', '公共层质量权重必须为正：公共制作参与全片质量分')
+if (episodeWeight <= 0) fail('episode', '单集质量权重必须为正')
+if (commonWeight + episodeWeight !== 1000) {
+  fail('root', `公共层(${commonWeight}‰) + 单集(${episodeWeight}‰) 必须等于 1000‰`)
+}
+
+if (doc.id === 'tv_standard') {
+  const commonTotal = doc.common.reduce((sum, item) => sum + item.work_total, 0)
+  const episodeTotal = doc.episode.reduce((sum, item) => sum + item.work_total, 0)
+  const coreTotal = doc.episode.filter((item) => !item.outsourceable).reduce((sum, item) => sum + item.work_total, 0)
+  const outsourceTotal = doc.episode.filter((item) => item.outsourceable).reduce((sum, item) => sum + item.work_total, 0)
+  if (doc.episode_count !== 10) fail('root.episode_count', 'v0.5 tv_standard 必须为 10 集')
+  if (commonTotal !== 4800) fail('common', `v0.5 公共制作必须为 4800 点，当前 ${commonTotal}`)
+  if (episodeTotal !== 2100) fail('episode', `v0.5 单集必须为 2100 点，当前 ${episodeTotal}`)
+  if (coreTotal !== 580) fail('episode', `v0.5 单集不可外包必须为 580 点，当前 ${coreTotal}`)
+  if (outsourceTotal !== 1520) fail('episode', `v0.5 单集可外包必须为 1520 点，当前 ${outsourceTotal}`)
+  if (commonWeight !== 200) fail('common', `v0.5 公共层质量权重必须为 200‰，当前 ${commonWeight}‰`)
+  if (episodeWeight !== 800) fail('episode', `v0.5 单集质量权重必须为 800‰，当前 ${episodeWeight}‰`)
+}
 
 // ---------- 阶段覆盖 ----------
 for (const stage of STAGES) {
@@ -248,22 +288,33 @@ const episodeWork = sum(doc.episode, 'work_total')
 const commonWork = sum(doc.common, 'work_total')
 const perInstance = episodeWork * doc.episode_count + commonWork
 
-// 关键路径（按工作量加权的依赖链长度）：取到每个节点为止的最长链
-const longestFrom = new Map()
-const walk = (key) => {
-  if (longestFrom.has(key)) return longestFrom.get(key)
-  const deps = key.startsWith(COMMON_PREFIX)
-    ? (commonDeps.get(key.slice(COMMON_PREFIX.length)) ?? []).map((d) => d)
-    : episodeDeps.get(key) ?? []
+// 公共图与单集图分别统计，避免把公共制作误算成单集工作量。
+const commonLongestFrom = new Map()
+const walkCommon = (key) => {
+  if (commonLongestFrom.has(key)) return commonLongestFrom.get(key)
   let best = 0
-  for (const dep of deps) {
-    const depWork = dep.startsWith(COMMON_PREFIX) ? common.get(dep.slice(COMMON_PREFIX.length)).work_total : episode.get(dep).work_total
-    best = Math.max(best, walk(dep) + depWork)
+  for (const dep of commonDeps.get(key) ?? []) {
+    const depKey = dep.slice(COMMON_PREFIX.length)
+    best = Math.max(best, walkCommon(depKey) + common.get(depKey).work_total)
   }
-  longestFrom.set(key, best)
+  commonLongestFrom.set(key, best)
   return best
 }
-const criticalPath = Math.max(...gates.map((g) => walk(g.key) + g.work_total))
+
+const episodeLongestFrom = new Map()
+const walkEpisode = (key) => {
+  if (episodeLongestFrom.has(key)) return episodeLongestFrom.get(key)
+  let best = 0
+  for (const dep of episodeDeps.get(key) ?? []) {
+    if (dep.startsWith(COMMON_PREFIX)) continue
+    best = Math.max(best, walkEpisode(dep) + episode.get(dep).work_total)
+  }
+  episodeLongestFrom.set(key, best)
+  return best
+}
+
+const commonCriticalPath = Math.max(...[...common.keys()].map((key) => walkCommon(key) + common.get(key).work_total))
+const criticalPath = Math.max(...gates.map((gate) => walkEpisode(gate.key) + gate.work_total))
 
 const perStage = STAGES.map((stage) => {
   const items = doc.episode.filter((item) => item.stage === stage)
@@ -273,11 +324,12 @@ const perStage = STAGES.map((stage) => {
 console.log(`蓝图: ${doc.id} (${doc.name ?? '-'})`)
 console.log(`规模: ${doc.scale} / ${doc.episode_count} 集`)
 console.log('')
-console.log(`单集工作项: ${doc.episode.length} 个, ${episodeWork} 点 (${(episodeWork / 100).toFixed(2)} 人周)`)
-console.log(`公共制作项: ${doc.common.length} 个, ${commonWork} 点 (${(commonWork / 100).toFixed(2)} 人周)`)
-console.log(`实例化后: ${doc.episode.length * doc.episode_count + doc.common.length} 个工作项, ${perInstance} 点 (${(perInstance / 100).toFixed(1)} 人周)`)
+console.log(`单集工作项: ${doc.episode.length} 个, ${episodeWork} 点 (${(episodeWork / POINTS_PER_STAFF_WEEK).toFixed(2)} 人周)`)
+console.log(`公共制作项: ${doc.common.length} 个, ${commonWork} 点 (${(commonWork / POINTS_PER_STAFF_WEEK).toFixed(2)} 人周)`)
+console.log(`实例化后: ${doc.episode.length * doc.episode_count + doc.common.length} 个工作项, ${perInstance} 点 (${(perInstance / POINTS_PER_STAFF_WEEK).toFixed(1)} 人周)`)
 console.log(`公共制作占总量: ${((commonWork / perInstance) * 100).toFixed(1)}%`)
-console.log(`关键路径最重链: ${criticalPath} 点 (${(criticalPath / 100).toFixed(2)} 人周，单集内)`)
+console.log(`全片质量权重: 公共 ${commonWeight}‰ / 单集 ${episodeWeight}‰`)
+console.log(`关键路径最重链: ${criticalPath} 点 (${(criticalPath / POINTS_PER_STAFF_WEEK).toFixed(2)} 人周，单集内)`)
 console.log('')
 console.log('阶段分布:')
 for (const row of perStage) {
@@ -286,12 +338,13 @@ for (const row of perStage) {
 console.log('')
 
 // ---------- 量级体检（只报警，不判定平衡） ----------
-if (episodeWork < 100) warn('scale', '单集工作量低于 1 人周，可能是量级写错或工作项过粗')
-if (episodeWork > 3000) warn('scale', '单集工作量超过 30 人周，请确认单位是否按 1/100 人周填写')
+if (episodeWork < POINTS_PER_STAFF_WEEK) warn('scale', '单集工作量低于 1 人周，可能是量级写错或工作项过粗')
+if (episodeWork > 30 * POINTS_PER_STAFF_WEEK) warn('scale', '单集工作量超过 30 人周，请确认工作点是否按当前 70 点/人周口径填写')
 if (commonWork / perInstance > 0.3) {
   warn('scale', `公共制作占比 ${((commonWork / perInstance) * 100).toFixed(1)}% 偏高，公共项通常应少于单集总量`)
 }
-if (criticalPath > episodeWork) fail('graph', '关键路径工作量超过单集总工作量，依赖链可能有环或重复计数')
+if (commonCriticalPath > commonWork) fail('graph', '公共制作关键路径工作量超过公共总工作量，依赖链可能有环或重复计数')
+if (criticalPath > episodeWork) fail('graph', '单集关键路径工作量超过单集总工作量，依赖链可能有环或重复计数')
 
 report()
 

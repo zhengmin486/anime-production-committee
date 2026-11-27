@@ -1,5 +1,5 @@
 import { describe, expect, expectTypeOf, it } from 'vitest'
-import { isCompanyResult, isV4Archive, isV4CompanyResult, isV4WorkRecord, isWorkRecord } from './gameV4'
+import { isCompanyResult, isV4Archive, isV4CompanyResult, isV4WorkRecord, isWorkRecord, V4_STAFF_ROLES } from './gameV4'
 import type { V4Archive, V4CompanyResult, V4WorkRecord } from './gameV4'
 import { isV4Market, isV4Offer, type V4Market } from './gameV4State'
 import { isCompanyResult as isV3CompanyResult, isWorkRecord as isV3WorkRecord } from './gameV3'
@@ -40,7 +40,8 @@ function work(): V4WorkRecord {
       tv_multiplier: 1000, agency_fee_permille: 0, gross: 100, net: 50, revenue: 100, company_received: 50, owner: 'company'
     }],
     episodes: [{ id: 'ep01', quality: { dims: { story: 70, direction: 70, drawing: 70, animation: 70, art: 70, sound: 70 }, mean: 70 } }],
-    team: [{ id: 'staff_dir', name: '导演', role: 'director' }], rules_status: 'placeholder'
+    team: [{ id: 'staff_dir', name: '导演', role: 'director' }],
+    outsourcing_summary: { contracts: 0, failed: 0, points: 0, spend: 0 }, rules_status: 'placeholder'
   }
 }
 
@@ -121,6 +122,24 @@ describe('v4 完整 WorkRecord 契约', () => {
     }
   })
 
+  it('quality_score 与 Q_final 同标尺接受 100/101/105，拒绝 106 并保持 JSON 往返', () => {
+    for (const qualityScore of [100, 101, 105]) {
+      const value = { ...work(), quality_score: qualityScore, rating: 'S' as const }
+      expect(isV4WorkRecord(value), String(qualityScore)).toBe(true)
+      expect(isV4WorkRecord(JSON.parse(JSON.stringify(value))), String(qualityScore)).toBe(true)
+    }
+    expect(isV4WorkRecord({ ...work(), quality_score: 106, rating: 'S' })).toBe(false)
+  })
+
+  it('channel quality_factor 接受至 1040 并保持边界 JSON 往返', () => {
+    for (const qualityFactor of [1000, 1010, 1040]) {
+      const value = changed(work(), 'channel_breakdown.0.quality_factor', qualityFactor)
+      expect(isV4WorkRecord(value), String(qualityFactor)).toBe(true)
+      expect(isV4WorkRecord(JSON.parse(JSON.stringify(value))), String(qualityFactor)).toBe(true)
+    }
+    expect(isV4WorkRecord(changed(work(), 'channel_breakdown.0.quality_factor', 1041))).toBe(false)
+  })
+
   it('校验质量均值、评级、合作比例、结束原因与唯一快照 id', () => {
     expect(isV4WorkRecord(changed(work(), 'quality.mean', 71))).toBe(false)
     expect(isV4WorkRecord(changed(work(), 'rating', 'A'))).toBe(false)
@@ -134,12 +153,16 @@ describe('v4 完整 WorkRecord 契约', () => {
     expect(isV4WorkRecord(changed(work(), 'start_week', 27))).toBe(false)
   })
 
-  it('接受旧岗位与八职业实际角色，仍拒绝未知角色', () => {
+  it('接受基础职业与八职业团队快照，拒绝未知角色', () => {
+    for (const role of V4_STAFF_ROLES) {
+      expect(isV4WorkRecord(changed(work(), 'team.0.role', role)), role).toBe(true)
+    }
     const value = work()
     value.team = ['director', '作画', '演出', '脚本', '摄影', '监督', '音乐', '声优', '美术']
       .map((role, index) => ({ id: `staff_${index}`, name: `成员 ${index}`, role: role as V4WorkRecord['team'][number]['role'] }))
     expect(isV4WorkRecord(value)).toBe(true)
     expect(isV4WorkRecord(changed(value, 'team.0.role', '主管'))).toBe(false)
+    expect(isV4WorkRecord(changed(work(), 'team.0.role', 'producer'))).toBe(false)
   })
 
   it('频道、公司所得与财务汇总精确对账', () => {
@@ -152,6 +175,16 @@ describe('v4 完整 WorkRecord 契约', () => {
     expect(isV4WorkRecord(changed(work(), 'finance_summary.total_costs', 101))).toBe(false)
     expect(isV4WorkRecord(changed(work(), 'finance_summary.profit', 949))).toBe(false)
     expect(isV4WorkRecord({ ...work(), channel_breakdown: [...work().channel_breakdown, ...work().channel_breakdown] })).toBe(false)
+  })
+
+  it('外包汇总必填且与成本对账', () => {
+    const value = work()
+    value.outsourcing_summary = { contracts: 2, failed: 1, points: 30, spend: 40 }
+    value.finance_summary.costs = { production: 60, outsourcing: 40 }
+    expect(isV4WorkRecord(value)).toBe(true)
+    expect(isV4WorkRecord(changed(value, 'outsourcing_summary.failed', 3))).toBe(false)
+    expect(isV4WorkRecord(changed(value, 'outsourcing_summary.points', -1))).toBe(false)
+    expect(isV4WorkRecord(changed(value, 'outsourcing_summary.spend', 41))).toBe(false)
   })
 
   it('接受委员会净池分配与 BD 公司所得并精确对账', () => {

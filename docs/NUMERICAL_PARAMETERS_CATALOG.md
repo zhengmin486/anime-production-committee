@@ -413,7 +413,7 @@
 
 **已确认：** 锁定期 2 周；提前 1 周提醒；接单时定金 100% 抵扣对应立项保证金或前期费用；逾期不退；同一企划终身最多锁定一次，不允许续锁。
 
-**已冻结：** 普通企划定金 5%、IP 上门企划 10%；计算基数为企划生成时固定的基础立项费用，不随后续预算调整变化。
+**已冻结：** 普通企划定金 5%、IP 上门企划 10%；DEC-PROD-006 的 TV-小另按 5.5% 分档。计算基数为企划生成时固定的基础立项费用，不随后续预算调整变化。`deposit_rate_permille` 与 `deposit_amount` 是生成时冻结的快照，适用于按矩阵分档的定金，不以统一 5% 覆盖 TV-小。
 
 **决定前应查阅：** [DECISION_LOG.md](DECISION_LOG.md)、[M0 契约](M0_CONTRACT_FREEZE.md)、[DESIGN_BACKLOG](DESIGN_BACKLOG_2026-11-25.md)、[#59 市场](https://github.com/zhengmin486/anime-production-committee/issues/59)。
 
@@ -813,11 +813,10 @@
 
 | 参数 | M1 当前临时值 | 使用位置/核查文件 |
 |---|---:|---|
-| 单人基础产能 | 1000 千分比 = 1 人周 | [M1 运行切片](M1_RUNTIME_SLICE.md)、[v4 内核](../packages/game-core/src/v4/kernel.cpp) |
-| 能力产能系数 | 500 + 能力 × 5 | 同上 |
-| 士气产能系数 | 600 + 士气 × 4 | 同上 |
-| 疲劳产能系数 | 1000 − 疲劳 × 4 | 同上 |
-| 工作点换算 | 1 人周 = 100 工作点 | [M1 运行切片](M1_RUNTIME_SLICE.md)、[v4 内核声明](../packages/game-core/include/apc/v4/kernel.hpp) |
+| 工序有效能力倍率 | 30≤S≤60：650 + ⌊(S−30)×350/30⌋；S>60：1000 + ⌊(S−60)×300/40⌋ | [DECISION_LOG](DECISION_LOG.md) DEC-STAFF-008、[v4 内核](../packages/game-core/src/v4/kernel.cpp) |
+| 工序有效能力 S_eff | ⌊(85×S_primary + 3×Σ其他5维)/100⌋ | 同上 |
+| 工作点换算 | 1 人周 = 70 工作点 | [v4 内核声明](../packages/game-core/include/apc/v4/kernel.hpp) |
+| M1 旧版产能系数（已停用） | 能力 500+5×、士气 600+4×、疲劳 1000−4×、适配 1000/800 | [M1 运行切片](M1_RUNTIME_SLICE.md)（历史记录）；v0.5 起不参与产能计算 |
 | M1 旧版不匹配适配系数 | 800/1000 | [M1 运行切片](M1_RUNTIME_SLICE.md)、[v4 内核](../packages/game-core/src/v4/kernel.cpp)；须与正式主责 100%、协力 60% 规则分开核验 |
 | 质量样本适配偏移 | ±4 | [M1 运行切片](M1_RUNTIME_SLICE.md)、[v4 内核](../packages/game-core/src/v4/kernel.cpp) |
 | 质量随机偏移 | -5 至 +5 | 同上 |

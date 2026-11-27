@@ -66,6 +66,8 @@
       "view_event"
     ],
     "positions": {
+      "hire_temporary": 8,
+      "sign_outsourcing": 9,
       "view_event": 22,
       "lock_offer": 23
     }
@@ -183,11 +185,6 @@
       "field": "facilities",
       "path": "state.company",
       "ref": "§3.1 / §14.7 阶段2 / §14.9"
-    },
-    {
-      "field": "episode_id",
-      "path": "state.events.pending[]",
-      "ref": "§3.8 / D-09"
     }
   ],
   "future_contract": {
@@ -282,11 +279,13 @@
             "partner_tv",
             "partner_stream"
           ],
-          "contract_budget": 1200000,
-          "deposit_basis": 1200000,
+          "contract_budget": 170000000,
+          "deposit_amount": 9350000,
+          "deposit_basis": 170000000,
           "deposit_paid": 0,
-          "duration_weeks": 26,
-          "episode_count": 12,
+          "deposit_rate_permille": 55,
+          "duration_weeks": 52,
+          "episode_count": 10,
           "expires_week": 3,
           "genre": "sf",
           "id": "offer_01",
@@ -300,7 +299,7 @@
           "scale": "tv",
           "source": "publisher",
           "style": "standard",
-          "target_quality": 70,
+          "target_quality": 65,
           "workload_scale_permille": 1000
         },
         {
@@ -326,11 +325,13 @@
             "partner_stream",
             "partner_pub"
           ],
-          "contract_budget": 900000,
-          "deposit_basis": 900000,
+          "contract_budget": 170000000,
+          "deposit_amount": 9350000,
+          "deposit_basis": 170000000,
           "deposit_paid": 0,
-          "duration_weeks": 24,
-          "episode_count": 12,
+          "deposit_rate_permille": 55,
+          "duration_weeks": 52,
+          "episode_count": 10,
           "expires_week": 3,
           "genre": "drama",
           "id": "offer_02",
@@ -371,11 +372,13 @@
             "partner_tv",
             "partner_pub"
           ],
-          "contract_budget": 1500000,
-          "deposit_basis": 1500000,
+          "contract_budget": 170000000,
+          "deposit_amount": 9350000,
+          "deposit_basis": 170000000,
           "deposit_paid": 0,
-          "duration_weeks": 30,
-          "episode_count": 12,
+          "deposit_rate_permille": 55,
+          "duration_weeks": 52,
+          "episode_count": 10,
           "expires_week": 3,
           "genre": "family",
           "id": "offer_03",
@@ -389,7 +392,7 @@
           "scale": "tv",
           "source": "studio",
           "style": "standard",
-          "target_quality": 75,
+          "target_quality": 65,
           "workload_scale_permille": 1000
         },
         {
@@ -414,11 +417,13 @@
           "committee_candidates": [
             "partner_stream"
           ],
-          "contract_budget": 700000,
-          "deposit_basis": 700000,
+          "contract_budget": 170000000,
+          "deposit_amount": 9350000,
+          "deposit_basis": 170000000,
           "deposit_paid": 0,
-          "duration_weeks": 20,
-          "episode_count": 12,
+          "deposit_rate_permille": 55,
+          "duration_weeks": 52,
+          "episode_count": 10,
           "expires_week": 3,
           "genre": "romance",
           "id": "offer_04",
@@ -432,7 +437,7 @@
           "scale": "tv",
           "source": "publisher",
           "style": "standard",
-          "target_quality": 60,
+          "target_quality": 65,
           "workload_scale_permille": 1000
         }
       ]
@@ -477,58 +482,82 @@
     ],
     "state.suppliers": [
       {
-        "capacity_per_week": 120,
-        "id": "supplier_draw",
-        "name": "曙光作画协力",
-        "price_per_unit": 4000,
-        "quality": 68,
-        "reliability": 82,
-        "speed": 80,
+        "capacity_per_week": 600,
+        "id": "supplier_genga",
+        "name": "东云作画",
+        "price_per_unit": 4200,
+        "quality": 72,
+        "reliability": 90,
+        "speed": 30,
         "specialties": [
-          "drawing",
+          "drawing"
+        ],
+        "unlocked_week": 0
+      },
+      {
+        "capacity_per_week": 500,
+        "id": "supplier_genga_sub",
+        "name": "三河作画",
+        "price_per_unit": 3600,
+        "quality": 62,
+        "reliability": 80,
+        "speed": 25,
+        "specialties": [
+          "drawing"
+        ],
+        "unlocked_week": 0
+      },
+      {
+        "capacity_per_week": 700,
+        "id": "supplier_douga",
+        "name": "白鲸中割",
+        "price_per_unit": 3200,
+        "quality": 58,
+        "reliability": 75,
+        "speed": 35,
+        "specialties": [
           "animation"
         ],
         "unlocked_week": 0
       },
       {
-        "capacity_per_week": 80,
-        "id": "supplier_post",
-        "name": "回声后期工作室",
-        "price_per_unit": 5000,
-        "quality": 74,
-        "reliability": 78,
-        "speed": 70,
+        "capacity_per_week": 300,
+        "id": "supplier_sound",
+        "name": "音匠 Studio",
+        "price_per_unit": 4600,
+        "quality": 75,
+        "reliability": 92,
+        "speed": 40,
         "specialties": [
           "postproduction"
         ],
         "unlocked_week": 0
       },
       {
-        "capacity_per_week": 60,
-        "id": "supplier_sound",
-        "name": "星音制作",
-        "price_per_unit": 4500,
-        "quality": 70,
-        "reliability": 86,
-        "speed": 65,
+        "capacity_per_week": 200,
+        "id": "supplier_edit",
+        "name": "剪辑工房",
+        "price_per_unit": 3800,
+        "quality": 68,
+        "reliability": 85,
+        "speed": 50,
         "specialties": [
-          "management"
-        ],
-        "unlocked_week": 0
-      },
-      {
-        "capacity_per_week": 40,
-        "id": "supplier_plan",
-        "name": "青叶企划社",
-        "price_per_unit": 5500,
-        "quality": 76,
-        "reliability": 90,
-        "speed": 60,
-        "specialties": [
-          "planning",
           "direction"
         ],
-        "unlocked_week": 12
+        "unlocked_week": 8
+      },
+      {
+        "capacity_per_week": 450,
+        "id": "supplier_douga_hi",
+        "name": "御影动画",
+        "price_per_unit": 4000,
+        "quality": 70,
+        "reliability": 88,
+        "speed": 30,
+        "specialties": [
+          "animation"
+        ],
+        "unlocked_week": 16
       }
     ],
     "state.works": []
@@ -591,9 +620,10 @@
       "INV-24",
       "INV-25",
       "INV-27",
-      "INV-29"
+      "INV-29",
+      "INV-30"
     ],
-    "declared_total": 29,
+    "declared_total": 30,
     "source": "packages/game-core/src/v4/runtime.cpp"
   },
   "ledger": {
@@ -618,10 +648,12 @@
       "events",
       "operations",
       "production",
-      "salary"
+      "salary",
+      "temporary"
     ],
     "id_prefixes": [
       "w{week}.salary.",
+      "w{week}.temporary.",
       "w{week}.operations",
       "w{week}.production.",
       "w{week}.event.",
@@ -655,6 +687,11 @@
       "target",
       "value"
     ],
+    "state.staff[].temporary_contract": [
+      "end_week",
+      "start_week",
+      "work_id"
+    ],
     "report.events.expired[]": [
       "automatic",
       "event_id",
@@ -679,6 +716,10 @@
       "penalty",
       "penalty_paid",
       "penalty_waived",
+      "q_final",
+      "q_min",
+      "quality_gap",
+      "quality_penalty",
       "quality_score",
       "rating",
       "rules_status",
@@ -740,6 +781,7 @@
       "mode",
       "name",
       "offer_id",
+      "outsourcing_summary",
       "penalty_paid",
       "quality",
       "quality_score",
@@ -780,6 +822,12 @@
       "drawing",
       "sound",
       "story"
+    ],
+    "state.archive.works[].outsourcing_summary": [
+      "contracts",
+      "failed",
+      "points",
+      "spend"
     ],
     "state.archive.works[].team[]": [
       "id",
@@ -842,8 +890,10 @@
       "committee_candidates",
       "contract_budget",
       "created_week",
+      "deposit_amount",
       "deposit_basis",
       "deposit_paid",
+      "deposit_rate_permille",
       "development_fee",
       "draft_status",
       "duration_weeks",
@@ -908,8 +958,10 @@
       "commercial_potential",
       "committee_candidates",
       "contract_budget",
+      "deposit_amount",
       "deposit_basis",
       "deposit_paid",
+      "deposit_rate_permille",
       "duration_weeks",
       "episode_count",
       "expires_week",
@@ -958,7 +1010,7 @@
     ]
   },
   "paths": {
-    "report": [
+        "report": [
       "events",
       "funds",
       "outsourcing",
@@ -985,10 +1037,14 @@
     "report.funds.costs": [
       "operations",
       "production",
-      "salary"
+      "salary",
+      "temporary"
     ],
     "report.outsourcing[]": [
+      "contract_id",
       "id",
+      "item_id",
+      "kind",
       "points",
       "result",
       "status",
@@ -1154,8 +1210,10 @@
       "commercial_potential",
       "committee_candidates",
       "contract_budget",
+      "deposit_amount",
       "deposit_basis",
       "deposit_paid",
+      "deposit_rate_permille",
       "duration_weeks",
       "episode_count",
       "expires_week",
@@ -1298,6 +1356,7 @@
       "channels",
       "committee_id",
       "common",
+      "contributor_snapshots",
       "deadline_week",
       "delivery",
       "episodes",
@@ -1317,15 +1376,28 @@
       "id",
       "items"
     ],
+    "state.works[].contributor_snapshots[]": [
+      "id",
+      "name",
+      "role"
+    ],
     "state.works[].common.items[]": [
       "ability",
       "contributors",
+      "core_aesthetic",
       "deliver_at",
       "deps",
+      "external_min_quality",
+      "external_points",
+      "external_quality_milli_sum",
       "id",
+      "in_house_ability_centi_sum",
+      "in_house_points",
       "is_gate",
       "key",
+      "outsourceable",
       "quality",
+      "quality_weight_permille",
       "work_done",
       "work_total"
     ],
@@ -1349,12 +1421,20 @@
     "state.works[].episodes[].stages[].items[]": [
       "ability",
       "contributors",
+      "core_aesthetic",
       "deliver_at",
       "deps",
+      "external_min_quality",
+      "external_points",
+      "external_quality_milli_sum",
       "id",
+      "in_house_ability_centi_sum",
+      "in_house_points",
       "is_gate",
       "key",
+      "outsourceable",
       "quality",
+      "quality_weight_permille",
       "work_done",
       "work_total"
     ],
@@ -1374,6 +1454,7 @@
       "target"
     ],
     "state.recruitment": [
+      "free_pool",
       "last_scout_week",
       "pity",
       "pool"
@@ -1382,12 +1463,17 @@
       "since_sr",
       "since_ssr"
     ],
-    "state.recruitment.pool[]": [
+        "state.recruitment.free_pool[]": [
       "expires_week",
       "origin",
       "staff"
     ],
-    "state.recruitment.pool[].staff": [
+"state.recruitment.pool[]": [
+      "expires_week",
+      "origin",
+      "staff"
+    ],
+        "state.recruitment.free_pool[].staff": [
       "abilities",
       "assignment_work_id",
       "departure_warning",
@@ -1406,7 +1492,26 @@
       "temporary_contract",
       "weekly_salary"
     ],
-    "state.recruitment.pool[].staff.abilities": [
+"state.recruitment.pool[].staff": [
+      "abilities",
+      "assignment_work_id",
+      "departure_warning",
+      "employment",
+      "experience",
+      "fatigue",
+      "id",
+      "last_participation",
+      "morale",
+      "name",
+      "potential",
+      "revealed_potential",
+      "role",
+      "signing_fee",
+      "talent_type",
+      "temporary_contract",
+      "weekly_salary"
+    ],
+        "state.recruitment.free_pool[].staff.abilities": [
       "animation",
       "direction",
       "drawing",
@@ -1414,7 +1519,7 @@
       "planning",
       "postproduction"
     ],
-    "state.recruitment.pool[].staff.experience": [
+"state.recruitment.pool[].staff.abilities": [
       "animation",
       "direction",
       "drawing",
@@ -1422,7 +1527,7 @@
       "planning",
       "postproduction"
     ],
-    "state.recruitment.pool[].staff.potential": [
+        "state.recruitment.free_pool[].staff.experience": [
       "animation",
       "direction",
       "drawing",
@@ -1430,7 +1535,39 @@
       "planning",
       "postproduction"
     ],
-    "state.recruitment.pool[].staff.revealed_potential": [
+"state.recruitment.pool[].staff.experience": [
+      "animation",
+      "direction",
+      "drawing",
+      "management",
+      "planning",
+      "postproduction"
+    ],
+        "state.recruitment.free_pool[].staff.potential": [
+      "animation",
+      "direction",
+      "drawing",
+      "management",
+      "planning",
+      "postproduction"
+    ],
+"state.recruitment.pool[].staff.potential": [
+      "animation",
+      "direction",
+      "drawing",
+      "management",
+      "planning",
+      "postproduction"
+    ],
+        "state.recruitment.free_pool[].staff.revealed_potential": [
+      "animation",
+      "direction",
+      "drawing",
+      "management",
+      "planning",
+      "postproduction"
+    ],
+"state.recruitment.pool[].staff.revealed_potential": [
       "animation",
       "direction",
       "drawing",
@@ -1510,6 +1647,7 @@
     ],
     "sign_outsourcing": [
       "contract_id",
+      "due_week",
       "fee_total",
       "state",
       "weekly_cap"
@@ -1540,11 +1678,6 @@
     ],
     "dismiss_staff": [
       "state"
-    ],
-    "lock_offer": [
-      "deposit_paid",
-      "offer_id",
-      "state"
     ]
   },
   "required_on_parse": [
@@ -1553,6 +1686,11 @@
     "state.archive.works",
     "state.archive.series",
     "state.archive.company_result",
+    "state.archive.works[].outsourcing_summary",
+    "state.archive.works[].outsourcing_summary.contracts",
+    "state.archive.works[].outsourcing_summary.failed",
+    "state.archive.works[].outsourcing_summary.points",
+    "state.archive.works[].outsourcing_summary.spend",
     "state.company",
     "state.staff",
     "state.suppliers",
@@ -1561,6 +1699,48 @@
     "state.committees",
     "state.works",
     "state.works[].supervisor_staff_id",
+    "state.works[].contributor_snapshots",
+    "state.works[].contributor_snapshots[].id",
+    "state.works[].contributor_snapshots[].name",
+    "state.works[].contributor_snapshots[].role",
+    "state.works[].common.items[]",
+    "state.works[].common.items[].id",
+    "state.works[].common.items[].key",
+    "state.works[].common.items[].ability",
+    "state.works[].common.items[].work_total",
+    "state.works[].common.items[].work_done",
+    "state.works[].common.items[].deliver_at",
+    "state.works[].common.items[].deps",
+    "state.works[].common.items[].is_gate",
+    "state.works[].common.items[].outsourceable",
+    "state.works[].common.items[].quality_weight_permille",
+    "state.works[].common.items[].core_aesthetic",
+    "state.works[].common.items[].in_house_points",
+    "state.works[].common.items[].in_house_ability_centi_sum",
+    "state.works[].common.items[].external_points",
+    "state.works[].common.items[].external_quality_milli_sum",
+    "state.works[].common.items[].external_min_quality",
+    "state.works[].common.items[].quality",
+    "state.works[].common.items[].contributors",
+    "state.works[].episodes[].stages[].items[]",
+    "state.works[].episodes[].stages[].items[].id",
+    "state.works[].episodes[].stages[].items[].key",
+    "state.works[].episodes[].stages[].items[].ability",
+    "state.works[].episodes[].stages[].items[].work_total",
+    "state.works[].episodes[].stages[].items[].work_done",
+    "state.works[].episodes[].stages[].items[].deliver_at",
+    "state.works[].episodes[].stages[].items[].deps",
+    "state.works[].episodes[].stages[].items[].is_gate",
+    "state.works[].episodes[].stages[].items[].outsourceable",
+    "state.works[].episodes[].stages[].items[].quality_weight_permille",
+    "state.works[].episodes[].stages[].items[].core_aesthetic",
+    "state.works[].episodes[].stages[].items[].in_house_points",
+    "state.works[].episodes[].stages[].items[].in_house_ability_centi_sum",
+    "state.works[].episodes[].stages[].items[].external_points",
+    "state.works[].episodes[].stages[].items[].external_quality_milli_sum",
+    "state.works[].episodes[].stages[].items[].external_min_quality",
+    "state.works[].episodes[].stages[].items[].quality",
+    "state.works[].episodes[].stages[].items[].contributors",
     "state.finance",
     "state.finance.loans",
     "state.finance.solvency",
@@ -1579,6 +1759,7 @@
     "state.events.pending[].viewed",
     "state.recruitment",
     "state.recruitment.pool",
+    "state.recruitment.free_pool",
     "state.recruitment.pity",
     "state.recruitment.last_scout_week",
     "state.recruitment.pity.since_sr",
@@ -1587,8 +1768,71 @@
     "state.recruitment.pool[].expires_week",
     "state.recruitment.pool[].origin",
     "state.recruitment.pool[].staff.signing_fee",
-    "state.recruitment.pool[].staff.weekly_salary"
+    "state.recruitment.pool[].staff.weekly_salary",
+    "state.recruitment.free_pool[].staff",
+    "state.recruitment.free_pool[].expires_week",
+    "state.recruitment.free_pool[].origin",
+    "state.recruitment.free_pool[].staff.signing_fee",
+    "state.recruitment.free_pool[].staff.weekly_salary"
   ],
+  "numeric_ranges": {
+    "quality_dimensions": {
+      "paths": [
+        "state.works[].common.items[].quality",
+        "state.works[].episodes[].stages[].items[].quality",
+        "state.archive.works[].quality.dims",
+        "state.archive.works[].episodes[].quality.dims"
+      ],
+      "type": "integer",
+      "min": 0,
+      "max": 105
+    },
+    "quality_score": {
+      "paths": [
+        "state.archive.works[].quality_score",
+        "report.settlements[].quality_score"
+      ],
+      "type": "integer",
+      "min": 0,
+      "max": 105
+    },
+    "q_final": {
+      "paths": [
+        "report.settlements[].q_final"
+      ],
+      "type": "integer",
+      "min": 0,
+      "max": 105
+    },
+    "q_min": {
+      "paths": [
+        "report.settlements[].q_min"
+      ],
+      "type": "integer",
+      "min": 0,
+      "max": 105
+    },
+    "channel_quality_factor_permille": {
+      "paths": [
+        "state.archive.works[].channel_breakdown[].quality_factor",
+        "report.settlements[].channels[].quality_factor"
+      ],
+      "type": "integer",
+      "min": 200,
+      "max": 1040,
+      "formula": "clamp(200 + quality_score * 8, 200, 1040)"
+    }
+  },
+  "legacy_save_policy": {
+    "missing_new_required_fields": "reject",
+    "silent_defaults_allowed": false,
+    "required_paths_source": "required_on_parse",
+    "new_required_contract_groups": [
+      "WorkItem outsourceable/quality_weight_permille/core_aesthetic/contribution ledger fields",
+      "Recruitment.free_pool and candidate wrapper fields",
+      "WorkRecord.outsourcing_summary and its four fields"
+    ]
+  },
   "reserved_defaults": {
     "state.finance.loans": [],
     "state.finance.solvency": {
@@ -1607,13 +1851,17 @@
     "future_ledger_categories_allowed": false,
     "arrange_financing_export_allowed": false,
     "abort_work_implemented": true,
-    "bankrupt_negative_balance_allowed": true
+    "bankrupt_negative_balance_allowed": true,
+    "strict_new_required_field_decode_implemented": true,
+    "quality_score_105_and_factor_1040_implemented": true
   },
   "vendor_contract": {
     "status_validation_implemented": true,
     "sign_outsourcing_implemented": true,
     "weekly_delivery_implemented": true,
     "fee_settlement_implemented": true,
+    "quality_contribution_implemented": true,
+    "outsourcing_summary_implemented": true,
     "reliability_failure_implemented": true,
     "capacity_invariant": "sum(active weekly_cap by supplier_id) <= capacity_per_week",
     "delivery_invariant": "sum(work_done by item_id across contracts) <= work_item.work_total"
@@ -1630,7 +1878,7 @@
     "hash_normalizes_partner_and_committee_order": true
   },
   "archive_contract": {
-    "work_record_root_field_count": 31,
+    "work_record_root_field_count": 32,
     "work_record_shape": "state.archive.works[]",
     "series_source": "OfferSnapshot.ip_id -> Project.ip_id -> WorkRecord.ip_id -> Archive.series",
     "series_write": "completed/deadline/company_closed 交付结算与 WorkRecord 同次原子提交；aborted 保留 WorkRecord 但不写 series",

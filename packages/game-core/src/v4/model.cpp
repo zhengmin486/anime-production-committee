@@ -183,21 +183,37 @@ void to_json(Json& j, const WorkItem& value) {
              {"deliver_at", value.deliver_at},
              {"deps", value.deps},
              {"is_gate", value.is_gate},
+             {"outsourceable", value.outsourceable},
+             {"quality_weight_permille", value.quality_weight_permille},
+             {"core_aesthetic", value.core_aesthetic},
+             {"in_house_points", value.in_house_points},
+             {"in_house_ability_centi_sum", value.in_house_ability_centi_sum},
+             {"external_points", value.external_points},
+             {"external_quality_milli_sum", value.external_quality_milli_sum},
+             {"external_min_quality", value.external_min_quality},
              {"quality", dims_to_json(value.quality.dims)},
              {"contributors", value.contributors}};
 }
 
 void from_json(const Json& j, WorkItem& value) {
-    value.id = j.value("id", std::string{});
-    value.key = j.value("key", std::string{});
-    value.ability = j.value("ability", std::string{});
-    value.work_total = j.value("work_total", 0);
-    value.work_done = j.value("work_done", 0);
-    value.deliver_at = j.value("deliver_at", 1000);
-    value.deps = strings_from_json(j.value("deps", Json::array()));
-    value.is_gate = j.value("is_gate", false);
-    value.quality.dims = dims_from_json(j.value("quality", Json::object()));
-    value.contributors = strings_from_json(j.value("contributors", Json::array()));
+    value.id = j.at("id").get<std::string>();
+    value.key = j.at("key").get<std::string>();
+    value.ability = j.at("ability").get<std::string>();
+    value.work_total = j.at("work_total").get<int>();
+    value.work_done = j.at("work_done").get<int>();
+    value.deliver_at = j.at("deliver_at").get<int>();
+    value.deps = strings_from_json(j.at("deps"));
+    value.is_gate = j.at("is_gate").get<bool>();
+    value.outsourceable = j.at("outsourceable").get<bool>();
+    value.quality_weight_permille = j.at("quality_weight_permille").get<int>();
+    value.core_aesthetic = j.at("core_aesthetic").get<bool>();
+    value.in_house_points = j.at("in_house_points").get<int>();
+    value.in_house_ability_centi_sum = j.at("in_house_ability_centi_sum").get<std::int64_t>();
+    value.external_points = j.at("external_points").get<int>();
+    value.external_quality_milli_sum = j.at("external_quality_milli_sum").get<std::int64_t>();
+    value.external_min_quality = j.at("external_min_quality").get<int>();
+    value.quality.dims = dims_from_json(j.at("quality"));
+    value.contributors = strings_from_json(j.at("contributors"));
 }
 
 // ---------------- Project ----------------
@@ -218,6 +234,10 @@ void to_json(Json& j, const Project& value) {
 
     Json target = nullptr;
     if (value.plan.target) target = Json{{"kind", value.plan.target->kind}, {"id", value.plan.target->id}};
+    Json contributor_snapshots = Json::array();
+    for (const auto& snapshot : value.contributor_snapshots) {
+        contributor_snapshots.push_back(Json{{"id", snapshot.id}, {"name", snapshot.name}, {"role", snapshot.role}});
+    }
 
     j = Json{{"id", value.id},
              {"offer", value.offer},
@@ -229,6 +249,7 @@ void to_json(Json& j, const Project& value) {
              {"extension", value.extension},
              {"status", value.status},
              {"supervisor_staff_id", value.supervisor_staff_id ? Json(*value.supervisor_staff_id) : Json(nullptr)},
+             {"contributor_snapshots", contributor_snapshots},
              {"ip_id", value.ip_id ? Json(*value.ip_id) : Json(nullptr)},
              {"committee_id", value.committee_id ? Json(*value.committee_id) : Json(nullptr)},
              {"tv_service", value.tv_service},
@@ -256,6 +277,12 @@ void from_json(const Json& j, Project& value) {
         value.supervisor_staff_id = j.at("supervisor_staff_id").get<std::string>();
     } else {
         value.supervisor_staff_id.reset();
+    }
+    value.contributor_snapshots.clear();
+    for (const auto& snapshot : j.at("contributor_snapshots")) {
+        value.contributor_snapshots.push_back(ContributorSnapshot{
+            snapshot.at("id").get<std::string>(), snapshot.at("name").get<std::string>(),
+            snapshot.at("role").get<std::string>()});
     }
     if (j.contains("ip_id") && j.at("ip_id").is_string()) value.ip_id = j.at("ip_id").get<std::string>();
     else value.ip_id.reset();
@@ -492,7 +519,14 @@ void to_json(Json& j, const Recruitment& value) {
                             {"expires_week", candidate.expires_week ? Json(*candidate.expires_week) : Json(nullptr)},
                             {"origin", candidate.origin}});
     }
+    Json free_pool = Json::array();
+    for (const auto& candidate : value.free_pool) {
+        free_pool.push_back(Json{{"staff", candidate.staff},
+                                 {"expires_week", candidate.expires_week ? Json(*candidate.expires_week) : Json(nullptr)},
+                                 {"origin", candidate.origin}});
+    }
     j = Json{{"pool", pool},
+             {"free_pool", free_pool},
              {"pity", Json{{"since_sr", value.pity.since_sr}, {"since_ssr", value.pity.since_ssr}}},
              {"last_scout_week", value.last_scout_week ? Json(*value.last_scout_week) : Json(nullptr)}};
 }
@@ -509,6 +543,18 @@ void from_json(const Json& j, Recruitment& value) {
                 candidate.expires_week = raw.at("expires_week").get<int>();
             }
             value.pool.push_back(std::move(candidate));
+        }
+    }
+    if (j.contains("free_pool") && j.at("free_pool").is_array()) {
+        for (const auto& raw : j.at("free_pool")) {
+            if (!raw.is_object()) continue;
+            PoolCandidate candidate;
+            candidate.staff = raw.at("staff").get<Staff>();
+            candidate.origin = raw.value("origin", std::string{"regular"});
+            if (raw.contains("expires_week") && raw.at("expires_week").is_number_integer()) {
+                candidate.expires_week = raw.at("expires_week").get<int>();
+            }
+            value.free_pool.push_back(std::move(candidate));
         }
     }
     if (j.contains("pity") && j.at("pity").is_object()) {

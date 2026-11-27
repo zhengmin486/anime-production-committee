@@ -8,7 +8,7 @@
 //
 // 约定：
 // - 全部字段 snake_case，与 M0_CONTRACT_FREEZE §3 对齐。
-// - 无浮点。金额为日元整数，工作量为整数"点"（1 点 = 1/100 人周）。
+// - 无浮点。金额为日元整数，工作量为整数"点"（当前 v0.5 runtime：1 人周 = 70 点）。
 // - 空值用 std::optional 表达，序列化为 null。
 
 #include <array>
@@ -66,6 +66,12 @@ struct Participation {
     int week = 0;
 };
 
+struct ContributorSnapshot {
+    std::string id;
+    std::string name;
+    std::string role;
+};
+
 struct Staff {
     std::string id;
     std::string name;
@@ -99,6 +105,21 @@ struct WorkItem {
     int deliver_at = 1000;
     std::vector<std::string> deps;
     bool is_gate = false;
+    bool outsourceable = false;
+    // 全片质量权重（千分比）。公共层与单集各自成组：Σcommon + Σepisode = 1000，
+    // 每个单集的权重和必须相同（DEC-STAFF-008 的 20/20/22/10/13/5/10）。
+    int quality_weight_permille = 0;
+    // DEC-STAFF-008：核心审美工序才参与「核心审美奖励」（要求 S_sup>70 且 Q_item>70）。
+    bool core_aesthetic = false;
+    // DEC-STAFF-008 质量修型所需的贡献账本（按"实际有效完成点数"加权，单位见字段名）：
+    //   in_house_points / in_house_ability_centi_sum：社内贡献点数与 Σ(点数×S_eff_centi)
+    //   external_points / external_quality_milli_sum：外包贡献点数与 Σ(点数×供应商质量_milli)
+    //   external_min_quality：实际交付过点数的外部供应商里最低 quality（0=无外包）
+    int in_house_points = 0;
+    std::int64_t in_house_ability_centi_sum = 0;
+    int external_points = 0;
+    std::int64_t external_quality_milli_sum = 0;
+    int external_min_quality = 0;
     Quality quality;
     std::vector<std::string> contributors;
 
@@ -153,6 +174,7 @@ struct Project {
     // INV-27/§14.8：监督是项目内岗位，不写进 Staff.role（DEC-STAFF-008），
     // 也不用"归属里角色是监督者"推导——那样多人主责与原子换班都无法表达。
     std::optional<std::string> supervisor_staff_id;
+    std::vector<ContributorSnapshot> contributor_snapshots;
     std::optional<std::string> ip_id;
     std::optional<std::string> committee_id;
     Json tv_service = nullptr;             // M4：{channel, paid_week, fee}
@@ -260,6 +282,9 @@ struct PoolCandidate {
 
 struct Recruitment {
     std::vector<PoolCandidate> pool;
+    // 自由人才池：展示窗口到期后回池，冷却结束可"同身份"重返展示槽。
+    // 条目复用 PoolCandidate 形状，其中 expires_week 在自由池里表示"冷却结束周"。
+    std::vector<PoolCandidate> free_pool;
     Pity pity;
     std::optional<int> last_scout_week;   // null = 从未 scout；只由 scout 命令写入
 };

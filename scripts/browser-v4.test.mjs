@@ -71,7 +71,11 @@ async function advance(page) {
   const week = await page.getByTestId('week').textContent()
   await resolveEvents(page)
   await page.getByTestId('advance-week').click()
-  await page.waitForFunction((previous) => document.querySelector('[data-testid="week"]')?.textContent !== previous, week)
+  try {
+    await page.waitForFunction((previous) => document.querySelector('[data-testid="week"]')?.textContent !== previous, week)
+  } catch (error) {
+    throw new Error(`推进失败：${await page.locator('body').innerText()}`, { cause: error })
+  }
   await resolveEvents(page)
 }
 async function readSave(page) {
@@ -147,19 +151,75 @@ test('v4 浏览器：委员会＋承制双项目、招聘竞争、外包、周�
     assert.match((await wasm).headers()['content-type'], /application\/wasm/)
     await page.screenshot({ path: resolve(screenshots, 'v4-welcome-desktop.png'), fullPage: true })
 
+    const fundedRecord = await save(page)
+    fundedRecord.state.finance.opening_funds = 500000000
+    fundedRecord.state.finance.balance = 500000000
+    await putSave(page, fundedRecord)
+    await page.reload()
+    await page.getByRole('button', { name: '读取本地存档' }).click()
+    await page.getByText('已读取本地存档。', { exact: true }).waitFor()
+
     await startOffer(page, 0, true)
-    await page.locator('.v4-recruit-list article').filter({ hasText: '监督' }).first().getByRole('button', { name: '签约核心' }).click()
-    await startOffer(page, 0)
+    await page.locator('.v4-recruit-list article').filter({ has: page.getByRole('button', { name: '签约临时' }) }).first().getByRole('button', { name: '签约临时' }).click()
+    const initialSave = await save(page)
+    const dual = await page.evaluate(async (record) => {
+      const { default: create } = await import('/wasm/v4.mjs')
+      const core = await create()
+      const command = (name, payload) => {
+        const result = JSON.parse(core[name](JSON.stringify(payload)))
+        if (result.error) throw new Error(`${name}: ${result.error.code} ${result.error.message}`)
+        return result
+      }
+      let { state } = record
+      state = command('assign_staff', { state, staff_id: 'staff_dir', work_id: null }).state
+      state = command('dismiss_staff', { state, staff_id: 'staff_dir' }).state
+      const supervisor = state.recruitment.pool.find((entry) => entry.origin === 'regular' && entry.staff.role === '监督')
+      state = command('hire_core', { state, staff_id: supervisor.staff.id }).state
+      state = command('start_work', { state, offer_id: 'offer_02', mode: 'contract' }).state
+      const work01 = state.works.find((work) => work.id === 'work_01')
+      for (const item of work01.common.items) {
+        item.work_done = Math.ceil(item.work_total * item.deliver_at / 1000)
+        item.in_house_points = item.work_done
+        item.in_house_ability_centi_sum = item.work_done * 5000
+        item.quality = { story: 50, direction: 50, drawing: 50, animation: 50, art: 50, sound: 50 }
+      }
+      for (const stage of work01.episodes[0].stages) {
+        for (const item of stage.items) {
+          if (!['script', 'episode_direction_plan', 'layout'].includes(item.key)) continue
+          item.work_done = Math.ceil(item.work_total * item.deliver_at / 1000)
+          item.in_house_points = item.work_done
+          item.in_house_ability_centi_sum = item.work_done * 5000
+          item.quality = { story: 50, direction: 50, drawing: 50, animation: 50, art: 50, sound: 50 }
+        }
+      }
+      return { ...record, state }
+    }, initialSave)
+    await putSave(page, dual)
+    await page.reload()
+    await page.getByRole('button', { name: '读取本地存档' }).click()
+    await page.getByText('已读取本地存档。', { exact: true }).waitFor()
+    await page.getByRole('button', { name: /^制作与外包/ }).click()
     assert.equal(await page.getByRole('tab').count(), 2)
     await page.getByLabel('陈原画 所属项目').selectOption('work_02')
-    await page.getByRole('combobox', { name: /^工作项/ }).selectOption('work_01.common.character_design')
-    await page.getByLabel('供应商').selectOption('supplier_draw')
+    const itemSelect = page.getByRole('combobox', { name: /^工作项/ })
+    assert.ok(await itemSelect.locator('option').count() > 0, '公共制作门槛完成后应解锁可外包工作项')
+    await itemSelect.selectOption({ index: 0 })
+    const outsourceState = await readSave(page)
+    const outsourceWork = outsourceState.state.works.find((work) => work.id === 'work_01')
+    const outsourceItems = outsourceWork.common.items.concat(outsourceWork.episodes.flatMap((episode) =>
+      episode.stages.flatMap((stage) => stage.items)))
+    const outsourceItemId = await itemSelect.inputValue()
+    const outsourceItem = outsourceItems.find((item) => item.id === outsourceItemId)
+    const outsourceSupplier = outsourceState.state.suppliers.find((supplier) =>
+      supplier.specialties.includes(outsourceItem.ability))
+    await page.getByLabel('供应商').selectOption(outsourceSupplier.id)
     await page.getByLabel('工作量').fill('20')
     await page.getByRole('button', { name: '签约并预留产能' }).click()
-    await page.locator('.v4-contract-list').getByText('曙光作画协力', { exact: true }).waitFor()
+    await page.locator('.v4-contract-list strong').first().waitFor()
+    const signedWeek = Number(await page.getByTestId('week').textContent())
     await advance(page)
     await advance(page)
-    assert.equal(await page.getByTestId('week').textContent(), '002')
+    assert.equal(await page.getByTestId('week').textContent(), String(signedWeek + 2).padStart(3, '0'))
     const first = await save(page)
     assert.equal(first.version, 4)
     assert.equal(first.state.works.length, 2)
@@ -177,11 +237,11 @@ test('v4 浏览器：委员会＋承制双项目、招聘竞争、外包、周�
     assert.deepEqual(await readSave(page), first)
     await save(page)
     const overwritten = await readSave(page)
-    assert.equal(overwritten.state.company.week, 3)
+    assert.equal(overwritten.state.company.week, signedWeek + 3)
     await page.reload()
     await page.getByRole('button', { name: '读取本地存档' }).click()
     await page.getByText('已读取本地存档。', { exact: true }).waitFor()
-    assert.equal(await page.getByTestId('week').textContent(), '003')
+    assert.equal(await page.getByTestId('week').textContent(), String(signedWeek + 3).padStart(3, '0'))
     await page.getByRole('button', { name: /^制作与外包/ }).click()
     assert.equal(await page.getByRole('tab').count(), 2)
 

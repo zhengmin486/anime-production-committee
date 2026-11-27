@@ -67,7 +67,7 @@ export function WorkDetail({ project, data, onBack }: { project: Project; data: 
           </tr>
         })}</tbody>
       </table>
-      <p className="proto-footnote">口径与 docs/BLUEPRINT_SPEC.md 一致：1 工作点 = 1/100 人周，deliver_at 是占 work_total 的千分比门槛；work_done × 1000 ≥ deliver_at × work_total 即解锁下游。</p>
+      <p className="proto-footnote">口径与 docs/BLUEPRINT_SPEC.md 一致：当前 v0.5 runtime 为 70 工作点/人周，deliver_at 是占 work_total 的千分比门槛；work_done × 1000 ≥ deliver_at × work_total 即解锁下游。</p>
     </Panel>
 
     <Panel eyebrow="EPISODES / 单集列表" title={`${project.episodeCount} 集各自的制作进度`} marks={['confirmed', 'sample']}

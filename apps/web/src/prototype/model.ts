@@ -105,7 +105,7 @@ export interface OutsourceTask {
 }
 
 /* 工作项是唯一的生产原子（DEC-PROD-003）。口径与 docs/BLUEPRINT_SPEC.md 一致：
-   1 工作点 = 1/100 人周；deliverAt 是占 workTotal 的千分比门槛；
+   当前 v0.5 runtime 为 70 工作点/人周；deliverAt 是占 workTotal 的千分比门槛；
    delivered ⇔ workDone × 1000 ≥ deliverAt × workTotal。 */
 export interface WorkItem {
   key: string

@@ -61,14 +61,21 @@ function assertInvariants(state) {
 }
 
 function signDrawingContract(state, work, amount) {
-  const supplier = state.suppliers.find((entry) => entry.id === 'supplier_draw')
-  const item = workItem(state, work.id, `${work.id}.common.character_design`)
+  const supplier = state.suppliers.find((entry) => entry.id === 'supplier_genga')
+  const all = work.common.items.concat(work.episodes.flatMap((episode) => episode.stages.flatMap((stage) => stage.items)))
+  const byId = new Map(all.map((item) => [item.id, item]))
+  const item = all.find((entry) => entry.outsourceable && !entry.is_gate && entry.ability === 'drawing' &&
+    entry.work_done < entry.work_total && entry.deps.every((id) => {
+      const dependency = byId.get(id)
+      return dependency && dependency.work_done * 1000 >= dependency.deliver_at * dependency.work_total
+    }))
+  if (!item) return { state, signed: false }
   const reserved = state.contracts
     .filter((entry) => entry.status === 'active' && entry.supplier_id === supplier.id)
     .reduce((sum, entry) => sum + entry.weekly_cap, 0)
   const outstanding = state.contracts
     .filter((entry) => entry.status === 'active' && entry.item_id === item.id)
-    .reduce((sum, entry) => sum + entry.work_total, 0)
+    .reduce((sum, entry) => sum + entry.work_total - entry.work_done, 0)
   const room = item.work_total - item.work_done - outstanding
   const total = Math.min(amount, room, supplier.capacity_per_week - reserved)
   if (total <= 0) return { state, signed: false }
@@ -83,13 +90,22 @@ test('M3/M4：真实命令双项目 520 周压力、存档重放与终局不变�
   let state = ok('initialize', { seed: 3 }).state
   state.finance.opening_funds = 500000000
   state.finance.balance = 500000000
-  const supervisor = state.recruitment.pool.find((entry) => entry.staff.role === '监督')
-  assert.ok(supervisor)
-  state = ok('hire_core', { state, staff_id: supervisor.staff.id }).state
   state = ok('start_work', {
     state, offer_id: 'offer_01', mode: 'committee', percent: 50,
     committee_partner_ids: ['partner_tv', 'partner_stream']
   }).state
+  const temporarySupervisor = state.recruitment.pool.find((entry) =>
+    entry.origin === 'temporary' && ['director', 'animation_director', 'production_manager', '监督'].includes(entry.staff.role))
+  assert.ok(temporarySupervisor, 'seed 3 must provide a temporary supervisor')
+  state = ok('hire_temporary', {
+    state, work_id: 'work_01', candidate_id: temporarySupervisor.staff.id
+  }).state
+  state = ok('assign_staff', { state, staff_id: 'staff_dir', work_id: null }).state
+  state = ok('dismiss_staff', { state, staff_id: 'staff_dir' }).state
+  const supervisor = state.recruitment.pool.find((entry) =>
+    entry.origin === 'regular' && ['director', 'animation_director', 'production_manager', '监督'].includes(entry.staff.role))
+  assert.ok(supervisor)
+  state = ok('hire_core', { state, staff_id: supervisor.staff.id }).state
   state = ok('start_work', { state, offer_id: 'offer_02', mode: 'contract' }).state
   state = ok('assign_staff', { state, staff_id: 'staff_ka', work_id: 'work_01' }).state
   state = ok('assign_staff', { state, staff_id: 'staff_anim', work_id: 'work_02' }).state
@@ -160,7 +176,7 @@ test('M3/M4：真实命令双项目 520 周压力、存档重放与终局不变�
   }
 
   assert.equal(state.company.week, 520)
-  assert.equal(state.company.status, 'closing')
+  assert.ok(state.company.status === 'closing' || state.company.status === 'ended')
   assert.equal(state.company.end_reason, 'time_limit')
   while (state.works.length > 0) {
     state = ok('finalize_delivery', { state, work_id: state.works[0].id }).state

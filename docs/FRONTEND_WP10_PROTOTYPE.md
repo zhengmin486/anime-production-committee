@@ -90,7 +90,7 @@
 | `relationships` | 长期合作方关系 | 无读模型，见 §5 缺口 |
 | `history` | 已交付作品履历 | 无读模型，见 §5 缺口 |
 
-工作项口径（`docs/BLUEPRINT_SPEC.md`）：1 个工作点 = 1/100 人周（`centi_staff_week`）；`deliver_at` 取 1–1000‰；`is_gate` 只允许出现在单集项上；《雾港II》的门槛项是 `delivery_master`（12 工作点、`deliver_at=1000`）。
+工作项口径（`docs/BLUEPRINT_SPEC.md`）：`work_unit=centi_staff_week` 是冻结枚举名，当前 v0.5 runtime 按 1 个工作点 = 1/70 人周（70 点/人周）换算；`deliver_at` 取 1–1000‰；`is_gate` 只允许出现在单集项上；《雾港II》的门槛项是 `delivery_master`（12 工作点、`deliver_at=1000`）。
 
 界面上的工作项三态由 `model.ts` 判定并显示为「可开始 / 进行中，未达门槛 / 被依赖阻塞 / 已达标，可继续完善 / 已完成」。
 

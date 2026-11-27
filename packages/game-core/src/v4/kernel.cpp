@@ -6,17 +6,8 @@
 namespace apc::v4::kernel {
 namespace {
 
-// ---- 平衡参数（全部 [PLACEHOLDER]，由模拟标定；此处数值只用于 M1 可测性）----
-constexpr int kBaseCapacity = 1000;          // 千分比，1.00 人周
-constexpr int kAbilityBase = 500;            // 能力 0 → 0.50
-constexpr int kAbilityPerPoint = 5;          // 能力 100 → 1.00
-constexpr int kMoraleBase = 600;
-constexpr int kMoralePerPoint = 4;           // 士气 0 → 0.60，100 → 1.00
-constexpr int kFatigueBase = 1000;
-constexpr int kFatiguePerPoint = 4;          // 疲劳 0 → 1.00，100 → 0.60
-constexpr int kFitMatch = 1000;
-constexpr int kFitMismatch = 800;
-constexpr int kPointsPerStaffWeek = 100;     // 1 人周 = 100 工作点
+// ---- 平衡参数（M1 可测性基线；员工产能按 DEC-STAFF-008）----
+constexpr int kPointsPerStaffWeek = 70;        // 1 人周 = 70 工作点
 constexpr int kHandoverLoss = 250;           // 接手磨合：该员工在该项产出扣 25%
 constexpr int kSupervisorSwitchLoss = 100;   // 监督换项目：团队级扣 10%
 constexpr int kQualityApproach = 300;        // 质量评级向本周样本靠拢 30%
@@ -126,22 +117,18 @@ std::string staff_specialty(const Staff& staff) {
     return kAbilities[static_cast<std::size_t>(best_index)];
 }
 
-int fit_permille(const Staff& staff, const std::string& ability) {
-    return staff_specialty(staff) == ability ? kFitMatch : kFitMismatch;
-}
-
+// 工序有效能力 → 产能倍率。DEC-STAFF-008 的公式域是 S_eff ∈ [30,100]，
+// 但当前招聘生成会产出低能力候选（非主能力 5–45），S_eff 可以低于 30；
+// 这里的线性外推是临时行为，尚未按"越界属于非法状态"收口（缺口登记在 #53）。
 int capacity_permille(const Staff& staff, const std::string& ability) {
-    const int ability_q = kAbilityBase + ability_value(staff, ability) * kAbilityPerPoint;
-    const int morale_q = kMoraleBase + clamp(staff.morale, 0, 100) * kMoralePerPoint;
-    const int fatigue_q = kFatigueBase - clamp(staff.fatigue, 0, 100) * kFatiguePerPoint;
-    const int fit_q = fit_permille(staff, ability);
-
-    int capacity = kBaseCapacity;
-    capacity = capacity * ability_q / 1000;
-    capacity = capacity * morale_q / 1000;
-    capacity = capacity * fatigue_q / 1000;
-    capacity = capacity * fit_q / 1000;
-    return capacity;
+    const int primary = ability_value(staff, ability);
+    int other_sum = 0;
+    for (int i = 0; i < kAbilityCount; ++i) {
+        if (kAbilities[static_cast<std::size_t>(i)] != ability) other_sum += staff.abilities[static_cast<std::size_t>(i)];
+    }
+    const int effective = (85 * primary + 3 * other_sum) / 100;
+    if (effective <= 60) return 650 + (effective - 30) * 350 / 30;
+    return 1000 + (effective - 60) * 300 / 40;
 }
 
 int points_from_capacity(int capacity_permille_value) {
@@ -159,6 +146,16 @@ int quality_sample(const Staff& staff, const std::string& ability, std::uint32_t
     const std::uint32_t jitter =
         draw_below(seed, week, Stream::quality, purpose, static_cast<std::uint32_t>(dimension + 1), 11);
     return clamp(base + fit + static_cast<int>(jitter) - 5, 0, kQualityMax);
+}
+
+// 工作项是否已经形成过质量。首次接触会把整项基准铺到六维，
+// 之后每周只精修一个维度——否则一集十来个工作项各被碰一次后，
+// 六维里只有一两维有值，作品分被摊成 1/6，永远够不到 Q_min。
+bool item_exposed(const WorkItem& item) {
+    for (int i = 0; i < kDimensionCount; ++i) {
+        if (item.quality.dims[static_cast<std::size_t>(i)] > 0) return true;
+    }
+    return false;
 }
 
 // 按权重抽取维度：700/300 真的按 7:3，不是"在非零维度里等概率"。
@@ -236,19 +233,21 @@ std::vector<ItemAssignment> allocate(const Project& work, const std::vector<cons
     for (const auto& candidate : candidates) remaining[candidate.item_id] = candidate.remaining;
 
     for (const Staff* member : ordered) {
-        // 周产能按主专业计算（fit=1000），跨专业时在逐项投入上打折，避免双重折扣。
+        // 保留既有周预算与稳定顺序；每项投入再受该工序 S_eff 周产能上限约束。
         int budget = points_from_capacity(capacity_permille(*member, staff_specialty(*member)));
         budget = budget * team_permille / 1000;
+        if (work.supervisor_staff_id && *work.supervisor_staff_id == member->id) {
+            budget = budget / 2;
+        }
         for (const auto& candidate : candidates) {
             if (budget <= 0) break;
             const int available = remaining[candidate.item_id];
             if (available <= 0) continue;
-            const int take = std::min(budget, available);
+            const int weekly_cap = points_from_capacity(capacity_permille(*member, candidate.ability));
+            const int take = std::min({budget, available, weekly_cap});
             if (take <= 0) continue;
-            // 四舍五入而非截断：否则剩余量很小的项会算出 0 点，一周投入凭空消失。
-            const int scaled = (take * fit_permille(*member, candidate.ability) + 500) / 1000;
             assignments.push_back(ItemAssignment{work.id, candidate.item_id, candidate.episode_id, candidate.stage_key,
-                                                 member->id, candidate.ability, scaled});
+                                                 member->id, candidate.ability, take});
             remaining[candidate.item_id] -= take;
             budget -= take;
         }
@@ -282,6 +281,91 @@ std::array<int, kDimensionCount> dimension_weights(const std::string& stage_key,
     return weights;
 }
 
+int apply_outsourced_quality(WorkItem& item, int supplier_quality, int points, std::uint32_t seed, int week,
+                             const std::string& stage_key, const std::string& contract_id,
+                             const std::array<int, kDimensionCount>& caps) {
+    // 贡献账本：外包部分按供应商 quality 记点数权重（与社内同一把尺）
+    if (points > 0) {
+        item.external_points += points;
+        item.external_quality_milli_sum += static_cast<std::int64_t>(points) * supplier_quality * 1000;
+        item.external_min_quality =
+            item.external_min_quality == 0 ? supplier_quality : std::min(item.external_min_quality, supplier_quality);
+    }
+    const auto weights = dimension_weights(stage_key, item.ability);
+    int total_weight = 0;
+    for (int i = 0; i < kDimensionCount; ++i) total_weight += std::max(weights[static_cast<std::size_t>(i)], 0);
+    if (total_weight <= 0) return 0;
+
+    const std::uint32_t purpose = hash_text(contract_id);
+    const int roll = static_cast<int>(draw_below(seed, week, Stream::quality, purpose, 0,
+                                                 static_cast<std::uint32_t>(total_weight)));
+    const int dim = weighted_dimension(weights, roll);
+    if (dim < 0) return 0;
+
+    const std::uint32_t jitter =
+        draw_below(seed, week, Stream::quality, purpose, static_cast<std::uint32_t>(dim + 1), 11);
+    const int sample = clamp(supplier_quality + static_cast<int>(jitter) - 5, 0, kQualityMax);
+    if (!item_exposed(item)) {
+        int gain = 0;
+        for (int i = 0; i < kDimensionCount; ++i) {
+            const int seeded = clamp(sample, 0, std::min(caps[static_cast<std::size_t>(i)], kQualityMax));
+            item.quality.dims[static_cast<std::size_t>(i)] = seeded;
+            gain += seeded;
+        }
+        return gain;
+    }
+    const int before = item.quality.dims[static_cast<std::size_t>(dim)];
+    const int after = clamp(before + (sample - before) * kQualityApproach / 1000, 0,
+                            std::min(caps[static_cast<std::size_t>(dim)], kQualityMax));
+    item.quality.dims[static_cast<std::size_t>(dim)] = after;
+    return after - before;
+}
+
+void adjust_quality(Project& work, const std::string& stage_key, int delta) {
+    const auto adjust_item = [delta](WorkItem& item) {
+        for (auto& value : item.quality.dims) value = clamp(value + delta, 0, kQualityMax);
+    };
+    if (stage_key.empty()) {
+        for (auto& item : work.common.items) adjust_item(item);
+    }
+    for (auto& episode : work.episodes) {
+        for (auto& stage : episode.stages) {
+            if (!stage_key.empty() && stage.key != stage_key) continue;
+            for (auto& item : stage.items) adjust_item(item);
+        }
+    }
+}
+
+int add_work_points(Project& work, const std::string& stage_key, int points) {
+    if (points <= 0) return 0;
+    std::vector<WorkItem*> items;
+    for (auto& episode : work.episodes) {
+        for (auto& stage : episode.stages) {
+            if (!stage_key.empty() && stage.key != stage_key) continue;
+            for (auto& item : stage.items) {
+                if (item.is_gate || item.work_done >= item.work_total) continue;
+                items.push_back(&item);
+            }
+        }
+    }
+    std::sort(items.begin(), items.end(), [](const WorkItem* a, const WorkItem* b) { return a->id < b->id; });
+    int left = points;
+    int applied = 0;
+    for (WorkItem* item : items) {
+        if (left <= 0) break;
+        const int take = std::min(left, item->work_total - item->work_done);
+        item->work_done += take;
+        left -= take;
+        applied += take;
+    }
+    return applied;
+}
+
+void adjust_staff_condition(Staff& staff, int fatigue_delta, int morale_delta) {
+    staff.fatigue = clamp(staff.fatigue + fatigue_delta, 0, 100);
+    staff.morale = clamp(staff.morale + morale_delta, 0, 100);
+}
+
 ProductionResult apply_production(WorkItem& item, const Staff& staff, int points, bool hands_over,
                                   std::uint32_t seed, int week, const std::string& stage_key,
                                   const std::array<int, kDimensionCount>& caps) {
@@ -292,6 +376,20 @@ ProductionResult apply_production(WorkItem& item, const Staff& staff, int points
     if (gain <= 0) return result;
 
     item.work_done += gain;
+    // 贡献账本：Q_base 需要"谁做的、什么水准、做了多少点"。
+    // DEC-QUALITY-002：Q_inhouse 只统计正式核心员工；临时员工与外部供应商统一计入
+    // Q_base 与协力计算，所以临时员工的点数进 "external" 桶（协力分母与木桶下限一起算）。
+    const int ability_centi = effective_ability_centi(staff, item.ability);
+    if (staff.employment == "temporary") {
+        item.external_points += gain;
+        item.external_quality_milli_sum += static_cast<std::int64_t>(gain) * ability_centi * 10;
+        const int quality = ability_centi / 100;
+        item.external_min_quality =
+            item.external_min_quality == 0 ? quality : std::min(item.external_min_quality, quality);
+    } else {
+        item.in_house_points += gain;
+        item.in_house_ability_centi_sum += static_cast<std::int64_t>(gain) * ability_centi;
+    }
     result.points = gain;
 
     if (std::find(item.contributors.begin(), item.contributors.end(), staff.id) == item.contributors.end()) {
@@ -315,11 +413,19 @@ ProductionResult apply_production(WorkItem& item, const Staff& staff, int points
     if (dim < 0) return result;
 
     const int sample = quality_sample(staff, item.ability, seed, week, purpose, dim);
+    if (!item_exposed(item)) {
+        // 首次接触：整项基准 = 本次样本（逐维受依赖上限约束）
+        for (int i = 0; i < kDimensionCount; ++i) {
+            const int seeded = clamp(sample, 0, std::min(caps[static_cast<std::size_t>(i)], kQualityMax));
+            item.quality.dims[static_cast<std::size_t>(i)] = seeded;
+            result.quality_by_dim[static_cast<std::size_t>(i)] = seeded;
+            result.quality_gain += seeded;
+        }
+        return result;
+    }
     const int before = item.quality.dims[static_cast<std::size_t>(dim)];
-    int after = before <= 0
-                    ? sample
-                    : before + (sample - before) * kQualityApproach / 1000;
-    after = clamp(after, 0, std::min(caps[static_cast<std::size_t>(dim)], kQualityMax));
+    const int after = clamp(before + (sample - before) * kQualityApproach / 1000, 0,
+                            std::min(caps[static_cast<std::size_t>(dim)], kQualityMax));
     item.quality.dims[static_cast<std::size_t>(dim)] = after;
     result.quality_by_dim[static_cast<std::size_t>(dim)] = after - before;
     result.quality_gain = after - before;
@@ -379,15 +485,154 @@ int mean_of(const std::array<int, kDimensionCount>& dims) {
 
 }  // namespace
 
-AggregatedQuality aggregate_stage(const EpisodeStage& stage) {
+
+namespace {
+
+}  // namespace
+
+int supervisor_ability_centi(const Staff& staff) {
+    const auto ability = [&staff](const std::string& name) {
+        const int index = ability_index(name);
+        return index < 0 ? 0 : staff.abilities[static_cast<std::size_t>(index)];
+    };
+    const int direction = ability("direction");
+    const int management = ability("management");
+    const std::string role = staff.role;
+    // 天然监督系（监督/演出/导演）：直接看统筹与演出
+    if (role == "监督" || role == "演出" || role == "director") {
+        return 70 * direction + 30 * management;   // 已是百分之一分精度
+    }
+    // 转任系（作画/脚本/美术及其英文岗位）：补上本职业主能力
+    const int primary = role == "作画" || role == "key_animator" || role == "animator" ||
+                                role == "animation_director"
+                            ? ability("drawing")
+                            : role == "脚本" || role == "scriptwriter" ? ability("planning")
+                                                                       : ability("drawing");
+    return 50 * direction + 25 * management + 25 * primary;
+}
+
+int effective_ability_centi(const Staff& staff, const std::string& ability) {
+    const int primary = ability_value(staff, ability) * 100;             // 百分之一分
+    int other_sum = 0;
+    for (int i = 0; i < kAbilityCount; ++i) {
+        if (kAbilities[static_cast<std::size_t>(i)] != ability) {
+            other_sum += staff.abilities[static_cast<std::size_t>(i)] * 100;
+        }
+    }
+    return (85 * primary + 3 * other_sum) / 100;
+}
+
+int item_quality_milli(const WorkItem& item, std::int64_t supervisor_milli) {
+    const std::int64_t total = static_cast<std::int64_t>(item.in_house_points) + item.external_points;
+    if (total <= 0) return 0;
+
+    // Q_base：社内贡献用 S_eff、外包贡献用 Supplier.quality，按实际有效点数加权
+    const std::int64_t in_house_milli_sum = item.in_house_ability_centi_sum * 10;
+    const std::int64_t base_sum = in_house_milli_sum + item.external_quality_milli_sum;
+    const std::int64_t q_base = base_sum / total;
+
+    // Q_sup：监督修型，只向上抬 35%，且不得超过监督自身水准
+    const std::int64_t q_sup = q_base + 35 * std::max<std::int64_t>(0, supervisor_milli - q_base) / 100;
+
+    // Q_cap：主责团队质量上限（整数分 half-up 后再 +8）
+    // DEC-QUALITY-002：没有社内核心产出时，用 Q_base 代替 Q_inhouse 代入上限公式
+    const std::int64_t q_inhouse =
+        item.in_house_points > 0 ? in_house_milli_sum / item.in_house_points : q_base;
+    const std::int64_t cap_inner = 60 * std::max(q_inhouse, supervisor_milli) + 40 * q_inhouse + 50000;
+    const std::int64_t q_cap =
+        std::min<std::int64_t>(100000, 1000 * (cap_inner / 100000) + 8000);
+
+    std::int64_t q_item = std::min(q_sup, q_cap);
+
+    // Q_ext_cap：存在外包时再压一层木桶——最低供应商质量 + 监督抬升 + 外包占比折扣
+    if (item.external_points > 0 && item.external_min_quality > 0) {
+        const std::int64_t ext_min = static_cast<std::int64_t>(item.external_min_quality) * 1000;
+        const std::int64_t r_ext_bp = 10000 * item.external_points / total;
+        const std::int64_t ext_cap =
+            ext_min + 25 * std::max<std::int64_t>(0, supervisor_milli - ext_min) / 100 +
+            (10000 - r_ext_bp) * 12000 / 10000;
+        q_item = std::min(q_item, ext_cap);
+    }
+    return static_cast<int>(std::clamp<std::int64_t>(q_item, 0, 100000));
+}
+
+int final_quality_milli(const Project& work, const Staff* supervisor) {
+    const std::int64_t s_sup_milli = supervisor == nullptr ? 0 : supervisor_ability_centi(*supervisor) * 10;
+    std::int64_t weighted = 0;
+    std::int64_t weight_sum = 0;
+    std::int64_t bonus_num = 0;
+    std::int64_t bonus_weight = 0;
+
+    const auto accumulate = [&](const WorkItem& item) {
+        const int weight = std::max(item.quality_weight_permille, 0);
+        if (weight == 0) return;
+        const std::int64_t q_milli = item_quality_milli(item, s_sup_milli);
+        weighted += weight * q_milli;
+        weight_sum += weight;
+        if (!item.core_aesthetic) return;
+        bonus_weight += weight;
+        // bonus_milli = floor(5 × max(0, min(S_sup, Q_item) − 70) / 30)，上限 5 分（5000 milli）
+        if (s_sup_milli > 70000 && q_milli > 70000) {
+            const std::int64_t limit = std::min(s_sup_milli, q_milli);
+            bonus_num += static_cast<std::int64_t>(weight) * (5 * (limit - 70000) / 30);
+        }
+    };
+    for (const auto& item : work.common.items) accumulate(item);
+    for (const auto& episode : work.episodes) {
+        for (const auto& stage : episode.stages) {
+            for (const auto& item : stage.items) accumulate(item);
+        }
+    }
+    if (weight_sum <= 0) return 0;
+    // 基础分按层合成：公共层（Σcommon）与单集层（每集 Σepisode）各自归一后加权。
+    // 不能直接 weighted/1000——单集权重是"每集 800‰"，直接相加会随集数放大。
+    std::int64_t common_weighted = 0;
+    std::int64_t common_weight = 0;
+    std::int64_t episode_weighted = 0;
+    std::int64_t episode_weight = 0;
+    const auto accumulate_layer = [&](const WorkItem& item, bool common) {
+        const int weight = std::max(item.quality_weight_permille, 0);
+        if (weight == 0) return;
+        const std::int64_t q_milli = item_quality_milli(item, s_sup_milli);
+        if (common) {
+            common_weighted += weight * q_milli;
+            common_weight += weight;
+        } else {
+            episode_weighted += weight * q_milli;
+            episode_weight += weight;
+        }
+    };
+    for (const auto& item : work.common.items) accumulate_layer(item, true);
+    for (const auto& episode : work.episodes) {
+        for (const auto& stage : episode.stages) {
+            for (const auto& item : stage.items) accumulate_layer(item, false);
+        }
+    }
+    const std::int64_t common_avg = common_weight > 0 ? common_weighted / common_weight : 0;
+    const std::int64_t episode_avg = episode_weight > 0 ? episode_weighted / episode_weight : 0;
+    const std::int64_t episode_layer_weight = work.episodes.empty() ? 0 : episode_weight / work.episodes.size();
+    const std::int64_t layer_weight = common_weight + episode_layer_weight;
+    const std::int64_t base_milli =
+        layer_weight > 0 ? (common_avg * common_weight + episode_avg * episode_layer_weight) / layer_weight : 0;
+    const std::int64_t bonus_milli = bonus_weight > 0 ? bonus_num / bonus_weight : 0;
+    const std::int64_t total = base_milli + bonus_milli;
+    return static_cast<int>(std::clamp<std::int64_t>(total, 0, 105000));
+}
+
+AggregatedQuality aggregate_episode(const Episode& episode) {
     AggregatedQuality result;
+    // DEC-STAFF-008：单集内按工作项的 quality_weight_permille 加权，不再按阶段等权。
+    // 权重由蓝图给出并在 validate 里保证每集合计相同，所以"先做哪一集"不影响单集分。
     int weight_total = 0;
-    for (const auto& item : stage.items) {
-        const int weight = std::max(item.work_total, 0);
-        weight_total += weight;
-        for (int i = 0; i < kDimensionCount; ++i) {
-            result.dims[static_cast<std::size_t>(i)] +=
-                item.quality.dims[static_cast<std::size_t>(i)] * weight;
+    for (const auto& stage : episode.stages) {
+        for (const auto& item : stage.items) {
+            const int weight = std::max(item.quality_weight_permille, 0);
+            if (weight == 0) continue;
+            weight_total += weight;
+            for (int i = 0; i < kDimensionCount; ++i) {
+                result.dims[static_cast<std::size_t>(i)] +=
+                    item.quality.dims[static_cast<std::size_t>(i)] * weight;
+            }
         }
     }
     if (weight_total > 0) {
@@ -400,38 +645,45 @@ AggregatedQuality aggregate_stage(const EpisodeStage& stage) {
     return result;
 }
 
-AggregatedQuality aggregate_episode(const Episode& episode) {
-    AggregatedQuality result;
-    // M1 用阶段等权；六阶段模板权重属于内容配置，等平衡阶段再定
-    if (episode.stages.empty()) return result;
-    for (const auto& stage : episode.stages) {
-        const auto stage_quality = aggregate_stage(stage);
-        for (int i = 0; i < kDimensionCount; ++i) {
-            result.dims[static_cast<std::size_t>(i)] += stage_quality.dims[static_cast<std::size_t>(i)];
-        }
-    }
-    const int count = static_cast<int>(episode.stages.size());
-    for (int i = 0; i < kDimensionCount; ++i) {
-        result.dims[static_cast<std::size_t>(i)] =
-            (result.dims[static_cast<std::size_t>(i)] + count / 2) / count;
-    }
-    result.mean = mean_of(result.dims);
-    return result;
-}
-
 AggregatedQuality aggregate_work(const Project& work) {
     AggregatedQuality result;
     if (work.episodes.empty()) return result;
+    // 公共层与单集层各自归一到 1000‰，再按层权重合成：
+    // 作品 = 公共层 × W_common + 单集均分 × W_episode（DEC-STAFF-008 的 20% / 80%）。
+    // 层权重取自蓝图：Σcommon 与 每集 Σepisode，validate 保证两者之和为 1000‰。
+    int common_weight = 0;
+    std::array<int, kDimensionCount> common_dims{};
+    for (const auto& item : work.common.items) {
+        const int weight = std::max(item.quality_weight_permille, 0);
+        if (weight == 0) continue;
+        common_weight += weight;
+        for (int i = 0; i < kDimensionCount; ++i) {
+            common_dims[static_cast<std::size_t>(i)] +=
+                item.quality.dims[static_cast<std::size_t>(i)] * weight;
+        }
+    }
+    int episode_weight = 0;
+    std::array<int, kDimensionCount> episode_dims{};
     for (const auto& episode : work.episodes) {
         const auto episode_quality = aggregate_episode(episode);
         for (int i = 0; i < kDimensionCount; ++i) {
-            result.dims[static_cast<std::size_t>(i)] += episode_quality.dims[static_cast<std::size_t>(i)];
+            episode_dims[static_cast<std::size_t>(i)] += episode_quality.dims[static_cast<std::size_t>(i)];
         }
+    }
+    for (const auto& stage : work.episodes.front().stages) {
+        for (const auto& item : stage.items) episode_weight += std::max(item.quality_weight_permille, 0);
     }
     const int count = static_cast<int>(work.episodes.size());
     for (int i = 0; i < kDimensionCount; ++i) {
+        const int episode_mean = (episode_dims[static_cast<std::size_t>(i)] + count / 2) / count;
+        const int common_normalized =
+            common_weight > 0 ? (common_dims[static_cast<std::size_t>(i)] + common_weight / 2) / common_weight : 0;
+        const int total_weight = common_weight + episode_weight;
         result.dims[static_cast<std::size_t>(i)] =
-            (result.dims[static_cast<std::size_t>(i)] + count / 2) / count;
+            total_weight > 0
+                ? (common_normalized * common_weight + episode_mean * episode_weight + total_weight / 2) /
+                      total_weight
+                : 0;
     }
     result.mean = mean_of(result.dims);
     return result;

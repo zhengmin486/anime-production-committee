@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { isV4GameState, type V4GameState, type V4Project, type V4Staff, type V4WorkItem } from './gameV4State'
+import { isV4GameState, type V4GameState, type V4PersistedWorkItem, type V4Project, type V4Staff } from './gameV4State'
 
 const scores = () => ({ planning: 50, direction: 50, drawing: 50, animation: 50, management: 50, postproduction: 50 })
 const flags = () => ({ planning: false, direction: false, drawing: false, animation: false, management: false, postproduction: false })
@@ -32,7 +32,7 @@ const state = (): V4GameState => ({
     reputation: 100, reputation_log: [],
   },
   staff: [staff()],
-  recruitment: { pool: [], pity: { since_sr: 0, since_ssr: 0 }, last_scout_week: null },
+  recruitment: { pool: [], free_pool: [], pity: { since_sr: 0, since_ssr: 0 }, last_scout_week: null },
   works: [],
   suppliers: [],
   contracts: [],
@@ -50,7 +50,7 @@ const state = (): V4GameState => ({
   archive: { works: [], series: [], company_result: null },
 })
 
-const workItem = (): V4WorkItem => ({
+const workItem = (): V4PersistedWorkItem => ({
   id: 'work_01.common.series_comp',
   key: 'series_comp',
   ability: 'planning',
@@ -59,6 +59,14 @@ const workItem = (): V4WorkItem => ({
   deliver_at: 1000,
   deps: [],
   is_gate: false,
+  outsourceable: false,
+  quality_weight_permille: 1000,
+  core_aesthetic: false,
+  in_house_points: 0,
+  in_house_ability_centi_sum: 0,
+  external_points: 0,
+  external_quality_milli_sum: 0,
+  external_min_quality: 0,
   quality: { story: 0, direction: 0, drawing: 0, animation: 0, art: 0, sound: 0 },
   contributors: [],
 })
@@ -81,6 +89,7 @@ const project = (): V4Project => ({
   extension: {},
   status: 'producing',
   supervisor_staff_id: null,
+  contributor_snapshots: [],
   ip_id: null,
   committee_id: null,
   tv_service: null,
@@ -108,6 +117,19 @@ describe('v4 GameState 关键不变式', () => {
   it('接受现金恒等式一致且引用完整的状态', () => {
     expect(isV4GameState(state())).toBe(true)
     expect(isV4GameState(JSON.parse(JSON.stringify(state())))).toBe(true)
+  })
+
+  it('接受同一项目同时保留多条待处理事件', () => {
+    const value = withProject()
+    const option = {
+      id: 'accept', label: '接受', kind: 'accept', risk_hint: '无额外风险', cost: 0,
+      effects: [{ scope: 'instant', target: 'morale', stage: '', value: 6 }],
+    }
+    value.events.pending.push(
+      { event_id: 'animator_exhaustion', name: '疲劳', work_id: 'work_01', triggered_week: 4, expires_week: null, cooldown_weeks: 0, once_per_project: false, viewed: false, options: [option] },
+      { event_id: 'station_visit', name: '探班', work_id: 'work_01', triggered_week: 4, expires_week: null, cooldown_weeks: 0, once_per_project: false, viewed: false, options: [option] },
+    )
+    expect(isV4GameState(value)).toBe(true)
   })
 
   it('拒绝期初资金、流水与余额不一致的存档', () => {
@@ -212,6 +234,41 @@ describe('v4 GameState 关键不变式', () => {
       invalidate(value)
       expect(isV4GameState(value)).toBe(false)
     }
+  })
+
+  it('接受公司关闭时临时员工向交付项目的合同交接', () => {
+    const value = temporaryState()
+    value.company.status = 'closing'
+    value.company.end_reason = 'voluntary'
+    value.works[0].status = 'delivering'
+    expect(isV4GameState(value)).toBe(true)
+
+    value.company.status = 'running'
+    expect(isV4GameState(value)).toBe(false)
+  })
+
+  it('拒绝缺失 contributor_snapshots 的项目存档', () => {
+    const value = withProject()
+    delete (value.works[0] as unknown as Record<string, unknown>).contributor_snapshots
+    expect(isV4GameState(value)).toBe(false)
+  })
+
+  it('拒绝缺失任一 WorkItem 持久化必填字段的存档', () => {
+    const requiredFields = [
+      'outsourceable', 'quality_weight_permille', 'core_aesthetic', 'in_house_points',
+      'in_house_ability_centi_sum', 'external_points', 'external_quality_milli_sum', 'external_min_quality',
+    ] as const
+    for (const field of requiredFields) {
+      const value = withProject()
+      delete (value.works[0].common.items[0] as unknown as Record<string, unknown>)[field]
+      expect(isV4GameState(value), field).toBe(false)
+    }
+  })
+
+  it('拒绝缺失 recruitment.free_pool 的存档', () => {
+    const value = state()
+    delete (value.recruitment as unknown as Record<string, unknown>).free_pool
+    expect(isV4GameState(value)).toBe(false)
   })
 
   it('contributors 可引用历史员工、不重复且未开工项不得有参与者', () => {

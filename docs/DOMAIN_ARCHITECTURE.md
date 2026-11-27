@@ -567,7 +567,7 @@ Staff {
 
 **监督人员**：岗位为 `director`、`animation_director`、`production_manager` 的员工。其切换代价是团队级的，因为监督换人会打断整条线的判断连续性；这一条仍然按项目判定，不拆到工作项。
 
-**存储成本**：`contributors` 挂在每个工作项上，只记"参与过的人"，同一人只出现一次。TV 12 集 × 14 项 ≈ 168 项，每项通常 1–3 个 id，约 5–10 KB/项目。这是**为正确性付出的必要成本**：容器级省下的几 KB，换来的是每周都可能出现的错误扣减，而玩家无法从回执里看出为什么。
+**存储成本**：`contributors` 挂在每个工作项上，只记"参与过的人"，同一人只出现一次。当前 `tv_standard` 为 10 集 × 12 项 + 5 项公共制作 = 125 项，每项通常 1–3 个 id，约 5–10 KB/项目。这是**为正确性付出的必要成本**：容器级省下的几 KB，换来的是每周都可能出现的错误扣减，而玩家无法从回执里看出为什么。
 
 **实现要点**
 - 员工在本周首次对某工作项产生非零产出时，把其 id 追加进该工作项 `contributors`，同时判断是否触发扣减（顺序不能颠倒，否则会把自己算成"已有参与者"）。
@@ -641,7 +641,8 @@ WorkItem {
   deliver_at: 1..1000                     // 最低交付门槛（占 work_total 的千分比）
   deps: item_id[]                         // 可跨容器：公共制作 → 单集
   is_gate: bool                           // 是否为作品交付门槛项（仅单集末阶段）
-  quality: {story,direction,drawing,animation,art,sound}: 0..100
+  outsourceable: bool                     // 公共制作与 gate 必须为 false；仅 episode 非 gate 可外包
+  quality: {story,direction,drawing,animation,art,sound}: 0..105  // 展示分截顶 100
   contributors: staff_id[]                // 磨合判定用；首次产出时追加，同一人只记一次
 }
 
@@ -674,13 +675,13 @@ start_work ⇒ 实例化：
 
 **蓝图必须先有可检查的样例，M0 才算完成**。规范见 [制作蓝图规范](BLUEPRINT_SPEC.md)，样例见 [`blueprints/tv_standard.blueprint.json`](blueprints/tv_standard.blueprint.json)，校验命令 `npm run validate:blueprint`。
 
-样例（12 集）的读数：
+样例（v0.5 `tv_standard`，10 集）的读数：
 
 ```text
-单集 14 个工作项 / 596 点（5.96 人周）
-公共制作 6 项 / 325 点（3.25 人周）
-实例化 174 个工作项 / 7477 点（74.8 人周）
-关键路径最重链 574 点（占单集总工作量 96%）
+单集 12 个工作项 / 2,100 点（30.00 人周），其中核心 580、可外包 1,520
+公共制作 5 项 / 4,800 点（68.57 人周），全部不可外包
+实例化 125 个工作项 / 25,800 点（368.57 人周）
+关键路径最重链 1,780 点（25.43 人周，单集内）
 ```
 
 **为什么这条不能省**：字段齐全不等于结构成立。依赖有没有环、门槛是否可达、公共项是否真的成为单集前置、每集 14 项的粒度玩家是否还读得懂——这些只能靠一个真实样例 + 校验器回答。校验器已经用五类人为破坏（成环、删门槛、悬空依赖、缺阶段、孤立项）验证过会报错，见规范 §4。
@@ -766,7 +767,7 @@ WorkPlan.target: null
 
 **为什么不加效率惩罚**：定向已经通过"产能有限"产生了真实代价。再叠一个"非目标集效率下降"的系数，就是又一个隐性惩罚数值，既难解释也难平衡。痛感应当来自"别的地方真的变慢了"，而不是来自一个乘数。
 
-**为什么不做 O3（逐集/逐项指派）**：174 个工作项一旦可指派，UI 必然长成排班表，与"决策少而有分量"和 DEC-PLAY-002 的自动化边界直接冲突。需要更强控制时，应增加下一个低维旋钮（例如"暂停某集"），而不是把工作项摊开。
+**为什么不做 O3（逐集/逐项指派）**：125 个工作项一旦可指派，UI 必然长成排班表，与"决策少而有分量"和 DEC-PLAY-002 的自动化边界直接冲突。需要更强控制时，应增加下一个低维旋钮（例如"暂停某集"），而不是把工作项摊开。
 
 #### 7.3.6 交付：门槛达标后由玩家决定何时交
 
@@ -775,8 +776,9 @@ WorkPlan.target: null
 ```text
 可交付（全部 is_gate 项 delivered）
   ⇒ 玩家可 deliver_work：当次提交内完成交付结算，立即停止生产
-  ⇒ 或继续投入直到 deadline_week 自动强制交付
-不可交付 且 到达 deadline_week
+  ⇒ 或继续投入直到 deadline_week − 1（最后一个生产周）；该周生产与外包交付完成后，
+    结算记在 deadline_week 名下自动完成
+不可交付 且 已结算周达到 deadline_week
   ⇒ 强制交付：按当前完成度结算，扣罚与声望损失
 ```
 
@@ -820,7 +822,7 @@ Supplier { id, name, specialties[], capacity_per_week>0, quality, speed, price_p
 
 OutsourceContract {
   id, supplier_id, work_id
-  episode_id: null | episode_id     // null = 项目级公共制作的工作项
+  episode_id: episode_id                 // 外包只承接 episode 非 gate 工作项，不接受公共制作
   item_id                            // 外包的落点是具体工作项，不是"某个阶段"
   ability
   mode: normal | emergency
@@ -851,11 +853,15 @@ Offer { id, name, source, genre, scale, contract_budget, duration_weeks, target_
         ip_id: null|series_id,               // 可选 IP；立项时冻结，不按标题推断续作
         blueprint_id, episode_count>0, workload_scale_permille>0,   // 立项时实例化为具体工作项
         origin, style }
+
+Offer 生命周期新增：`expires_week, locked_until, lock_used, deposit_paid, offer_source_type,
+deposit_basis, deposit_rate_permille, deposit_amount`。后两项是生成时冻结的定金档位与金额快照；
+普通企划 5%、IP 上门 10%，DEC-PROD-006 的 TV-小按 5.5%，已支付金额不随后续字段篡改重算。
 ```
 
 **不变式**
 - `OutsourceContract.weekly_cap` 之和（同一供应商、active）≤ `Supplier.capacity_per_week`。
-- 合同的 `item_id` 必须属于同一 `work_id`；`episode_id` 与该工作项所在容器一致。
+- 合同的 `item_id` 必须属于同一 `work_id`，且是 `outsourceable=true` 的 episode 非 gate 项；`episode_id` 与该工作项所在单集一致。公共制作与 gate 不可外包。
 - 同一工作项可同时接受内部产能与多个外包合同，但累计交付不得超过其 `work_total`（超出部分不出产、不退款）。
 - `Committee.members` 中成员不重复、渠道不重复（一个成员一个渠道，`bd_dvd` 不挂成员），且成员渠道必须属于该 Partner。
 - active `Committee` 必须与同一 `mode=committee` 项目双向引用；项目允许 `producing/delivering`，`formed_week=opened_week`。
@@ -865,11 +871,15 @@ Offer { id, name, source, genre, scale, contract_budget, duration_weeks, target_
 - `mode=committee ⇒ investment.percent ∈ {10,20,…,100} ∧ committee_id≠null`。
 - `Offer.allowed_modes`：普通企划必含 contract 与 committee；原创只含 committee。
 
-**Vendor 运行时现状（2026-11-27）**：`suppliers` / `contracts` 仍以 `Json` 存储，但解析要求根数组必填，`validate` 已精确校验 Supplier 9 字段与 OutsourceContract 15 字段，并落实 INV-19/20、全局 id、供应商解锁/专业匹配、active 项目状态、episode 容器、能力一致性、费用/周期边界和 int64 汇总保护。active 合同计入共享容量；delivered/failed 合同不计入，但所有终态合同仍必须保留可校验的项目与工作项引用。`state_hash` 按 id 规范化 suppliers / contracts，并排序 specialties。
+**Vendor 运行时现状（2026-11-27）**：`suppliers` / `contracts` 仍以 `Json` 存储，但解析要求根数组必填，`validate` 已精确校验 Supplier 9 字段与 OutsourceContract 15 字段，并落实 INV-19/20、全局 id、供应商解锁/专业匹配、active 项目状态、episode 容器、能力一致性、可外包非 gate 限制、费用/周期边界和 int64 汇总保护。active 合同计入共享容量；delivered/failed 合同不计入。`state_hash` 按 id 规范化 suppliers / contracts，并排序 specialties。
+
+周结算已实现 DEC-VENDOR-003/004 的确定性正常/延误/返工、返工倒扣、同项比例与最大余数分配、截止失败和 active 容量释放；先完成本周交付，再按本周结算后的已结算周判断 `company.week >= due_week`。`end_company` 预演会将活动合同终态化。供应商基础目录（6 家、按周解锁）与 `sign_outsourcing`（`weekly_cap` 共享池预检、签约即付清、`due_week` 缓冲推导）已实现；`due_week` 缓冲系数与目录数值仍是 `[PLACEHOLDER]`，终态合同归档形状未实现。
+
+**未决冲突**：本节冻结约束要求所有终态合同保留可校验的项目与工作项引用，但当前 `settle_project` 会删除该项目的合同，Archive 28 字段也没有外包快照。#53 尚未裁决终态合同的保留或归档形状；在裁决前保留上述契约与引用校验，并把结项删除行为登记为实现缺口，不新增 Archive 字段、不删除项目后放宽引用校验，也不把删除合同美化为已实现归档。
 
 **Partnership 运行时现状（2026-11-27）**：`partners` / `committees` 根数组解析必填；Partner 精确 8 字段、history 精确 4 字段、Committee 精确 6 字段、member 精确 2 字段。INV-13 已断言成员/渠道唯一、伙伴渠道归属、BD 不挂成员、项目双向引用、active/closed 生命周期、关闭后 Archive 一致性及 history 归档引用。active Committee 允许指向 `delivering`，以覆盖 `end_company → finalize_delivery` 的合法中间态。`state_hash` 按 id 规范化 partners / committees，并排序 Partner.channels 与 Committee.members；history 保持追加顺序，不用排序掩盖乱序。
 
-上述状态约束不等于外包玩法已开放：`sign_outsourcing`、供应商默认目录、`weekly_cap` 推导、按周交付、费用支付和可靠性失败均尚未实现。项目交付/中止时删除其未完成 active 合同并释放产能，不退款；§6.4 / §7.3 的“未完成合同置 failed”目标语义已由该活动聚合清理实现，不得伪报未实际写入的终态合同。
+外包玩法已开放到"可签约、可交付、可失败"：`sign_outsourcing`、基础供应商目录、`weekly_cap` 签约推导与签约即付清均已实现，按周交付/可靠性失败/截止释放沿用 DEC-VENDOR-003/004；交付结项时终态合同仍被删除，终态归档形状未定，当前删除行为不得视为完整归档。
 
 ### 7.5 Finance
 
@@ -939,7 +949,7 @@ WorkRecord { id, ip_id, offer_id, name, source, genre, scale, mode, investment_p
              channel_breakdown[], episodes[{id, quality}], team[{id, name, role}], rules_status }
 ```
 
-以上是当前 runtime 已冻结并输出的 31 字段载荷。`episode_count/occurrence_issues/commercial_rank/episode_summary/committee_snapshot/major_events` 属于未来扩展，尚未实现，不得伪装成当前字段。履历保留单集质量摘要而不保留全部工作项：`episodes[{id, quality}]` + 六维质量 + 团队快照足以支持分集复盘，同时避免存档随工作项数量线性膨胀。
+以上是当前 runtime 已冻结并输出的 31 字段载荷，加上 2026-11-27 授权的外包履历快照 `outsourcing_summary{contracts,failed,points,spend}` 共 32 字段。`episode_count/occurrence_issues/commercial_rank/episode_summary/committee_snapshot/major_events` 属于未来扩展，尚未实现，不得伪装成当前字段。履历保留单集质量摘要而不保留全部工作项：`episodes[{id, quality}]` + 六维质量 + 团队快照足以支持分集复盘，同时避免存档随工作项数量线性膨胀。
 
 **写入时机与来源**
 - 来源链固定为 `OfferSnapshot.ip_id → Project.ip_id → WorkRecord.ip_id → Archive.series`；不按标题猜测续作，不恢复线性 `previous_work_id`。
@@ -1037,7 +1047,7 @@ WeekSnapshot {
 
 **收益**：依赖关系从 O(n²) 降为"各自 → 快照"。也让"顺序无关"变成可测试属性——只要所有计算只读快照，遍历顺序就不可能影响结果。
 
-**成本**：快照含全部工作项，TV 项目约 174 项（样例 12 集）。若实测拷断开销过大，允许快照持有只读引用而非深拷贝——但必须在类型层面禁止写入（`const`/只读视图），不能靠约定。
+**成本**：快照含全部工作项，当前 `tv_standard` 约 125 项（10 集）。若实测拷断开销过大，允许快照持有只读引用而非深拷贝——但必须在类型层面禁止写入（`const`/只读视图），不能靠约定。
 
 ### 8.4 读模型
 
@@ -1208,7 +1218,7 @@ WeekReceipt {
 
 要求：
 - `causes` 必须能回答"为什么这周只推进了这么多"，且必须能解释**没有推进**（例如"分镜与原画未达门槛，动画制作不可开工"）。
-- 工作项推进只列**有变化**的项，不把 174 项全部铺给玩家；默认折叠。
+- 工作项推进只列**有变化**的项，不把 125 项全部铺给玩家；默认折叠。核心回执中的净推进同时包含外包交付与返工倒扣，前端派生 `work_delta` 必须沿用同一口径。
 - 磨合损失必须逐条出现在回执里，否则玩家会认为"换人无缘无故变慢"。
 - `blocking_items[]` 与 `actionable_clues[]` 是互斥信息分区：所有待处理事件/强制事项完整进入前者，普通机会与预警进入后者；普通线索默认突出 2–3 条但不得因此丢弃其他重要信息。
 - 资金风险通过现金预测与周回执呈现；周结算刚性支出预检失败按 §22.2 直接破产，不进入可继续推进的危机状态。
@@ -1260,7 +1270,7 @@ advance_week → §22 八阶段原子结算
 - **关闭路径**：公司因破产或主动结束转 `closing` → 按公司关闭规则将未结项目转入交付清算 → 由 `finalize_delivery` 逐个结清。刚性支出预检失败即触发不可逆破产，不存在危机期限内继续经营的中间状态。
 
 ```text
-前置：全部 is_gate 项 delivered（提前交付）或已到 deadline_week（强制交付）
+前置：全部 is_gate 项 delivered（提前交付）或已结算周达到 deadline_week（截止周生产完成后自动结算）
 1. 门槛完成度：gate_completion_permille（强制交付时用于扣罚与评价修正）
 2. 质量：工作项 → 阶段 → 单集 → 作品（六维聚合链，§7.3.4）；适配度只修正评价
 3. 评价：S/A/B/C/D（固定分数线）；重大事故独立影响
@@ -1380,7 +1390,7 @@ SaveRecord { version: 4, savedAt: ISO8601, rules_version, state: GameState }
 
 估算（520 周）：项目 ≤ 5、员工 ≤ 30、流水 ≤ 6000 条、履历 ≤ 30 部、竞争公司 30。
 
-**工作项是本架构新增的主要体积来源**：按样例 12 集 × 14 项 + 6 项公共制作 = 174 项/项目（13 集约 188 项）；每项约 150–200 字节（六维质量 + 1–3 个参与者 id），单项目约 30 KB；5 个项目并行 ≈ 150 KB。叠加其他状态，单文档预计 **0.5–1.5 MB**。
+**工作项是本架构新增的主要体积来源**：按当前 `tv_standard` 10 集 × 12 项 + 5 项公共制作 = 125 项/项目；每项约 150–200 字节（六维质量 + 1–3 个参与者 id），单项目约 25 KB；5 个项目并行 ≈ 125 KB。叠加其他状态，单文档预计 **0.5–1.5 MB**。
 
 | 措施 | 何时用 |
 | --- | --- |
@@ -1519,7 +1529,7 @@ SaveRecord { version: 4, savedAt: ISO8601, rules_version, state: GameState }
 | # | 风险 | 影响 | 缓解 |
 | --- | --- | --- | --- |
 | R1 | 结算服务变成"上帝对象"（13 阶段 × 9 领域） | 难维护、难测试 | 每阶段独立函数 + 快照只读 + 每阶段单独测试；禁止在编排里写公式 |
-| R2 | 工作项模型过度复杂（TV 约 174 项） | 玩家理解与架构维护成本 | 玩家只看到单集/阶段；工作项只在详情页折叠展示；分派由内核完成，玩家不做逐项微操 |
+| R2 | 工作项模型过度复杂（当前 `tv_standard` 约 125 项） | 玩家理解与架构维护成本 | 玩家只看到单集/阶段；工作项只在详情页折叠展示；分派由内核完成，玩家不做逐项微操 |
 | R3 | 六维质量提高理解成本 | 玩家看不懂质量为什么低 | 只显示维度详情；总览只给阶段质量与最终质量；回执用文案解释而非罗列数值 |
 | R4 | 多项目资源竞争缺乏可读反馈 | 多开退化为"多几条进度条" | 通过现金、核心员工唯一归属、供应商产能和项目风险形成自然约束；不得新增独立管理负荷数值 |
 | R10 | 工作项自动分派结果难解释 | 玩家觉得"系统乱安排"，失去掌控感 | 回执逐项说明本周投入与原因；排序规则固定且公开；需要更强控制在"项目优先级/关键单集"层解决，而不是摊开工作项 |
@@ -1601,7 +1611,7 @@ SaveRecord { version: 4, savedAt: ISO8601, rules_version, state: GameState }
 | 融资条件与期限 | 仅未来更新候选；当前不提供 `arrange_financing`、贷款或偿付状态 | 不属于首版接口/参数标定 |
 | 临时员工/供应商跨项目 | 临时员工绑定单项目；供应商按合同占用周产能；二者都不放宽核心员工约束 | §7.4 |
 | 工作项与依赖图 | 工作项为唯一生产原子，依赖跨容器，状态全派生 | §7.3.1–§7.3.3 |
-| 质量聚合参数 | 工作项→阶段→单集→作品；保留 600‰+40 传递上限 | §7.3.4 |
+| 质量聚合参数 | 工作项（按 `quality_weight_permille` 加权）→ 单集（层内归一）→ 作品（公共层 200‰ + 单集 800‰）；保留 600‰+40 传递上限 | §7.3.4、DEC-STAFF-008 |
 | 交付时机 | 门槛达标后玩家可主动交付（C13，需知情） | §7.3.6 |
 
 ## 19. 与现有文档的关系与冲突登记
@@ -1662,7 +1672,7 @@ SaveRecord { version: 4, savedAt: ISO8601, rules_version, state: GameState }
 
 ### DISC-01 Q2–Q8、Q10–Q11 的架构约束补充（2026-11-25）
 
-- **机会刷新与定金**：Market 持有企划池、招聘/Scout 候选机会及锁定状态；企划池自然周更、招聘池部分轮换、Scout 付费即时刷新和企划两周定金锁定属于 Market/Staff 的业务规则。定金档位固定为普通企划 5%、IP 上门企划 10%，计算基数为企划生成时固定的基础立项费用；其他池规模与费用仍属于待标定参数。
+- **机会刷新与定金**：Market 持有企划池、招聘/Scout 候选机会及锁定状态；企划池自然周更、招聘池部分轮换、Scout 付费即时刷新和企划两周定金锁定属于 Market/Staff 的业务规则。定金档位固定为普通企划 5%、IP 上门企划 10%，DEC-PROD-006 的 TV-小按 5.5% 分档；计算基数为企划生成时固定的基础立项费用，金额在生成时冻结。其他池规模与费用仍属于待标定参数。
 - **托管与玩家承诺边界**：自动执行只消费玩家已配置的计划和已承诺资源；招聘、外包等新增重大支出仍由玩家明确确认，不新增自动采购或隐式承诺。
 - **周内计划态**：assign_staff 与 set_work_plan 的周内操作只更新计划态。预览是从当前最终计划态派生的只读结果，不写入存档、不产生进度、磨合损失、现金变化或合同承诺；周结算统一校验并原子提交实际结果。
 - **人员磨合**：普通员工磨合按“员工 × 工作项”的历史实际参与关系判定；监督团队层面的切换损失独立计算。具体事实字段由 Staff/Project 的唯一写入权威落实，不建立重复事实源。

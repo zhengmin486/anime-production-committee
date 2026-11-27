@@ -2,6 +2,8 @@ export const V4_DIMENSIONS = ['story', 'direction', 'drawing', 'animation', 'art
 export const V4_WINDOWS = ['domestic_streaming', 'overseas', 'merchandise', 'music', 'tv', 'bd_dvd'] as const
 export const V4_PARTNERSHIP_CHANNELS = [...V4_WINDOWS, 'publishing'] as const
 export const V4_WORK_COST_CATEGORIES = ['salary', 'production', 'temporary', 'outsourcing', 'events', 'extension', 'distribution', 'penalty', 'development'] as const
+export const V4_STAFF_ROLES = ['director', 'scriptwriter', 'animation_director', 'key_animator', 'animator', 'production_manager', 'postproduction',
+  '作画', '演出', '脚本', '摄影', '监督', '音乐', '声优', '美术'] as const
 
 export type V4Dimension = typeof V4_DIMENSIONS[number]
 export type V4Window = typeof V4_WINDOWS[number]
@@ -14,8 +16,6 @@ export const V4_WORK_SOURCES = ['publisher', 'studio', 'manga', 'light_novel', '
 export type V4WorkSource = typeof V4_WORK_SOURCES[number]
 export type V4Scale = 'ova' | 'short' | 'tv' | 'movie'
 export type V4CooperationMode = 'contract' | 'committee'
-export const V4_STAFF_ROLES = ['director', 'scriptwriter', 'animation_director', 'key_animator', 'animator', 'production_manager', 'postproduction',
-  '作画', '演出', '脚本', '摄影', '监督', '音乐', '声优', '美术'] as const
 export type V4StaffRole = typeof V4_STAFF_ROLES[number]
 
 export interface V4Quality {
@@ -62,6 +62,13 @@ export interface V4TeamMember {
   role: V4StaffRole
 }
 
+export interface V4OutsourcingSummary {
+  contracts: number
+  failed: number
+  points: number
+  spend: number
+}
+
 export interface V4WorkRecord {
   id: string
   ip_id: string | null
@@ -93,6 +100,7 @@ export interface V4WorkRecord {
   channel_breakdown: V4ChannelRevenue[]
   episodes: V4EpisodeRecord[]
   team: V4TeamMember[]
+  outsourcing_summary: V4OutsourcingSummary
   rules_status: 'placeholder'
 }
 
@@ -151,7 +159,7 @@ export const isV4Quality = (value: unknown): value is V4Quality => {
 const isV4ChannelRevenue = (value: unknown): value is V4ChannelRevenue => exactFields(value,
   ['window', 'potential', 'quality_factor', 'heat_factor', 'reputation_factor', 'tv_multiplier', 'agency_fee_permille', 'gross', 'net', 'revenue', 'company_received', 'owner'])
   && choice(value.window, V4_WINDOWS) && integer(value.potential)
-  && integer(value.quality_factor, 0, 1000) && integer(value.heat_factor, 0, 2000)
+  && integer(value.quality_factor, 0, 1040) && integer(value.heat_factor, 0, 2000)
   && integer(value.reputation_factor, 0, 2000) && integer(value.tv_multiplier, 0, 2000)
   && integer(value.agency_fee_permille, 0, 1000) && integer(value.gross) && integer(value.net, 0, value.gross as number)
   && integer(value.revenue) && value.revenue === value.gross && integer(value.company_received, 0, value.net as number)
@@ -176,7 +184,8 @@ export const isV4WorkRecord = (value: unknown): value is V4WorkRecord => {
     'start_week', 'end_week', 'end_reason', 'status', 'forced',
     'gate_completion_permille', 'aborted_week', 'penalty_paid', 'quality', 'quality_score', 'rating',
     'commercial_revenue', 'bd_gross', 'bd_revenue', 'committee_pool', 'investor_share', 'company_received', 'finance_summary',
-    'channel_breakdown', 'episodes', 'team', 'rules_status'])) return false
+    'channel_breakdown', 'episodes', 'team', 'outsourcing_summary', 'rules_status'])) return false
+  const outsourcing = value.outsourcing_summary as unknown as V4OutsourcingSummary
   if (!isText(value.id) || !nullableText(value.ip_id) || !isText(value.offer_id) || !isText(value.name)
     || !choice(value.source, V4_WORK_SOURCES) || !isText(value.genre)
     || !choice(value.scale, ['ova', 'short', 'tv', 'movie']) || !choice(value.mode, ['contract', 'committee'])
@@ -187,15 +196,23 @@ export const isV4WorkRecord = (value: unknown): value is V4WorkRecord => {
     || !integer(value.gate_completion_permille, 0, 1000)
     || !(value.end_reason === 'aborted'
       ? value.status === 'ABORTED' && week(value.aborted_week) && value.aborted_week === value.end_week && integer(value.penalty_paid)
-      : value.status === 'DELIVERED' && value.aborted_week === null) || !isV4Quality(value.quality) || !score(value.quality_score)
+      : value.status === 'DELIVERED' && value.aborted_week === null) || !isV4Quality(value.quality) || !integer(value.quality_score, 0, 105)
     || !choice(value.rating, ['S', 'A', 'B', 'C', 'D']) || value.rating !== ratingOf(value.quality_score)
     || !integer(value.commercial_revenue) || !integer(value.bd_gross) || !integer(value.bd_revenue)
     || !integer(value.committee_pool) || !integer(value.investor_share) || !integer(value.company_received)
     || !isV4FinanceSummary(value.finance_summary) || !arrayOf(value.channel_breakdown, isV4ChannelRevenue)
     || !arrayOf(value.episodes, isV4EpisodeRecord) || value.episodes.length === 0
     || !unique(value.episodes.map(({ id }) => id)) || !arrayOf(value.team, isV4TeamMember)
-    || !unique(value.team.map(({ id }) => id)) || value.rules_status !== 'placeholder') return false
+    || !unique(value.team.map(({ id }) => id))
+    || !exactFields(value.outsourcing_summary, ['contracts', 'failed', 'points', 'spend'])
+    || !integer(outsourcing.contracts, 0)
+    || !integer(outsourcing.failed, 0)
+    || !integer(outsourcing.points, 0)
+    || !integer(outsourcing.spend, 0)
+    || outsourcing.failed > outsourcing.contracts
+    || value.rules_status !== 'placeholder') return false
   if (value.finance_summary.penalty !== value.penalty_paid || value.finance_summary.bd_revenue !== value.bd_revenue) return false
+  if ((value.finance_summary.costs.outsourcing ?? 0) !== outsourcing.spend) return false
   if (value.end_reason === 'completed' && (value.forced || value.gate_completion_permille !== 1000)) return false
   if (!unique(value.channel_breakdown.map(({ window }) => window))) return false
   if (value.channel_breakdown.reduce((sum, line) => sum + line.revenue, 0) !== value.commercial_revenue) return false

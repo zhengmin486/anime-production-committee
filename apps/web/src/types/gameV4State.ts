@@ -2,6 +2,7 @@ import {
   V4_DIMENSIONS,
   V4_PARTNERSHIP_CHANNELS,
   V4_WINDOWS,
+  V4_WORK_SOURCES,
   isV4Archive,
   type V4Archive,
   type V4CooperationMode,
@@ -84,9 +85,21 @@ export interface V4WorkItem {
   deliver_at: number
   deps: string[]
   is_gate: boolean
+  outsourceable?: boolean
+  quality_weight_permille?: number
+  core_aesthetic?: boolean
+  in_house_points?: number
+  in_house_ability_centi_sum?: number
+  external_points?: number
+  external_quality_milli_sum?: number
+  external_min_quality?: number
   quality: V4QualityDimensions
   contributors: string[]
 }
+
+export type V4PersistedWorkItem = V4WorkItem & Required<Pick<V4WorkItem,
+  'outsourceable' | 'quality_weight_permille' | 'core_aesthetic' | 'in_house_points' | 'in_house_ability_centi_sum'
+  | 'external_points' | 'external_quality_milli_sum' | 'external_min_quality'>>
 
 export interface V4EpisodeStage {
   key: V4Stage
@@ -145,6 +158,12 @@ export interface V4Offer {
   [key: string]: unknown
 }
 
+export interface V4ContributorSnapshot {
+  id: string
+  name: string
+  role: string
+}
+
 export interface V4Project {
   id: string
   offer: V4Offer
@@ -156,6 +175,7 @@ export interface V4Project {
   extension: V4JsonObject
   status: string
   supervisor_staff_id: string | null
+  contributor_snapshots: V4ContributorSnapshot[]
   ip_id: string | null
   committee_id: string | null
   tv_service: V4JsonObject | null
@@ -173,9 +193,12 @@ export interface V4PoolCandidate {
 
 export interface V4Recruitment {
   pool: V4PoolCandidate[]
+  free_pool?: V4PoolCandidate[]
   pity: { since_sr: number; since_ssr: number }
   last_scout_week: number | null
 }
+
+export type V4PersistedRecruitment = V4Recruitment & { free_pool: V4PoolCandidate[] }
 
 export interface V4LedgerEntry {
   id: string
@@ -218,6 +241,14 @@ export interface V4EventOption {
   effects: V4EventEffect[]
 }
 
+export interface V4Escalation {
+  description: string
+  expires_weeks: number
+  triggered_week: number
+  options: V4EventOption[]
+  timeout_option_id: string
+}
+
 export interface V4PendingEvent {
   event_id: string
   name: string
@@ -228,6 +259,9 @@ export interface V4PendingEvent {
   once_per_project: boolean
   viewed: boolean
   options: V4EventOption[]
+  timeout_option_id?: string
+  escalated?: boolean
+  escalation?: V4Escalation | null
 }
 
 export interface V4WorkEventState {
@@ -299,6 +333,11 @@ const nullableText = (value: unknown): value is string | null => value === null 
 const choice = <T extends string>(value: unknown, values: readonly T[]): value is T => typeof value === 'string' && values.includes(value as T)
 const exactFields = (value: unknown, fields: readonly string[]): value is Record<string, unknown> => isRecord(value)
   && Object.keys(value).length === fields.length && fields.every((field) => Object.hasOwn(value, field))
+const exactFieldsWithOptional = (value: unknown, required: readonly string[], optional: readonly string[]): value is Record<string, unknown> => {
+  if (!isRecord(value) || !required.every((field) => Object.hasOwn(value, field))) return false
+  const allowed = new Set([...required, ...optional])
+  return Object.keys(value).every((field) => allowed.has(field))
+}
 const arrayOf = <T>(value: unknown, guard: (item: unknown) => item is T): value is T[] => Array.isArray(value) && value.every(guard)
 const isObjectArray = (value: unknown): value is V4JsonObject[] => Array.isArray(value) && value.every(isRecord)
 const scores = (value: unknown): value is V4AbilityScores => exactFields(value, V4_ABILITIES)
@@ -314,8 +353,7 @@ const optionalRulesStatus = (value: Record<string, unknown>): boolean => !Object
 export const isV4Offer = (value: unknown): value is V4Offer => {
   if (!isRecord(value)) return false
   if (!isText(value.id) || !isText(value.name)
-    || !choice(value.source, ['publisher', 'studio', 'manga', 'light_novel', 'game', 'original', 'market'])
-    || !isText(value.genre) || !choice(value.scale, ['ova', 'short', 'tv', 'movie'])
+    || !choice(value.source, V4_WORK_SOURCES) || !isText(value.genre) || !choice(value.scale, ['ova', 'short', 'tv', 'movie'])
     || !integer(value.contract_budget) || !integer(value.duration_weeks) || !integer(value.target_quality, 0, 100)
     || !integer(value.audience_base) || !integer(value.commercial_potential, 0, 1000)
     || !isRecord(value.channel_potentials) || !Object.entries(value.channel_potentials).every(([window, potential]) => choice(window, V4_WINDOWS) && integer(potential))
@@ -355,12 +393,18 @@ export const isV4Staff = (value: unknown): value is V4Staff => exactFields(value
   && nullableText(value.assignment_work_id) && (value.last_participation === null || isV4Participation(value.last_participation))
   && (value.temporary_contract === null || isV4TemporaryContract(value.temporary_contract))
 
-const isV4WorkItem = (value: unknown): value is V4WorkItem => exactFields(value,
-  ['id', 'key', 'ability', 'work_total', 'work_done', 'deliver_at', 'deps', 'is_gate', 'quality', 'contributors'])
+const isV4WorkItem = (value: unknown): value is V4PersistedWorkItem => exactFields(value,
+  ['id', 'key', 'ability', 'work_total', 'work_done', 'deliver_at', 'deps', 'is_gate', 'outsourceable',
+    'quality_weight_permille', 'core_aesthetic', 'in_house_points', 'in_house_ability_centi_sum', 'external_points',
+    'external_quality_milli_sum', 'external_min_quality', 'quality', 'contributors'])
   && isText(value.id) && isText(value.key) && choice(value.ability, V4_ABILITIES)
-  && integer(value.work_total) && integer(value.work_done) && integer(value.deliver_at)
-  && arrayOf(value.deps, isText) && typeof value.is_gate === 'boolean' && dimensions(value.quality)
-  && arrayOf(value.contributors, isText)
+  && integer(value.work_total, 1) && integer(value.work_done, 0, value.work_total as number) && integer(value.deliver_at, 1, 1000)
+  && arrayOf(value.deps, isText) && typeof value.is_gate === 'boolean' && typeof value.outsourceable === 'boolean'
+  && integer(value.quality_weight_permille, 0, 1000) && typeof value.core_aesthetic === 'boolean'
+  && integer(value.in_house_points) && integer(value.in_house_ability_centi_sum) && integer(value.external_points)
+  && integer(value.external_quality_milli_sum) && integer(value.external_min_quality, 0, 100)
+  && ((value.external_points as number) === 0 || (value.external_min_quality as number) > 0)
+  && dimensions(value.quality) && arrayOf(value.contributors, isText)
 
 const isV4EpisodeStage = (value: unknown): value is V4EpisodeStage => exactFields(value, ['key', 'items'])
   && choice(value.key, V4_STAGES) && arrayOf(value.items, isV4WorkItem)
@@ -374,24 +418,37 @@ const isV4WorkPlan = (value: unknown): value is V4WorkPlan => {
   return value.target === null || (exactFields(value.target, ['kind', 'id']) && isText(value.target.kind) && isText(value.target.id))
 }
 
+const isV4ContributorSnapshot = (value: unknown): value is V4ContributorSnapshot =>
+  exactFields(value, ['id', 'name', 'role']) && isText(value.id) && isText(value.name) && isText(value.role)
+
 export const isV4Project = (value: unknown): value is V4Project => {
   if (!exactFields(value, ['id', 'offer', 'mode', 'investment', 'channels', 'opened_week', 'deadline_week', 'extension',
-    'status', 'supervisor_staff_id', 'ip_id', 'committee_id', 'tv_service', 'common', 'episodes', 'plan', 'delivery'])) return false
+    'status', 'supervisor_staff_id', 'contributor_snapshots', 'ip_id', 'committee_id', 'tv_service', 'common', 'episodes', 'plan', 'delivery'])) return false
   return isText(value.id) && isV4Offer(value.offer) && choice(value.mode, ['contract', 'committee'])
     && isRecord(value.investment) && arrayOf(value.channels, (channel) => choice(channel, V4_PARTNERSHIP_CHANNELS))
     && integer(value.opened_week) && integer(value.deadline_week)
     && isRecord(value.extension) && isText(value.status) && nullableText(value.supervisor_staff_id)
+    && arrayOf(value.contributor_snapshots, isV4ContributorSnapshot)
     && nullableText(value.ip_id) && nullableText(value.committee_id) && nullableObject(value.tv_service)
     && exactFields(value.common, ['id', 'items']) && isText(value.common.id) && arrayOf(value.common.items, isV4WorkItem)
     && arrayOf(value.episodes, isV4Episode) && isV4WorkPlan(value.plan) && nullableObject(value.delivery)
 }
 
 const isV4PoolCandidate = (value: unknown): value is V4PoolCandidate => exactFields(value, ['staff', 'expires_week', 'origin'])
-  && isV4Staff(value.staff) && nullableInteger(value.expires_week) && isText(value.origin)
+  && isV4Staff(value.staff) && nullableInteger(value.expires_week) && choice(value.origin, ['regular', 'scout', 'temporary'])
 
-const isV4Recruitment = (value: unknown): value is V4Recruitment => exactFields(value, ['pool', 'pity', 'last_scout_week'])
-  && arrayOf(value.pool, isV4PoolCandidate) && exactFields(value.pity, ['since_sr', 'since_ssr'])
-  && integer(value.pity.since_sr) && integer(value.pity.since_ssr) && nullableInteger(value.last_scout_week)
+const isV4Recruitment = (value: unknown): value is V4PersistedRecruitment => {
+  if (!exactFields(value, ['pool', 'free_pool', 'pity', 'last_scout_week'])
+    || !arrayOf(value.pool, isV4PoolCandidate) || !arrayOf(value.free_pool, isV4PoolCandidate)
+    || !exactFields(value.pity, ['since_sr', 'since_ssr'])
+    || !integer(value.pity.since_sr) || !integer(value.pity.since_ssr) || !nullableInteger(value.last_scout_week)) return false
+  if (!value.pool.every((candidate) => (candidate.origin !== 'regular' || candidate.expires_week === null)
+    && (candidate.origin !== 'scout' || candidate.expires_week !== null)
+    && candidate.staff.assignment_work_id === null && candidate.staff.temporary_contract === null)) return false
+  return value.free_pool.length <= 24 && value.free_pool.every((candidate) => candidate.origin === 'regular'
+    && candidate.expires_week !== null && candidate.staff.employment === 'core'
+    && candidate.staff.assignment_work_id === null && candidate.staff.temporary_contract === null)
+}
 
 const isV4LedgerEntry = (value: unknown): value is V4LedgerEntry => exactFields(value,
   ['id', 'week', 'work_id', 'category', 'amount', 'counterparty', 'memo'])
@@ -406,18 +463,33 @@ const isV4Finance = (value: unknown): value is V4Finance => exactFields(value, [
   && isObjectArray(value.loans) && isV4Solvency(value.solvency)
 
 const isV4EventEffect = (value: unknown): value is V4EventEffect => exactFields(value, ['scope', 'target', 'stage', 'value'])
-  && isText(value.scope) && isText(value.target) && isText(value.stage) && signed(value.value)
+  && isText(value.scope) && isText(value.target) && typeof value.stage === 'string' && signed(value.value)
 
 const isV4EventOption = (value: unknown): value is V4EventOption => exactFields(value,
   ['id', 'label', 'kind', 'risk_hint', 'cost', 'effects'])
   && isText(value.id) && isText(value.label) && isText(value.kind) && isText(value.risk_hint)
   && signed(value.cost) && arrayOf(value.effects, isV4EventEffect)
 
-const isV4PendingEvent = (value: unknown): value is V4PendingEvent => exactFields(value,
-  ['event_id', 'name', 'work_id', 'triggered_week', 'expires_week', 'cooldown_weeks', 'once_per_project', 'viewed', 'options'])
-  && isText(value.event_id) && isText(value.name) && isText(value.work_id) && integer(value.triggered_week)
-  && nullableInteger(value.expires_week) && integer(value.cooldown_weeks) && typeof value.once_per_project === 'boolean'
-  && typeof value.viewed === 'boolean' && arrayOf(value.options, isV4EventOption)
+const isV4Escalation = (value: unknown): value is V4Escalation => exactFields(value,
+  ['description', 'expires_weeks', 'triggered_week', 'options', 'timeout_option_id'])
+  && isText(value.description) && integer(value.expires_weeks) && value.expires_weeks === 2 && integer(value.triggered_week)
+  && arrayOf(value.options, isV4EventOption) && value.options.length > 0 && typeof value.timeout_option_id === 'string'
+  && value.options.some((option) => option.kind === 'abandon')
+  && value.options.some((option) => option.id === value.timeout_option_id && (option.kind === 'abandon' || option.kind === 'decline'))
+
+const isV4PendingEvent = (value: unknown): value is V4PendingEvent => {
+  if (!exactFieldsWithOptional(value,
+    ['event_id', 'name', 'work_id', 'triggered_week', 'expires_week', 'cooldown_weeks', 'once_per_project', 'viewed', 'options'],
+    ['timeout_option_id', 'escalated', 'escalation'])) return false
+  if (!isText(value.event_id) || !isText(value.name) || !isText(value.work_id) || !integer(value.triggered_week)
+    || !nullableInteger(value.expires_week) || !integer(value.cooldown_weeks) || typeof value.once_per_project !== 'boolean'
+    || typeof value.viewed !== 'boolean' || !arrayOf(value.options, isV4EventOption) || value.options.length === 0) return false
+  if (Object.hasOwn(value, 'timeout_option_id') && typeof value.timeout_option_id !== 'string') return false
+  if (Object.hasOwn(value, 'escalated') && typeof value.escalated !== 'boolean') return false
+  if (value.escalation !== undefined && value.escalation !== null && !isV4Escalation(value.escalation)) return false
+  if (value.escalated === true && (value.escalation === undefined || value.escalation === null)) return false
+  return value.expires_week === null || value.options.some((option) => option.kind === 'abandon')
+}
 
 const isV4WorkEventState = (value: unknown): value is V4WorkEventState => exactFields(value, ['cooldowns', 'major_seen'])
   && isRecord(value.cooldowns) && Object.values(value.cooldowns).every((entry) => integer(entry)) && arrayOf(value.major_seen, isText)
@@ -451,13 +523,19 @@ export const isV4GameState = (value: unknown): value is V4GameState => {
   for (const member of state.staff) {
     if (staffIds.has(member.id)) return false
     staffIds.add(member.id)
-    if (member.assignment_work_id !== null && worksById.get(member.assignment_work_id)?.status !== 'producing') return false
+    if (member.assignment_work_id !== null) {
+      const assigned = worksById.get(member.assignment_work_id)
+      const closingHandoff = member.employment === 'temporary' && state.company.status === 'closing'
+        && assigned?.status === 'delivering'
+      if (assigned?.status !== 'producing' && !closingHandoff) return false
+    }
     if (member.employment === 'core' && member.temporary_contract !== null) return false
     if (member.employment === 'temporary') {
       const contract = member.temporary_contract
       if (contract === null || contract.start_week > state.company.week || member.assignment_work_id !== contract.work_id) return false
       const owner = worksById.get(contract.work_id)
-      if (!owner || owner.status !== 'producing' || contract.end_week !== owner.deadline_week) return false
+      const closingHandoff = state.company.status === 'closing' && owner?.status === 'delivering'
+      if (!owner || (owner.status !== 'producing' && !closingHandoff) || contract.end_week !== owner.deadline_week) return false
     }
   }
 
@@ -480,7 +558,9 @@ export const isV4GameState = (value: unknown): value is V4GameState => {
   const knownWorkIds = new Set([...workIds, ...state.archive.works.map((record) => record.id)])
 
   const candidateIds = new Set<string>()
-  for (const candidate of state.recruitment.pool) {
+  const recruitment = state.recruitment as V4PersistedRecruitment
+  if (recruitment.last_scout_week !== null && recruitment.last_scout_week > state.company.week) return false
+  for (const candidate of [...recruitment.pool, ...recruitment.free_pool]) {
     if (candidateIds.has(candidate.staff.id) || staffIds.has(candidate.staff.id)
       || candidate.staff.assignment_work_id !== null || candidate.staff.temporary_contract !== null) return false
     candidateIds.add(candidate.staff.id)
@@ -504,10 +584,8 @@ export const isV4GameState = (value: unknown): value is V4GameState => {
     if (work.committee_id !== null && !committeeIds.has(work.committee_id)) return false
   }
 
-  const pendingWorks = new Set<string>()
   for (const event of state.events.pending) {
-    if (!workIds.has(event.work_id) || pendingWorks.has(event.work_id)) return false
-    pendingWorks.add(event.work_id)
+    if (!workIds.has(event.work_id)) return false
   }
   for (const entry of state.finance.entries) {
     if (entry.work_id !== null && !knownWorkIds.has(entry.work_id)) return false

@@ -6,7 +6,8 @@
 // 契约依据：M0_CONTRACT_FREEZE §14.13.2（#53 裁决，PR #97 合入）、DECISION_LOG §17 Q4、
 // DATA_DICTIONARY_V4 §3.12、DESIGN_BACKLOG STATUS-49/51。
 // DEC-MARKET-001：企划市场固定四槽，锁定期两周（W/W+1 有效，W+2 开局失效）、
-// 终身一次锁定、定金普通 5%/IP 上门 10% × deposit_basis（生成时固定）、
+// 终身一次锁定、普通 5%/IP 上门 10% × deposit_basis（生成时固定）、
+// DEC-PROD-006：已注册 TV-小企划使用 170M/52 周/10 集/Q_min 65 与 5.5% 定金快照。
 // 签约 100% 抵扣（仅锁定期内）、到期定金不退。每周只补空槽，存活企划不重抽。
 // 危机机制已废除：守卫不含危机分支，CRISIS_COMMITMENT_BLOCKED 为废弃占位码。
 //
@@ -35,8 +36,12 @@ export const DEFAULT_PARAMS = Object.freeze({
   expiry_min: 1,         // [PLACEHOLDER] 有效期范围 1–3 周（STATUS-49 确认范围）
   expiry_max: 3,
   lock_weeks: 2,         // Q4 已确认：锁定期两周，非待标定参数
-  deposit_rate_regular_permille: 50,   // §14.13.2 已冻结：普通企划 5%
+  deposit_rate_regular_permille: 50,   // §14.13.2 已冻结：非矩阵普通企划 5%
   deposit_rate_ip_permille: 100,       // §14.13.2 已冻结：IP 上门企划 10%
+  deposit_rate_tv_small_permille: 55,  // DEC-PROD-006：TV-小 5.5%
+  tv_small_budget: 170000000,
+  tv_small_weeks: 52,
+  tv_small_target_quality: 65,
 })
 
 // ---- 企划生成 ----
@@ -48,9 +53,13 @@ export function generateOffer(seed, week, index, opts = {}) {
 
   const genre = GENRES[subBelow(0, GENRES.length)]
   const scale = GENERATED_SCALES[0]
-  const episodeCount = { short: 1, ova: 2, tv: 12, movie: 1 }[scale]
-  const budget = (500 + subBelow(2, 1500)) * 10000
+  const episodeCount = { short: 1, ova: 2, tv: 10, movie: 1 }[scale]
+  const budget = params.tv_small_budget
   const sourceType = opts.sourceType ?? 'market'
+  const depositRate = sourceType === 'ip_visit'
+    ? params.deposit_rate_ip_permille
+    : params.deposit_rate_tv_small_permille
+  const depositAmount = Math.floor(budget / 1000) * depositRate + Math.floor((budget % 1000) * depositRate / 1000)
   const minReputation = Math.min(subBelow(7, 120), opts.reputationCap ?? 120)
   const commercialPotential = subBelow(6, 101)
   const potential = (permille) => Math.floor(budget * permille / 1000)
@@ -62,8 +71,8 @@ export function generateOffer(seed, week, index, opts = {}) {
     genre,
     scale,
     contract_budget: budget,
-    duration_weeks: 12 + subBelow(3, 27),
-    target_quality: 40 + subBelow(4, 51),
+    duration_weeks: params.tv_small_weeks,
+    target_quality: params.tv_small_target_quality,
     audience_base: 1000 + subBelow(5, 9000),
     commercial_potential: commercialPotential,
     channel_potentials: {
@@ -87,6 +96,8 @@ export function generateOffer(seed, week, index, opts = {}) {
     offer_source_type: sourceType,
     // §14.13.2：定金基数在生成时固定，后续预算调整不得追溯改变定金。
     deposit_basis: budget,
+    deposit_rate_permille: depositRate,
+    deposit_amount: depositAmount,
     expires_week: week + params.expiry_min + subBelow(8, params.expiry_max - params.expiry_min + 1),
     locked_until: null,
     lock_used: false,
@@ -162,12 +173,13 @@ export function depositBase(offer) {
   return offer.deposit_basis
 }
 
-// 定金档位（§14.13.2 已冻结）：普通 5%、IP 上门 10%，来源类型决定档位，玩家不可切换。
-// 整数千分比计算；非整除时的取整规则待标定（CATALOG §11.3），当前向下取整。
+// 定金档位：普通 5%、IP 上门 10%，矩阵企划使用生成时冻结的档位与金额快照。
+// 整数千分比向下取整；旧 fixture 未带快照时由来源档位和 deposit_basis 推导。
 export function depositAmount(offer, params = DEFAULT_PARAMS) {
-  const rate = offer.offer_source_type === 'ip_visit'
+  if (Number.isInteger(offer.deposit_amount) && offer.deposit_amount >= 0) return offer.deposit_amount
+  const rate = offer.deposit_rate_permille ?? (offer.offer_source_type === 'ip_visit'
     ? params.deposit_rate_ip_permille
-    : params.deposit_rate_regular_permille
+    : params.deposit_rate_regular_permille)
   const basis = depositBase(offer)
   return Math.floor(basis / 1000) * rate + Math.floor((basis % 1000) * rate / 1000)
 }

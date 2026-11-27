@@ -253,9 +253,12 @@ function ProjectPanel({ game, work, busy, run }: { game: V4GameState; work: V4Pr
 }
 
 function RecruitmentPanel({ game, busy, run }: { game: V4GameState; busy: boolean; run: Run }) {
+  const temporaryWork = game.works.find((work) => work.status === 'producing')
   return <section className="v4-subsection" aria-labelledby="recruit-title"><div className="v4-subheading"><h3 id="recruit-title">核心招聘</h3><button className="v4-text-button" disabled={busy || game.company.status !== 'running' || game.recruitment.last_scout_week === game.company.week} onClick={() => run('scout')}>本周招募</button></div>
-    {game.recruitment.pool.length === 0 ? <p className="v4-empty">招聘池为空。每周可招募一次候选人。</p> : <div className="v4-recruit-list">{game.recruitment.pool.map((candidate) => <article key={candidate.staff.id}><div><strong>{candidate.staff.name}</strong><span>{candidate.staff.role} · {candidate.staff.talent_type}</span><small>主能力 {Math.max(...Object.values(candidate.staff.abilities))} · 签约费 {money(candidate.staff.signing_fee)}{candidate.expires_week !== null ? ` · W${candidate.expires_week} 到期` : ''}</small></div><button className="v4-button" disabled={busy || game.company.status !== 'running' || candidate.staff.employment !== 'core'} onClick={() => run('hire_core', { staff_id: candidate.staff.id })}>签约核心</button></article>)}</div>}
-    <p className="v4-fineprint">正常临时候选来源仍受冻结契约冲突阻塞，界面不伪造临时招聘入口。</p>
+    {game.recruitment.pool.length === 0 ? <p className="v4-empty">招聘池为空。每周可招募一次候选人。</p> : <div className="v4-recruit-list">{game.recruitment.pool.map((candidate) => <article key={candidate.staff.id}><div><strong>{candidate.staff.name}</strong><span>{candidate.staff.role} · {candidate.staff.talent_type}</span><small>主能力 {Math.max(...Object.values(candidate.staff.abilities))} · 签约费 {money(candidate.staff.signing_fee)}{candidate.expires_week !== null ? ` · W${candidate.expires_week} 到期` : ''}</small></div>{candidate.origin === 'temporary'
+      ? <button className="v4-button" disabled={busy || !temporaryWork || game.company.status !== 'running'} onClick={() => run('hire_temporary', { work_id: temporaryWork?.id, candidate_id: candidate.staff.id })}>签约临时<small>{temporaryWork ? `加入 ${temporaryWork.offer.name}` : '需先在制项目'}</small></button>
+      : <button className="v4-button" disabled={busy || game.company.status !== 'running' || candidate.staff.employment !== 'core'} onClick={() => run('hire_core', { staff_id: candidate.staff.id })}>签约核心</button>}</article>)}</div>}
+    <p className="v4-fineprint">临时员工绑定首个在制项目，占用公司弹性工位；合同结束周随项目延期同步。</p>
   </section>
 }
 
@@ -263,7 +266,7 @@ function SupplierPanel({ game, work, busy, run }: { game: V4GameState; work: V4P
   const items = useMemo(() => {
     if (!work) return []
     const all = new Map(itemsOf(work).map((item) => [item.id, item]))
-    return [...all.values()].filter((item) => item.work_done < item.work_total && item.deps.every((id) => {
+    return [...all.values()].filter((item) => item.outsourceable && !item.is_gate && item.work_done < item.work_total && item.deps.every((id) => {
       const dependency = all.get(id)
       return dependency && dependency.work_done * 1000 >= dependency.deliver_at * dependency.work_total
     }))

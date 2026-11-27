@@ -1,59 +1,66 @@
 {
   "schema_version": 1,
   "id": "tv_standard",
-  "name": "常规 TV 季番（12 集）",
+  "name": "常规 TV 季番（10 集）",
   "scale": "tv",
-  "episode_count": 12,
+  "episode_count": 10,
   "work_unit": "centi_staff_week",
-  "notes": "工作点单位：1 点 = 1/100 人周。数值为 [PLACEHOLDER] 量级样例，用于验证结构可检查性，不作为平衡依据。common 项为项目级公共制作，episode 项为单集模板，实例化时按 episode_count 展开为 ep01..ep12。",
+  "notes": "v0.5 标准 TV：公共制作 4,800 点；每集 2,100 点，其中不可外包 580 点、可外包 1,520 点。公共制作只计一次，不按集数重复。",
   "common": [
     {
       "key": "series_composition",
-      "name": "系列构成",
+      "name": "企划与系列构成",
       "ability": "planning",
-      "work_total": 60,
+      "work_total": 1500,
       "deliver_at": 850,
-      "deps": []
+      "deps": [],
+      "outsourceable": false,
+      "quality_weight_permille": 63,
+      "core_aesthetic": true
     },
     {
       "key": "character_design",
       "name": "角色设定",
       "ability": "drawing",
-      "work_total": 85,
+      "work_total": 1000,
       "deliver_at": 900,
-      "deps": []
+      "deps": [],
+      "outsourceable": false,
+      "quality_weight_permille": 42,
+      "core_aesthetic": true
     },
     {
       "key": "art_setting",
-      "name": "美术设定",
+      "name": "世界观美术与色彩设定",
       "ability": "drawing",
-      "work_total": 70,
+      "work_total": 500,
       "deliver_at": 850,
-      "deps": []
-    },
-    {
-      "key": "color_design",
-      "name": "色彩设计",
-      "ability": "drawing",
-      "work_total": 30,
-      "deliver_at": 850,
-      "deps": ["common:character_design"]
-    },
-    {
-      "key": "music",
-      "name": "配乐",
-      "ability": "postproduction",
-      "work_total": 45,
-      "deliver_at": 800,
-      "deps": []
+      "deps": ["common:character_design"],
+      "outsourceable": false,
+      "quality_weight_permille": 21,
+      "core_aesthetic": true
     },
     {
       "key": "op_ed",
-      "name": "OP/ED",
+      "name": "OP/ED 分镜演出",
       "ability": "postproduction",
-      "work_total": 35,
+      "work_total": 900,
       "deliver_at": 800,
-      "deps": []
+      "deps": [],
+      "outsourceable": false,
+      "quality_weight_permille": 37,
+      "core_aesthetic": false
+    },
+    {
+      "key": "music",
+      "name": "主题曲与主音效库",
+      "ability": "postproduction",
+      "work_total": 900,
+      "deliver_at": 800,
+      "deps": [],
+      "outsourceable": false,
+      "quality_weight_permille": 37,
+      "core_aesthetic": false
     }
   ],
   "episode": [
@@ -62,127 +69,145 @@
       "stage": "content_design",
       "name": "单集脚本",
       "ability": "planning",
-      "work_total": 42,
+      "work_total": 100,
       "deliver_at": 900,
-      "deps": ["common:series_composition"]
+      "deps": ["common:series_composition"],
+      "outsourceable": false,
+      "quality_weight_permille": 100,
+      "core_aesthetic": true
     },
     {
       "key": "episode_direction_plan",
       "stage": "content_design",
-      "name": "演出构想",
+      "name": "分镜与演出构想",
       "ability": "direction",
-      "work_total": 18,
+      "work_total": 100,
       "deliver_at": 850,
-      "deps": ["script"]
-    },
-    {
-      "key": "storyboard",
-      "stage": "storyboard_key_animation",
-      "name": "分镜",
-      "ability": "direction",
-      "work_total": 55,
-      "deliver_at": 900,
-      "deps": ["episode_direction_plan"]
+      "deps": ["script"],
+      "outsourceable": false,
+      "quality_weight_permille": 100,
+      "core_aesthetic": true
     },
     {
       "key": "layout",
       "stage": "storyboard_key_animation",
-      "name": "构图与Layout",
+      "name": "构图与 Layout",
       "ability": "drawing",
-      "work_total": 48,
+      "work_total": 260,
       "deliver_at": 850,
-      "deps": ["storyboard", "common:character_design"]
+      "deps": ["episode_direction_plan", "common:character_design"],
+      "outsourceable": false,
+      "quality_weight_permille": 119,
+      "core_aesthetic": true
     },
     {
       "key": "key_animation",
       "stage": "storyboard_key_animation",
-      "name": "原画",
+      "name": "一原外包",
       "ability": "drawing",
-      "work_total": 95,
+      "work_total": 220,
       "deliver_at": 900,
-      "deps": ["layout"]
+      "deps": ["layout"],
+      "outsourceable": true,
+      "quality_weight_permille": 101,
+      "core_aesthetic": true
     },
     {
       "key": "inbetween",
       "stage": "animation",
-      "name": "动画（中割）",
+      "name": "二原与中割动画外包",
       "ability": "animation",
-      "work_total": 78,
+      "work_total": 650,
       "deliver_at": 900,
-      "deps": ["key_animation"]
-    },
-    {
-      "key": "animation_check",
-      "stage": "animation",
-      "name": "作画检查",
-      "ability": "direction",
-      "work_total": 34,
-      "deliver_at": 950,
-      "deps": ["inbetween"]
+      "deps": ["key_animation"],
+      "outsourceable": true,
+      "quality_weight_permille": 100,
+      "core_aesthetic": false
     },
     {
       "key": "background",
       "stage": "art_visual",
-      "name": "背景",
+      "name": "背景美术外包",
       "ability": "drawing",
-      "work_total": 62,
+      "work_total": 300,
       "deliver_at": 850,
-      "deps": ["layout", "common:art_setting"]
+      "deps": ["layout", "common:art_setting"],
+      "outsourceable": true,
+      "quality_weight_permille": 130,
+      "core_aesthetic": true
     },
     {
-      "key": "art_check",
+      "key": "coloring",
       "stage": "art_visual",
-      "name": "美术检查",
+      "name": "上色与色彩指定外包",
       "ability": "drawing",
-      "work_total": 20,
+      "work_total": 230,
       "deliver_at": 900,
-      "deps": ["background", "common:color_design"]
+      "deps": ["inbetween", "background"],
+      "outsourceable": true,
+      "quality_weight_permille": 50,
+      "core_aesthetic": false
     },
     {
       "key": "composite",
       "stage": "photography_editing",
       "name": "摄影合成",
       "ability": "postproduction",
-      "work_total": 52,
+      "work_total": 80,
       "deliver_at": 900,
-      "deps": ["animation_check", "art_check"]
-    },
-    {
-      "key": "editing",
-      "stage": "photography_editing",
-      "name": "剪辑",
-      "ability": "direction",
-      "work_total": 24,
-      "deliver_at": 950,
-      "deps": ["composite"]
-    },
-    {
-      "key": "dubbing",
-      "stage": "sound_delivery",
-      "name": "配音收录",
-      "ability": "postproduction",
-      "work_total": 26,
-      "deliver_at": 900,
-      "deps": ["editing"]
+      "deps": ["coloring"],
+      "outsourceable": false,
+      "quality_weight_permille": 34,
+      "core_aesthetic": false
     },
     {
       "key": "sound_mix",
-      "stage": "sound_delivery",
-      "name": "音响调整",
+      "stage": "photography_editing",
+      "name": "音控与试片",
       "ability": "postproduction",
-      "work_total": 30,
-      "deliver_at": 950,
-      "deps": ["dubbing", "common:music"]
+      "work_total": 20,
+      "deliver_at": 900,
+      "deps": ["composite"],
+      "outsourceable": false,
+      "quality_weight_permille": 8,
+      "core_aesthetic": false
+    },
+    {
+      "key": "editing",
+      "stage": "sound_delivery",
+      "name": "剪辑协力",
+      "ability": "direction",
+      "work_total": 20,
+      "deliver_at": 900,
+      "deps": ["composite"],
+      "outsourceable": true,
+      "quality_weight_permille": 8,
+      "core_aesthetic": false
+    },
+    {
+      "key": "sound_control",
+      "stage": "sound_delivery",
+      "name": "音响调整协力",
+      "ability": "postproduction",
+      "work_total": 100,
+      "deliver_at": 900,
+      "deps": ["editing", "sound_mix", "common:music"],
+      "outsourceable": true,
+      "quality_weight_permille": 42,
+      "core_aesthetic": false
     },
     {
       "key": "delivery_master",
       "stage": "sound_delivery",
       "name": "完成母版",
       "ability": "postproduction",
-      "work_total": 12,
+      "work_total": 20,
       "deliver_at": 1000,
+      "deps": ["sound_control", "sound_mix", "common:op_ed"],
       "is_gate": true,
-      "deps": ["sound_mix", "common:op_ed"]
+      "outsourceable": false,
+      "quality_weight_permille": 8,
+      "core_aesthetic": false
     }
   ]
 }
