@@ -636,3 +636,31 @@ v3 的单项目、五阶段、全局 phase、单事件槽、双份财务汇总�
 - 任一时点至少保证2个企划可立即承接。IP上门企划占普通企划槽；自定企划独立入口，不占市场槽。
 - 人才市场另有固定4个候选人展示槽位，四槽全部属于招聘市场；项目临时员工不进入人才市场。
 - 本规则取代企划市场旧10槽位/每周补充2个方案。企划市场与人才市场不得合并计数。
+
+
+### 14.15 2026-11-27 供应商、商业收入、特殊机会与设施契约补充
+
+#### 14.15.1 供应商周产能与可靠性
+
+- 供应商 `capacity_per_week` 是全平台 active 合同共享总池；`speed` 计算单合同基础上限：`max(1, floor(capacity_per_week * speed / 100))`。
+- normal 模式速度/价格倍率均100%；emergency 模式速度135%、价格140%。签约时按 `weekly_cap=min(avail_cap, work_total, max(1, floor(base_contract_cap*mode_speed_mult/100)))` 计算并冻结；`avail_cap=capacity_per_week-sum(active.weekly_cap)`。
+- 签约预检、预留与合同创建原子提交；active 合同预留总量不得超过供应商总池。跨项目按各自 weekly_cap 独立推进；同一工作项内合同争用 item_room 时按剩余需求比例分配并使用最大余数法。不设工序独立产能限制。
+- 每周按 `(week, contract.id, "outsource_tick")` 生成确定性 roll。roll<reliability 正常交付；`r<=roll<1-0.2*(1-r)` 为当周0交付的常规延误；其余为质量返工，当周0交付并将 work_done 倒扣 `max(1,weekly_cap//4)`，结果不得低于0。
+- 签约即付清；延误、返工、失败均无退款或额外扣款。每周先处理随机结果和 work_done，再检查完成；若 `week>=due_week` 且仍未完成，转 failed 并释放 weekly_cap。剩余缺口由玩家内部补齐或重新签约。
+
+#### 14.15.2 六渠道收入模型与成本口径
+
+- 六渠道统一使用 `ChannelGross=min(Cap_c, BasePool(type,scale)*w_c*TV_Mult_c*QualityFactor*RepFactor*HeatFactor*GenreWeight_c)`。渠道封顶以 `ChannelBase_c=BasePool*w_c` 为基准，`Cap_c=ChannelBase_c*CapMultiplier_c`。
+- 标准12集TV制作费200M、BasePool 280M。类型倍率：OVA 0.90、短篇1.15、TV小/中/大1.35/1.40/1.45、剧场版1.60。
+- 六渠道参数详见 DECISION_LOG §22.3；TV倍率只作用国内配信、玩具/周边、音乐、BD/DVD。OVA电视播出收入为0；剧场版不计算电视播出版权收入，改按独立票房收入结算，票房公式待标定。
+- RepFactor T0 0.90至T7 1.25；HeatFactor 0.75–1.45；GenreWeight 0.80–1.30。具体曲线与题材矩阵待标定。
+- fixed_prelaunch_cost 默认制作费10%，按类型×规模可固定覆盖；项目交付通过进入发行准备时一次性扣除，取消/中止不退。Finance现金扣款与净商业池成本扣除是同一笔成本的两个视角，不得重复扣款。
+- 电视播出、BD/DVD渠道抽成均0 bps；BD/DVD毛收入50%直接归制作公司。外部代理费率替代对应渠道 channel_overhead_bps，二者互斥。
+
+#### 14.15.3 特殊商业机会与设施阶梯
+
+- 五类特殊商业机会的门槛、触发概率、前置费、收入区间、履约工作量与期限以 DECISION_LOG §22.5 为准。接受即锁定收入并扣前置费；按期完成全额取得，原期限后2周宽限期内完成收入折减25%，超过宽限期或项目中止收入归0；前置费沉没，彻底违约/中止声望处罚5–10点，避免与既有中止处罚重复。
+- 特殊机会按作品规模进行触发检查；标准12集TV每4集一次。不同类型的规模映射及同一检查点多机会抽取互斥规则仍需实现前补齐。
+- 设施核心编制阶梯、升级费与维护费以 DECISION_LOG §22.6 为准。弹性工位按 T0–T7 为1/1/2/2/3/3/4/4，不收费；设施升级无声望限制，扣款后即时生效，不影响在制项目，维护费从下一次周结算起计提。超编员工不强制解雇，未降至上限以下前禁止新增招聘。
+
+本节记录目标契约与数值基线，不代表相关运行时命令、财务映射、Archive或完整回归已实现。
