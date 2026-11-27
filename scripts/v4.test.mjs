@@ -2390,6 +2390,170 @@ function contractIdForRoll(predicate, reliability = 80, start = 0) {
   throw new Error('找不到外包随机区间夹具')
 }
 
+// ---- M0 命令 9：sign_outsourcing（weekly_cap 按 DEC-VENDOR-003，due_week 按 DECISION_LOG 推导）----
+
+function outsourcedState() {
+  let state = setupTiny(42)
+  state.works[0].episodes[0].stages
+    .flatMap((stage) => stage.items)
+    .find((item) => item.key === 'storyboard').work_done = 100
+  return state
+}
+
+test('initialize 自带基础供应商目录，按周解锁', () => {
+  const state = ok('initialize', { seed: 7 }).state
+  assert.equal(state.suppliers.length, 6)
+  assert.deepEqual(state.suppliers.map((supplier) => supplier.id), [
+    'supplier_genga', 'supplier_genga_sub', 'supplier_douga',
+    'supplier_sound', 'supplier_edit', 'supplier_douga_hi'
+  ])
+  const edit = state.suppliers.find((supplier) => supplier.id === 'supplier_edit')
+  assert.equal(edit.unlocked_week, 8)
+  assert.deepEqual(edit.specialties, ['direction'])
+})
+
+test('sign_outsourcing：weekly_cap/due_week/签约费与台账按公式落地', () => {
+  const state = outsourcedState()
+  const item = findItem(state, 'work_01', 'ep01.inbetween')
+  const receipt = ok('sign_outsourcing', {
+    state, work_id: 'work_01', item_id: item.id, supplier_id: 'supplier_douga', work_total: 100, mode: 'normal'
+  })
+  // base_cap = floor(700×35/100) = 245；weekly_cap = min(700, 100, 245) = 100
+  assert.equal(receipt.weekly_cap, 100)
+  // N = ceil(100/100) = 1；normal 缓冲 ceil(1/4)+1 = 2 → due = 0 + 1 + 2
+  assert.equal(receipt.due_week, 3)
+  assert.equal(receipt.fee_total, 100 * 3200)
+  const contract = receipt.state.contracts[0]
+  assert.equal(contract.episode_id, 'ep01')
+  assert.equal(contract.ability, 'animation')
+  assert.equal(contract.status, 'active')
+  assert.equal(contract.fee_paid, contract.fee_total)
+  assert.equal(contract.signed_week, 0)
+  const entry = receipt.state.finance.entries.find((row) => row.category === 'outsourcing')
+  assert.equal(entry.amount, -320000)
+  assert.equal(entry.work_id, 'work_01')
+  assert.equal(receipt.state.finance.balance, state.finance.balance - 320000)
+
+  // 周结算应把外包结果写进回执日志（延误/返工/交付都只在这里出现，不做弹窗）
+  const advanced = ok('advance_week', { state: receipt.state })
+  assert.equal(advanced.report.outsourcing.length, 1)
+  assert.equal(advanced.report.outsourcing[0].contract_id, receipt.contract_id)
+  assert.ok(['delivered', 'delay', 'rework'].includes(advanced.report.outsourcing[0].kind))
+})
+
+test('sign_outsourcing：emergency 加急价 140%、缓冲更短', () => {
+  const state = outsourcedState()
+  const item = findItem(state, 'work_01', 'ep01.inbetween')
+  const normal = ok('sign_outsourcing', {
+    state, work_id: 'work_01', item_id: item.id, supplier_id: 'supplier_douga', work_total: 100, mode: 'normal'
+  })
+  const urban = ok('sign_outsourcing', {
+    state, work_id: 'work_01', item_id: item.id, supplier_id: 'supplier_douga', work_total: 100, mode: 'emergency'
+  })
+  assert.equal(urban.fee_total, Math.floor(100 * 3200 * 140 / 100))
+  assert.equal(urban.fee_total, normal.fee_total * 140 / 100)
+  // emergency 缓冲 ceil(1×15/100) = 1 → due = 0 + 1 + 1
+  assert.equal(urban.due_week, 2)
+  assert.ok(urban.due_week < normal.due_week)
+})
+
+test('供应商目录产能足以覆盖十集 TV 的外包需求（52 周窗口）', () => {
+  // 这是"目录数值不是随手填的"的可证伪断言：按每周 base_cap 汇总，需求必须能在
+  // 40 周内买光（给解锁周、排期与返工留 12 周余量）。改小 capacity 或调大可外包量都会红。
+  const blueprint = JSON.parse(readFileSync('docs/blueprints/tv_standard.blueprint.json', 'utf8'))
+  const demand = new Map()
+  for (const item of blueprint.episode.filter((entry) => entry.outsourceable)) {
+    demand.set(item.ability, (demand.get(item.ability) ?? 0) + item.work_total * blueprint.episode_count)
+  }
+  const state = ok('initialize', { seed: 7 }).state
+  const weeklyCap = new Map()
+  for (const supplier of state.suppliers) {
+    const base = Math.max(1, Math.floor(supplier.capacity_per_week * supplier.speed / 100))
+    for (const ability of supplier.specialties) weeklyCap.set(ability, (weeklyCap.get(ability) ?? 0) + base)
+  }
+  for (const [ability, points] of demand) {
+    const cap = weeklyCap.get(ability) ?? 0
+    assert.ok(cap > 0, `${ability} 没有可用供应商`)
+    const weeks = Math.ceil(points / cap)
+    assert.ok(weeks <= 40, `${ability} 需 ${weeks} 周才能买光 ${points} 点，超出 40 周裕度（每周 ${cap} 点）`)
+  }
+  assert.deepEqual([...demand.values()].reduce((a, b) => a + b, 0), 15200)
+})
+
+test('sign_outsourcing：守卫齐全且失败原子', () => {
+  const base = outsourcedState()
+  const inbetween = findItem(base, 'work_01', 'ep01.inbetween')
+  const common = findItem(base, 'work_01', 'common.series_comp')
+  const before = ok('hash_state', { state: base }).hash
+  const reject = (payload, code) => {
+    const result = call('sign_outsourcing', { state: base, ...payload })
+    assert.equal(result.error?.code, code, JSON.stringify(result.error))
+    assert.equal('state' in result, false, '失败命令不得返回半状态')
+    assert.equal(ok('hash_state', { state: base }).hash, before)
+  }
+
+  reject({ work_id: 'work_01', item_id: common.id, supplier_id: 'supplier_genga', work_total: 10, mode: 'normal' }, 'INVALID_INPUT')
+  reject({ work_id: 'work_01', item_id: inbetween.id, supplier_id: 'supplier_genga', work_total: 10, mode: 'normal' }, 'INVALID_INPUT')
+  reject({ work_id: 'work_01', item_id: inbetween.id, supplier_id: 'supplier_douga', work_total: 0, mode: 'normal' }, 'INVALID_INPUT')
+  reject({ work_id: 'work_01', item_id: inbetween.id, supplier_id: 'supplier_douga', work_total: 101, mode: 'normal' }, 'INVALID_INPUT')
+  reject({ work_id: 'work_01', item_id: inbetween.id, supplier_id: 'supplier_none', work_total: 10, mode: 'normal' }, 'NOT_FOUND')
+  reject({ work_id: 'work_01', item_id: inbetween.id, supplier_id: 'supplier_douga', work_total: 10, mode: 'rush' }, 'INVALID_INPUT')
+
+  // 上游未解锁
+  const locked = outsourcedState()
+  findItem(locked, 'work_01', 'ep01.storyboard').work_done = 0
+  const unmet = call('sign_outsourcing', {
+    state: locked, work_id: 'work_01', item_id: inbetween.id, supplier_id: 'supplier_douga', work_total: 10, mode: 'normal'
+  })
+  assert.equal(unmet.error?.code, 'DEPENDENCY_UNMET')
+
+  // 供应商尚未解锁（第 8 周才开放的剪辑工房）
+  const early = outsourcedState()
+  early.suppliers.find((entry) => entry.id === 'supplier_edit').specialties = ['animation']
+  const notYet = call('sign_outsourcing', {
+    state: early, work_id: 'work_01', item_id: inbetween.id, supplier_id: 'supplier_edit', work_total: 10, mode: 'normal'
+  })
+  assert.equal(notYet.error?.code, 'NOT_FOUND')
+
+  // 现金不足
+  const poor = outsourcedState()
+  poor.finance.opening_funds = 1000
+  poor.finance.balance = 1000
+  const noCash = call('sign_outsourcing', {
+    state: poor, work_id: 'work_01', item_id: inbetween.id, supplier_id: 'supplier_douga', work_total: 100, mode: 'normal'
+  })
+  assert.equal(noCash.error?.code, 'INSUFFICIENT_FUNDS')
+})
+
+test('sign_outsourcing：产能是供应商级共享池，排满后拒绝', () => {
+  let state = outsourcedState()
+  const supplier = state.suppliers.find((entry) => entry.id === 'supplier_genga')
+  supplier.capacity_per_week = 200
+  supplier.speed = 100   // base_cap = 200，但单份合同仍受 work_total 限制
+  // 造第二个 drawing 可外包项，才有多份合同可签（tiny 的 background 默认不可外包）
+  findItem(state, 'work_01', 'ep01.background').outsourceable = true
+  const work = state.works[0]
+  const art = work.episodes[0].stages.find((stage) => stage.key === 'art_visual')
+  art.items.push({
+    id: 'work_01.ep01.background_b', key: 'background_b', ability: 'drawing', work_total: 100, work_done: 0,
+    deliver_at: 1000, deps: ['work_01.ep01.storyboard'], is_gate: false, outsourceable: true,
+    quality_weight_permille: 0, quality: { story: 0, direction: 0, drawing: 0, animation: 0, art: 0, sound: 0 },
+    contributors: []
+  })
+  const first = ok('sign_outsourcing', {
+    state, work_id: 'work_01', item_id: 'work_01.ep01.background', supplier_id: 'supplier_genga', work_total: 100, mode: 'normal'
+  })
+  assert.equal(first.weekly_cap, 100)
+  const second = ok('sign_outsourcing', {
+    state: first.state, work_id: 'work_01', item_id: 'work_01.ep01.background_b', supplier_id: 'supplier_genga', work_total: 100, mode: 'normal'
+  })
+  assert.equal(second.weekly_cap, 100)
+  const third = call('sign_outsourcing', {
+    state: second.state, work_id: 'work_01', item_id: 'work_01.ep01.background_b', supplier_id: 'supplier_genga', work_total: 33, mode: 'normal'
+  })
+  assert.equal(third.error?.code, 'CAPACITY_EXCEEDED', '共享池用满后不得再签')
+})
+
 test('外包周结算：坐标与 JS oracle 一致，正常/延误/返工区间和返工下限正确', () => {
   const cases = [
     { name: '正常', predicate: (roll, normal) => roll < normal, delivered: 60, itemDone: 60, reported: 50, status: 'delivered' },

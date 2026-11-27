@@ -291,6 +291,8 @@ startReceipt = unwrap('start_work', {
   committee_partner_ids: ['partner_tv', 'partner_stream']
 })
 collect(startReceipt.state, 'state', observed)
+// 外包周日志（延误/返工/交付/失败）来自 vendor 段的真实周结算
+collect(vendorAdvanced.report.outsourcing, 'report.outsourcing', observed)
 extensionReceipt = unwrap('request_extension', { state: startReceipt.state, work_id: startReceipt.work_id })
 collect(extensionReceipt.state, 'state', observed)
 completeGates(extensionReceipt.state, startReceipt.work_id)

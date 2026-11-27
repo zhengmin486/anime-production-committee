@@ -258,8 +258,8 @@ v4 固定九字段：`reason/weeks/final_funds/net_cash_change/total_projects/be
 
 | 聚合 | 契约形状 | 代码 | 缺口影响 |
 | --- | --- | --- | --- |
-| `Supplier` | DA §7.4 + M0 §3 | `Json` 强形状校验 | 9 字段精确载荷、专业枚举/唯一性、数值边界与全局 id 已校验；具体供应商目录尚未初始化，命令 9 未实现 |
-| `OutsourceContract` | DA §7.4 | `Json` 强形状校验 | 15 字段精确载荷、供应商/项目/工作项/单集/能力引用、费用与生命周期已校验；INV-19/20 已断言；周交付、可靠性延误/返工、截止失败与容量释放已实现，签约与费用结算未实现 |
+| `Supplier` | DA §7.4 + M0 §3 | `Json` 强形状校验 | 9 字段精确载荷、专业枚举/唯一性、数值边界与全局 id 已校验；`initialize` 初始化 6 家基础目录（4 家开局、剪辑工房第 8 周、御影动画第 16 周解锁），数值为 `[PLACEHOLDER]` |
+| `OutsourceContract` | DA §7.4 | `Json` 强形状校验 | 15 字段精确载荷、供应商/项目/工作项/单集/能力引用、费用与生命周期已校验；INV-19/20 已断言；签约、周交付、可靠性延误/返工、截止失败与容量释放已实现；终态合同归档形状仍未实现 |
 | `Partner` / `Committee` | DA §7.4 + M0 §3 | `Json` 强形状校验 | Partner 8 字段、history 4 字段、Committee 6 字段与成员 2 字段已精确校验；INV-13 已断言，覆盖渠道归属、项目双向引用、active/closed 生命周期与 Archive 一致性 |
 | `MarketState` | M0 §3 / DEC-MARKET-001；固定 4 个企划槽 | **槽位/生命周期/周补充/热度/合作方候选已初始化** | 初始目录与热度内容仍为 fixture（#59 标定）；自定/提案槽生命周期透传 |
 
@@ -328,7 +328,7 @@ M0 §5 冻结 **23 条命令**。核心实际导出 **28 个绑定入口**：22 
 | 6 | `scout(role?, focus_ability?)` | ✅ | `state`；`role/focus_ability` 至多一个 | `INVALID_INPUT/INVALID_PHASE/INSUFFICIENT_FUNDS` | `{state, added_ids}` | `实现`；每周至多一次；窗口/费用 [PLACEHOLDER] |
 | 7 | `dismiss_staff(staff_id)` | ✅ | `state, staff_id` | `NOT_FOUND/INVALID_INPUT/INVALID_PHASE` | `{state}` | `实现`；监督原子替换；历史 contributors 不阻止解雇且保持不变 |
 | 8 | `hire_temporary(work_id, candidate_id)` | ✅ | `state, work_id, candidate_id` | `NOT_FOUND/INVALID_INPUT/INVALID_PHASE/INSUFFICIENT_FUNDS/CAPACITY_EXCEEDED` | `{state, staff_id}` | `实现`；D-07 三字段合同、公司级弹性工位、Finance `temporary` 类目与延期联动 |
-| 9 | `sign_outsourcing(work_id, item_id, supplier_id, work_total, mode)` | ❌ | — | — | — | `待实现` |
+| 9 | `sign_outsourcing(work_id, item_id, supplier_id, work_total, mode)` | ✅ | `state, work_id, item_id, supplier_id, work_total, mode` | `NOT_FOUND/INVALID_INPUT/INVALID_PHASE/DEPENDENCY_UNMET/CAPACITY_EXCEEDED/INSUFFICIENT_FUNDS` | `{state, contract_id, weekly_cap, due_week, fee_total}` | `实现`；建合同、签约费入 `outsourcing` 流水、`weekly_cap` 占供应商共享池 |
 | 10 | `deliver_work(work_id)` | ✅ | `state, work_id` | `NOT_FOUND/INVALID_PHASE/GATE_UNMET/INVALID_STATE` | `{state, report}` | `实现`；pending 守卫拒绝交付 |
 | 11 | `abort_work(work_id)` | ✅ | `state, work_id` | `NOT_FOUND/INVALID_PHASE/COMPANY_ENDED/INVALID_STATE` | `{state, report}` | `实现`；50% 违约金/退款、声望重罚、Archive 履历、负余额破产见 §3.9/M0 §14.14 |
 | 12 | `create_custom_offer(name, source, scale, style)` | ✅ | `state` + 命令参数 | `INVALID_INPUT/INVALID_PHASE` | `{state}` | `实现` |

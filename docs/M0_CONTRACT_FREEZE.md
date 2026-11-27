@@ -149,7 +149,7 @@ SaveRecord { version: 4, savedAt: ISO8601, rules_version: string, state: GameSta
 | 6 | `scout(role?, focus_ability?)` | running ∧ `events.pending[]` 为空 ∧ 现金 ≥ 本次费用 ∧ `recruitment.last_scout_week ≠ week`（每周至多一次）∧ role 与 focus_ability 至多传一个 | INVALID_INPUT / INVALID_PHASE / INSUFFICIENT_FUNDS | 池+保底计数+last_scout_week+Finance 费用流水；scout 候选带签约窗口（§14.13） |
 | 7 | `dismiss_staff(staff_id)` | running ∧ core 员工存在 ∧ 解雇后 core 数 ≥1 ∧ 若为监督须先原子替换；无同项目/空闲合格替补则关键岗位锁定 | NOT_FOUND / INVALID_INPUT / INVALID_PHASE | 移出名册+清空归属；不预付遣散费 |
 | 8 | `hire_temporary(work_id, candidate_id)` | running ∧ 项目 producing ∧ 候选人存在且 `employment=temporary` ∧ 现金 ≥ signing_fee ∧ 弹性工位有空位 | NOT_FOUND / INVALID_INPUT / INSUFFICIENT_FUNDS / CAPACITY_EXCEEDED | 解包临时候选并写入 `temporary_contract={work_id,start_week=week,end_week=project.deadline_week}`、`assignment_work_id=work_id`；Finance `temporary` 类别即时扣签约费；weekly_salary 从后续周结算计提；一次提交 |
-| 9 | `sign_outsourcing(work_id, item_id, supplier_id, work_total, mode)` | 工作项已解锁 ∧ 专业匹配 ∧ 产能余量 ∧ 现金 | DEPENDENCY_UNMET / CAPACITY_EXCEEDED / INSUFFICIENT_FUNDS | 合同+费用+占用 |
+| 9 | `sign_outsourcing(work_id, item_id, supplier_id, work_total, mode)` | 工作项已解锁 ∧ 专业匹配 ∧ 供应商已解锁 ∧ 产能余量 ∧ 现金 | DEPENDENCY_UNMET / CAPACITY_EXCEEDED / INSUFFICIENT_FUNDS | 合同+费用+占用；`weekly_cap` 按 DEC-VENDOR-003，`due_week` 按 DEC-VENDOR-003 的缓冲推导 |
 | 10 | `deliver_work(work_id)` | 全部门槛项 delivered ∧ 未过截止 ∧ 项目 producing | GATE_UNMET / INVALID_PHASE | 当次完成交付结算（周数不变） |
 | 11 | `abort_work(work_id)` | running ∧ 项目 producing ∧ 未过截止 ∧ 本项目无 pending | NOT_FOUND / INVALID_PHASE / COMPANY_ENDED | 中止结算、退款/违约金入账、声望重罚、委员会关闭、Archive 履历、人员/外包释放；负余额复用破产关闭 |
 | 12 | `create_custom_offer(name, source, scale, style)` | running ∧ 基础声望等草稿资格满足 ∧ 原创草稿槽可用；不检查全部投资资金 | INVALID_INPUT | 只创建原创草稿，不建立 Project、不扣全部投资资金；草稿开发费时点待确认 |
@@ -212,7 +212,7 @@ SaveRecord { version: 4, savedAt: ISO8601, rules_version: string, state: GameSta
 | `advance_week` | ✅ 允许 | 走危机结算（只计固定成本、不生产） |
 | `end_company` | ✅ 允许 | 放弃经营，不是新增承诺；结局记为 voluntary |
 | `start_work` | ❌ 禁止 | 新增项目支出 |
-| `sign_outsourcing` | ❌ 禁止 | 新增外包支出 |
+| `sign_outsourcing` | ❌ 禁止 | 新增外包支出（签约即付清，费用沉没） |
 | `hire_core` / `scout` / `hire_temporary` | ❌ 禁止 | 新增薪酬承诺 |
 | `buy_tv_service` | ❌ 禁止 | 新增发行支出 |
 | `create_custom_offer` | ❌ 禁止 | 维持 DEC-FIN-003 的危机承诺边界；草稿资金分段不改变该守卫 |

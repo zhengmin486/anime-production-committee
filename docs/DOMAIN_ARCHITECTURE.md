@@ -873,13 +873,13 @@ deposit_basis, deposit_rate_permille, deposit_amount`。后两项是生成时冻
 
 **Vendor 运行时现状（2026-11-27）**：`suppliers` / `contracts` 仍以 `Json` 存储，但解析要求根数组必填，`validate` 已精确校验 Supplier 9 字段与 OutsourceContract 15 字段，并落实 INV-19/20、全局 id、供应商解锁/专业匹配、active 项目状态、episode 容器、能力一致性、可外包非 gate 限制、费用/周期边界和 int64 汇总保护。active 合同计入共享容量；delivered/failed 合同不计入。`state_hash` 按 id 规范化 suppliers / contracts，并排序 specialties。
 
-周结算已实现 DEC-VENDOR-003/004 的确定性正常/延误/返工、返工倒扣、同项比例与最大余数分配、截止失败和 active 容量释放；先完成本周交付，再按本周结算后的已结算周判断 `company.week >= due_week`。`end_company` 预演会将活动合同终态化。供应商具体目录、`sign_outsourcing` 的 `due_week` 推导、签约预留和费用支付仍未实现，手工 fixture 的周交付通过不代表签约玩法开放。
+周结算已实现 DEC-VENDOR-003/004 的确定性正常/延误/返工、返工倒扣、同项比例与最大余数分配、截止失败和 active 容量释放；先完成本周交付，再按本周结算后的已结算周判断 `company.week >= due_week`。`end_company` 预演会将活动合同终态化。供应商基础目录（6 家、按周解锁）与 `sign_outsourcing`（`weekly_cap` 共享池预检、签约即付清、`due_week` 缓冲推导）已实现；`due_week` 缓冲系数与目录数值仍是 `[PLACEHOLDER]`，终态合同归档形状未实现。
 
 **未决冲突**：本节冻结约束要求所有终态合同保留可校验的项目与工作项引用，但当前 `settle_project` 会删除该项目的合同，Archive 28 字段也没有外包快照。#53 尚未裁决终态合同的保留或归档形状；在裁决前保留上述契约与引用校验，并把结项删除行为登记为实现缺口，不新增 Archive 字段、不删除项目后放宽引用校验，也不把删除合同美化为已实现归档。
 
 **Partnership 运行时现状（2026-11-27）**：`partners` / `committees` 根数组解析必填；Partner 精确 8 字段、history 精确 4 字段、Committee 精确 6 字段、member 精确 2 字段。INV-13 已断言成员/渠道唯一、伙伴渠道归属、BD 不挂成员、项目双向引用、active/closed 生命周期、关闭后 Archive 一致性及 history 归档引用。active Committee 允许指向 `delivering`，以覆盖 `end_company → finalize_delivery` 的合法中间态。`state_hash` 按 id 规范化 partners / committees，并排序 Partner.channels 与 Committee.members；history 保持追加顺序，不用排序掩盖乱序。
 
-上述状态约束不等于外包玩法已开放：`sign_outsourcing`、供应商默认目录、`weekly_cap` 签约推导和费用支付尚未实现。按周交付、可靠性失败与截止释放已实现；交付结项时终态合同的历史保留方式仍受上述未决冲突约束，当前删除行为不得视为完整归档。
+外包玩法已开放到"可签约、可交付、可失败"：`sign_outsourcing`、基础供应商目录、`weekly_cap` 签约推导与签约即付清均已实现，按周交付/可靠性失败/截止释放沿用 DEC-VENDOR-003/004；交付结项时终态合同仍被删除，终态归档形状未定，当前删除行为不得视为完整归档。
 
 ### 7.5 Finance
 

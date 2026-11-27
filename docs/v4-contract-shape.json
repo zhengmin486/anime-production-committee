@@ -33,9 +33,7 @@
       "instantiate_work",
       "set_plan"
     ],
-    "documented_not_exported": [
-      "sign_outsourcing"
-    ],
+    "documented_not_exported": [],
     "exported": [
       "abort_work",
       "adopt_proposal",
@@ -62,12 +60,14 @@
       "scout",
       "set_plan",
       "set_work_plan",
+      "sign_outsourcing",
       "start_work",
       "validate_event_catalog",
       "view_event"
     ],
     "positions": {
       "hire_temporary": 8,
+      "sign_outsourcing": 9,
       "view_event": 22,
       "lock_offer": 23
     }
@@ -490,7 +490,6 @@
         "type": "publisher"
       }
     ],
-    "state.suppliers": [],
     "state.works": []
   },
   "error_codes": {
@@ -910,9 +909,10 @@
     ]
   },
   "paths": {
-    "report": [
+        "report": [
       "events",
       "funds",
+      "outsourcing",
       "settlements",
       "staff",
       "week",
@@ -938,6 +938,12 @@
       "production",
       "salary",
       "temporary"
+    ],
+    "report.outsourcing[]": [
+      "contract_id",
+      "item_id",
+      "kind",
+      "points"
     ],
     "report.staff[]": [
       "fatigue",

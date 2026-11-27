@@ -2134,6 +2134,62 @@ Json make_partner(const char* id, const char* name, const char* type, const char
                 {"status", "known"}};
 }
 
+// ---- 基础供应商目录（M3 前置的最小可玩目录）----
+// 数值全部 [PLACEHOLDER]：以"十集 TV 的可外包 15,200 点能在 52 周内被买光"反推容量，
+// 不声称已标定。设计意图是三档取舍：
+//   - 便宜但慢/不靠谱（三河、白鲸）：单位价低、reliability 低，返工概率高；
+//   - 贵但稳（东云、音匠）：单位价高、reliability 高，适合卡截止；
+//   - 后期解锁的高质量中割（御影，第 16 周）：给"前期先买便宜货、后期加价救火"留出口。
+struct SupplierSpec {
+    const char* id;
+    const char* name;
+    const char* specialty;
+    int capacity_per_week;
+    int speed;
+    int quality;
+    int reliability;
+    int price_per_unit;
+    int unlocked_week;
+};
+
+constexpr SupplierSpec kSupplierCatalog[] = {
+    {"supplier_genga", "东云作画", "drawing", 600, 30, 72, 90, 4200, 0},
+    {"supplier_genga_sub", "三河作画", "drawing", 500, 25, 62, 80, 3600, 0},
+    {"supplier_douga", "白鲸中割", "animation", 700, 35, 58, 75, 3200, 0},
+    {"supplier_sound", "音匠 Studio", "postproduction", 300, 40, 75, 92, 4600, 0},
+    {"supplier_edit", "剪辑工房", "direction", 200, 50, 68, 85, 3800, 8},
+    {"supplier_douga_hi", "御影动画", "animation", 450, 30, 70, 88, 4000, 16},
+};
+
+Json initial_suppliers() {
+    Json suppliers = Json::array();
+    for (const auto& spec : kSupplierCatalog) {
+        suppliers.push_back(Json{{"id", spec.id},
+                                 {"name", spec.name},
+                                 {"specialties", Json::array({spec.specialty})},
+                                 {"capacity_per_week", spec.capacity_per_week},
+                                 {"quality", spec.quality},
+                                 {"speed", spec.speed},
+                                 {"price_per_unit", spec.price_per_unit},
+                                 {"reliability", spec.reliability},
+                                 {"unlocked_week", spec.unlocked_week}});
+    }
+    return suppliers;
+}
+
+const Json* find_supplier(const GameState& state, const std::string& supplier_id) {
+    for (const auto& supplier : state.suppliers) {
+        if (supplier.is_object() && supplier.value("id", std::string{}) == supplier_id) return &supplier;
+    }
+    return nullptr;
+}
+
+// 外包签约的专用/紧急两档（DEC-VENDOR-003）：speed 与价格同时缩放。
+constexpr int kOutsourceModeNormalSpeed = 100;
+constexpr int kOutsourceModeNormalPrice = 100;
+constexpr int kOutsourceModeEmergencySpeed = 135;
+constexpr int kOutsourceModeEmergencyPrice = 140;
+
 Json make_offer(const char* id, const char* name, const char* source, const char* genre, int budget, int weeks,
                 int target_quality, int audience, int commercial, Json potentials, Json channels, Json modes,
                 Json candidates) {
@@ -2380,6 +2436,18 @@ struct SettlementOutcome {
     Json report = Json::object();
 };
 
+// 工作项所属单集 id（公共制作返回 null，由调用方保证不会走到这里）。
+std::optional<std::string> episode_id_of(const Project& work, const std::string& item_id) {
+    for (const auto& episode : work.episodes) {
+        for (const auto& stage : episode.stages) {
+            for (const auto& item : stage.items) {
+                if (item.id == item_id) return episode.id;
+            }
+        }
+    }
+    return std::nullopt;
+}
+
 // 工作项所属阶段 key：外包的维度权重按阶段 + 驱动能力取，与社内同一条表。
 std::string stage_key_of(const Project& work, const std::string& item_id) {
     for (const auto& episode : work.episodes) {
@@ -2405,7 +2473,7 @@ void fail_active_outsourcing(GameState& state, const std::string& work_id) {
     }
 }
 
-void advance_outsourcing(GameState& state, int week) {
+void advance_outsourcing(GameState& state, int week, Json& log) {
     std::vector<Json*> contracts;
     for (auto& contract : state.contracts) {
         if (contract.is_object() && contract.value("status", std::string{}) == "active") {
@@ -2445,7 +2513,16 @@ void advance_outsourcing(GameState& state, int week) {
                 contract->at("work_done") = contract->at("work_done").get<std::int64_t>() - loss;
                 item->work_done -= static_cast<int>(loss);
             }
+            log.push_back(Json{{"contract_id", contract_id},
+                               {"item_id", contract->at("item_id").get<std::string>()},
+                               {"kind", "rework"},
+                               {"points", -static_cast<std::int64_t>(loss)}});
         } else if (roll >= r * 100) {
+            // 延误：本周 0 交付。只进周回执，不弹窗。
+            log.push_back(Json{{"contract_id", contract_id},
+                               {"item_id", contract->at("item_id").get<std::string>()},
+                               {"kind", "delay"},
+                               {"points", 0}});
             continue;
         } else {
             normal_by_item[contract->at("item_id").get<std::string>()].push_back(contract);
@@ -2539,10 +2616,19 @@ void advance_outsourcing(GameState& state, int week) {
     }
 
     for (Json* contract : contracts) {
+        const std::string contract_id = contract->at("id").get<std::string>();
         if (contract->at("work_done").get<std::int64_t>() >= contract->at("work_total").get<std::int64_t>()) {
             contract->at("status") = "delivered";
+            log.push_back(Json{{"contract_id", contract_id},
+                               {"item_id", contract->at("item_id").get<std::string>()},
+                               {"kind", "delivered"},
+                               {"points", contract->at("work_done").get<std::int64_t>()}});
         } else if (week + 1 >= contract->at("due_week").get<std::int64_t>()) {
             contract->at("status") = "failed";
+            log.push_back(Json{{"contract_id", contract_id},
+                               {"item_id", contract->at("item_id").get<std::string>()},
+                               {"kind", "failed"},
+                               {"points", 0}});
         }
     }
 }
@@ -3106,6 +3192,7 @@ std::string initialize(const std::string& input) {
         state.staff.push_back(make_staff("staff_anim", "许动画", "animator", {40, 45, 60, 75, 40, 50}, 170000));
         state.staff.push_back(make_staff("staff_post", "周摄影", "postproduction", {40, 45, 50, 50, 45, 70}, 170000));
 
+        state.suppliers = initial_suppliers();
         state.partners = Json::array({make_partner("partner_tv", "东都电视台", "tv", "tv", 65),
                                       make_partner("partner_stream", "海流配信", "streaming", "domestic_streaming", 55),
                                       make_partner("partner_pub", "白鹭出版", "publisher", "publishing", 45)});
@@ -3494,6 +3581,138 @@ std::string hire_temporary(const std::string& input) {
     }
 }
 
+// M0 命令 9：sign_outsourcing(work_id, item_id, supplier_id, work_total, mode)。
+// weekly_cap 按 DEC-VENDOR-003 冻结公式推导；due_week 是本次实现补的推导（DECISION_LOG 已登记），
+// 目的只有一个——让"供应商拖到项目结束才失败"变成"拖到自己的窗口就失败"，否则 reliability 没有威慑力。
+std::string sign_outsourcing(const std::string& input) {
+    try {
+        const Json request = Json::parse(input);
+        GameState state = decode_state(request);
+        const auto input_errors = validate(state);
+        if (!input_errors.empty()) return encode(error_body("INVALID_STATE", input_errors.front()));
+        if (state.company.status != "running") return encode(error_body("INVALID_PHASE", "只有经营中的公司可以签约"));
+        for (const char* key : {"work_id", "item_id", "supplier_id", "mode"}) {
+            if (!request.contains(key) || !request.at(key).is_string()) {
+                return encode(error_body("INVALID_INPUT", std::string(key) + " 必须是字符串"));
+            }
+        }
+        if (!request.contains("work_total") || !request.at("work_total").is_number_integer()) {
+            return encode(error_body("INVALID_INPUT", "work_total 必须是整数"));
+        }
+        const std::string work_id = request.at("work_id").get<std::string>();
+        const std::string item_id = request.at("item_id").get<std::string>();
+        const std::string supplier_id = request.at("supplier_id").get<std::string>();
+        const std::string mode = request.at("mode").get<std::string>();
+        const std::int64_t work_total = request.at("work_total").get<std::int64_t>();
+        if (mode != "normal" && mode != "emergency") {
+            return encode(error_body("INVALID_INPUT", "mode 只能是 normal 或 emergency"));
+        }
+
+        Project* work = find_work(state, work_id);
+        if (work == nullptr) return encode(error_body("NOT_FOUND", "项目不存在"));
+        if (work->status != "producing") return encode(error_body("INVALID_PHASE", "项目必须处于 producing"));
+        WorkItem* item = find_item(*work, item_id);
+        if (item == nullptr) return encode(error_body("NOT_FOUND", "工作项不存在"));
+        if (!item->outsourceable || item->is_gate) {
+            return encode(error_body("INVALID_INPUT", "只有可外包的 episode 非门槛工作项可以外包"));
+        }
+        if (work_total <= 0 || work_total > item->remaining()) {
+            return encode(error_body("INVALID_INPUT", "work_total 必须在 1..剩余工作量之间"));
+        }
+        if (!kernel::is_unlocked(*work, *item)) {
+            return encode(error_body("DEPENDENCY_UNMET", "上游工作项尚未达到交付门槛"));
+        }
+        const Json* supplier = find_supplier(state, supplier_id);
+        if (supplier == nullptr) return encode(error_body("NOT_FOUND", "供应商不存在"));
+        if (state.company.week < supplier->at("unlocked_week").get<int>()) {
+            return encode(error_body("NOT_FOUND", "供应商尚未解锁"));
+        }
+        bool specialty_ok = false;
+        for (const auto& specialty : supplier->at("specialties")) {
+            if (specialty.is_string() && specialty.get<std::string>() == item->ability) specialty_ok = true;
+        }
+        if (!specialty_ok) return encode(error_body("INVALID_INPUT", "供应商专业与工作项能力不匹配"));
+
+        const std::int64_t capacity = supplier->at("capacity_per_week").get<std::int64_t>();
+        std::int64_t used = 0;
+        for (const auto& contract : state.contracts) {
+            if (!contract.is_object() || contract.value("status", std::string{}) != "active") continue;
+            if (contract.value("supplier_id", std::string{}) != supplier_id) continue;
+            used += contract.at("weekly_cap").get<std::int64_t>();
+        }
+        const std::int64_t available = capacity - used;
+        if (available <= 0) return encode(error_body("CAPACITY_EXCEEDED", "供应商本周产能已排满"));
+
+        const std::int64_t base_cap =
+            std::max<std::int64_t>(1, capacity * supplier->at("speed").get<std::int64_t>() / 100);
+        const int speed_mult = mode == "emergency" ? kOutsourceModeEmergencySpeed : kOutsourceModeNormalSpeed;
+        const int price_mult = mode == "emergency" ? kOutsourceModeEmergencyPrice : kOutsourceModeNormalPrice;
+        const std::int64_t weekly_cap = std::min({available, work_total, std::max<std::int64_t>(1, base_cap * speed_mult / 100)});
+        if (weekly_cap <= 0) return encode(error_body("CAPACITY_EXCEEDED", "供应商本周产能不足一份合同"));
+
+        const std::int64_t fee_total =
+            work_total * supplier->at("price_per_unit").get<std::int64_t>() * price_mult / 100;
+        if (state.finance.balance < fee_total) return encode(error_body("INSUFFICIENT_FUNDS", "现金不足：外包签约费不够"));
+
+        // due_week：最少 N 周完成 + 模式相关缓冲，再被项目截止周与第 520 周封顶。
+        // normal 缓冲 ceil(N*0.25)+1 给排期波动，emergency 只给 ceil(N*0.15)——加急买的是速度不是余地。
+        const std::int64_t weeks_needed = (work_total + weekly_cap - 1) / weekly_cap;
+        const std::int64_t buffer = mode == "emergency" ? (weeks_needed * 15 + 99) / 100
+                                                       : (weeks_needed + 3) / 4 + 1;
+        const std::int64_t due_week = std::min<std::int64_t>(
+            {kMaxWeek, work->deadline_week, state.company.week + weeks_needed + buffer});
+
+        // 合同 id 用内容哈希派生，重复时加序号，避免依赖数组长度（合同会被结项删除）。
+        std::string contract_id =
+            "oc_" + hex32(kernel::hash_text(supplier_id + "|" + item_id + "|" + std::to_string(state.company.week)));
+        for (int suffix = 1; ; ++suffix) {
+            bool taken = false;
+            for (const auto& contract : state.contracts) {
+                if (contract.is_object() && contract.value("id", std::string{}) == contract_id) taken = true;
+            }
+            if (!taken) break;
+            contract_id = "oc_" + hex32(kernel::hash_text(supplier_id + "|" + item_id + "|" +
+                                                  std::to_string(state.company.week) + "|" +
+                                                  std::to_string(suffix)));
+        }
+
+        state.contracts.push_back(Json{{"id", contract_id},
+                                       {"supplier_id", supplier_id},
+                                       {"work_id", work_id},
+                                       {"episode_id", episode_id_of(*work, item_id) ? Json(*episode_id_of(*work, item_id))
+                                                                                     : Json(nullptr)},
+                                       {"item_id", item_id},
+                                       {"ability", item->ability},
+                                       {"mode", mode},
+                                       {"work_total", work_total},
+                                       {"work_done", 0},
+                                       {"weekly_cap", weekly_cap},
+                                       {"fee_total", fee_total},
+                                       {"fee_paid", fee_total},
+                                       {"signed_week", state.company.week},
+                                       {"due_week", due_week},
+                                       {"status", "active"}});
+        if (fee_total > 0) {
+            state.finance.entries.push_back(LedgerEntry{
+                "w" + std::to_string(state.company.week) + ".outsourcing." + contract_id + ".sign",
+                state.company.week, work_id, "outsourcing", -fee_total, std::nullopt, supplier_id});
+            state.finance.balance -= fee_total;
+        }
+
+        const auto errors = validate(state);
+        if (!errors.empty()) return encode(error_body("INTERNAL_ERROR", "签约后状态非法: " + errors.front()));
+        return encode(Json{{"state", state},
+                           {"contract_id", contract_id},
+                           {"weekly_cap", weekly_cap},
+                           {"due_week", due_week},
+                           {"fee_total", fee_total}});
+    } catch (const Json::exception&) {
+        return encode(error_body("INVALID_INPUT", "JSON 或字段类型无效"));
+    } catch (...) {
+        return encode(error_body("INTERNAL_ERROR", "内部错误"));
+    }
+}
+
 // M0 命令 7：dismiss_staff(staff_id)。移出名册+清空归属，不预付遣散费；
 // 解雇后 core ≥ 1；监督须先原子替换，无合格替补则关键岗位锁定（§14.8）。
 std::string dismiss_staff(const std::string& input) {
@@ -3665,7 +3884,8 @@ std::string advance_week(const std::string& input) {
             if (work->status != "producing") continue;
             walk_items(*work, [&](const WorkItem& item) { week_start_progress[work->id][item.id] = item.work_done; });
         }
-        advance_outsourcing(state, week);
+        Json outsource_log = Json::array();
+        advance_outsourcing(state, week, outsource_log);
         std::map<std::string, std::map<std::string, int>> outsourced_delta;
         for (Project* work : ordered) {
             if (work->status != "producing") continue;
@@ -3877,6 +4097,7 @@ std::string advance_week(const std::string& input) {
                            {"staff", staff_report},
                            {"settlements", settlements},
                            {"events", events_report},
+                           {"outsourcing", outsource_log},
                            {"funds", Json{{"delta", state.finance.balance - snapshot.finance.balance},
                                           {"balance", state.finance.balance},
                                           {"costs", Json{{"salary", salary_total},

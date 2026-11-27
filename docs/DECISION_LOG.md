@@ -1110,7 +1110,7 @@ DISC-16 的设施方向已完成裁定，并由 DEC-COMPANY-001/002 归档。后
 
 ### DEC-VENDOR-003｜供应商合同周产能预留与交付上限
 
-**状态：规则已确认；运行时实现与边界测试待完成。**
+**状态：规则已确认；`weekly_cap` 推导、共享池预检与签约（命令 9）已实现，`due_week` 推导为本轮新增 `[PLACEHOLDER]`。**
 
 - `capacity_per_week` 是供应商全平台所有 active 合同共享的周产能总池，受 INV-19 硬约束。
 - `speed` 只决定单份合同可申请的基础周交付上限：
@@ -1121,6 +1121,7 @@ DISC-16 的设施方向已完成裁定，并由 DEC-COMPANY-001/002 归档。后
 - 签约预检、预留额度和合同创建必须原子执行；所有 active 合同的 weekly_cap 之和不得超过 capacity_per_week。weekly_cap 创建后冻结，不随供应商状态变化。
 - 合同进入终态后释放预留产能。跨项目合同每周按各自 weekly_cap 独立推进，不再运行时抢占供应商总池；同一工作项内多份合同竞争 item_room 时，按剩余需求比例分配，整数余数使用最大余数法。
 - 不设工序独立产能限制；specialties 负责专业接单资格，避免与 INV-19 重复限制。
+- **`due_week` 推导（2026-11-27，`[PLACEHOLDER]` 待 #53 标定）**：`N = ceil(work_total / weekly_cap)`；`due_week = min(520, project.deadline_week, signed_week + N + buffer)`，其中 normal `buffer = ceil(N×0.25) + 1`、emergency `buffer = ceil(N×0.15)`。理由是让 reliability 有威慑：合同若拖到项目截止才失败，供应商就没有"重签"压力；紧急档买的是速度，不是拖延余地。
 
 ### DEC-VENDOR-004｜外包可靠性三级周判定与违约损失
 
