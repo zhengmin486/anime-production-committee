@@ -121,7 +121,7 @@ SaveRecord { version: 4, savedAt: ISO8601, rules_version: string, state: GameSta
 | INV-19 | 同一供应商 `Σ active 合同 weekly_cap ≤ capacity_per_week` | CAPACITY_EXCEEDED |
 | INV-20 | 合同 `item_id` 属于同一 `work_id`；累计交付不超过该项 `work_total` | INVALID_STATE |
 | INV-21 | `running ⇒ week < 520`；`week` 只由 `advance_week` 改变 | INVALID_PHASE |
-| INV-22 | Archive 根字段齐全；WorkRecord 31 字段载荷、质量/评级、渠道与财务对账合法且按结束周追加、id 唯一；aborted 记录 status=ABORTED、aborted_week=end_week、penalty_paid 与 finance_summary.penalty 一致，且不进入 Series；Series 的 ip_id 唯一，作品引用存在且 IP 一致、仅归属一个系列、按交付周追加，last_week 等于最后交付周；带 ip_id 的已交付作品必须归属系列；company_result 与公司状态及 Archive 统计一致 | INVALID_STATE |
+| INV-22 | Archive 根字段齐全；WorkRecord 32 字段载荷（含 outsourcing_summary）、质量/评级、渠道与财务对账合法且按结束周追加、id 唯一；aborted 记录 status=ABORTED、aborted_week=end_week、penalty_paid 与 finance_summary.penalty 一致，且不进入 Series；Series 的 ip_id 唯一，作品引用存在且 IP 一致、仅归属一个系列、按交付周追加，last_week 等于最后交付周；带 ip_id 的已交付作品必须归属系列；company_result 与公司状态及 Archive 统计一致 | INVALID_STATE |
 | INV-23 | `events.pending[]` 可同时包含多个项目事件；每条带 `work_id/event_id/triggered_week/viewed`，pending 中每项目至多一条；同一项目每周最多触发一个；未查看事件阻塞推进，已查看未处理事件不阻塞；`last_event_week` 不得全局限流；事件不得覆盖/丢弃 | INVALID_STATE |
 | INV-24 | `market.slots ≤ 4`，初始生成 4；每周只补空槽且至少 2 个可立即承接；自定/提案槽与市场槽、历史 id 互斥；同一企划 id 终身唯一，不得删除后再生成绕过锁定历史 | INVALID_STATE |
 | INV-25 | `running` 时 `Finance.balance ≥ 0`；`bankrupt` 的 `closing/ended` 允许负余额以保留未豁免债务。刚性支出预检不足时回滚并直接破产，不记录负现金欠付，不得以 `solvency.state="crisis"` 绕过 | INVALID_STATE |
@@ -787,4 +787,4 @@ v3 的单项目、五阶段、全局 phase、单事件槽、双份财务汇总�
 - TV-小市场基线为制作费 170,000,000、工期 52 周、目标质量 65、定金率 55‰、定金 9,350,000；该金额在 Offer 生成时冻结。
 - 外包候选标准价为 4,000/点，仅对应 #64 的 0.40 万元/点用途；DEC-MARKET-003 保底利润公式中的 0.46 万元/点是另一候选成本输入，不得合并成单一报价。
 - 开局四人 52 周有效核心产能以 #63 最新评论的 11,045.6–11,281.3 点为验收区间；旧模型 11,324.9 点仅保留为历史推导。
-- 以上是当前实现验收锚点，不授权未冻结的供应商目录、`due_week` 推导、招聘冷却随机方式或 Archive 扩展字段。
+- 以上是当前实现验收锚点。供应商目录与 `due_week` 推导已于 2026-11-27 由负责人拍板实现；`outsourcing_summary` 是 2026-11-27 明确授权的 Archive 扩展字段。招聘冷却随机方式仍不在此授权范围。

@@ -1993,7 +1993,8 @@ function completedChannelHistory(id, windows) {
     },
     channel_breakdown: channelBreakdown,
     episodes: [{ id: 'ep01', quality: { dims, mean: 70 } }],
-    team: [{ id: 'staff_dir', name: '导演', role: 'director' }], rules_status: 'placeholder'
+    team: [{ id: 'staff_dir', name: '导演', role: 'director' }],
+    outsourcing_summary: { contracts: 0, failed: 0, points: 0, spend: 0 }, rules_status: 'placeholder'
   }
 }
 
@@ -2239,6 +2240,26 @@ test('M2 归档后新立项不复用已归档作品 id', () => {
   assert.equal(next.state.works[0].id, 'work_02')
 })
 
+test('归档外包聚合：合同数/失败数/交付点/支出与账本一致', () => {
+  let state = outsourcedState()
+  const item = findItem(state, 'work_01', 'ep01.inbetween')
+  const signed = ok('sign_outsourcing', {
+    state, work_id: 'work_01', item_id: item.id, supplier_id: 'supplier_douga', work_total: 100, mode: 'normal'
+  })
+  // 让合同先跑一周拿到真实交付量，再照常交付作品
+  state = completeWork(signed.state, 'work_01', 80)
+  const delivered = ok('deliver_work', { state, work_id: 'work_01' })
+  const record = delivered.state.archive.works[0]
+  const summary = record.outsourcing_summary
+  assert.equal(summary.contracts, 1)
+  // 结项时仍未交付的合同会随项目终止并记为 failed（含到期违约与结清终止两类）
+  assert.equal(summary.failed, 1)
+  assert.equal(summary.spend, signed.fee_total)
+  assert.equal(summary.spend, record.finance_summary.costs.outsourcing)
+  assert.ok(summary.points >= 0 && summary.points <= 100)
+  assert.deepEqual(Object.keys(summary).sort(), ['contracts', 'failed', 'points', 'spend'])
+})
+
 test('INV-22：交付冻结完整 WorkRecord，财务口径不重复扣罚', () => {
   let state = ok('initialize', { seed: 7 }).state
   state = ok('start_work', { state, offer_id: 'offer_02', mode: 'contract' }).state
@@ -2251,8 +2272,8 @@ test('INV-22：交付冻结完整 WorkRecord，财务口径不重复扣罚', () 
   assert.deepEqual(Object.keys(record).sort(), [
     'aborted_week', 'bd_gross', 'bd_revenue', 'channel_breakdown', 'commercial_revenue', 'committee_pool',
     'company_received', 'end_reason', 'end_week', 'episodes', 'finance_summary', 'forced', 'gate_completion_permille',
-    'genre', 'id', 'investment_percent', 'investor_share', 'ip_id', 'mode', 'name', 'offer_id', 'penalty_paid',
-    'quality', 'quality_score', 'rating', 'rules_status', 'scale', 'source', 'start_week', 'status', 'team'
+    'genre', 'id', 'investment_percent', 'investor_share', 'ip_id', 'mode', 'name', 'offer_id', 'outsourcing_summary',
+    'penalty_paid', 'quality', 'quality_score', 'rating', 'rules_status', 'scale', 'source', 'start_week', 'status', 'team'
   ].sort())
   const finance = record.finance_summary
   assert.ok(finance.penalty > 0)

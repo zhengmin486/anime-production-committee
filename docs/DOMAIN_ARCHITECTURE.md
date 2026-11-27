@@ -947,7 +947,7 @@ WorkRecord { id, ip_id, offer_id, name, source, genre, scale, mode, investment_p
              channel_breakdown[], episodes[{id, quality}], team[{id, name, role}], rules_status }
 ```
 
-以上是当前 runtime 已冻结并输出的 31 字段载荷。`episode_count/occurrence_issues/commercial_rank/episode_summary/committee_snapshot/major_events` 属于未来扩展，尚未实现，不得伪装成当前字段。履历保留单集质量摘要而不保留全部工作项：`episodes[{id, quality}]` + 六维质量 + 团队快照足以支持分集复盘，同时避免存档随工作项数量线性膨胀。
+以上是当前 runtime 已冻结并输出的 31 字段载荷，加上 2026-11-27 授权的外包履历快照 `outsourcing_summary{contracts,failed,points,spend}` 共 32 字段。`episode_count/occurrence_issues/commercial_rank/episode_summary/committee_snapshot/major_events` 属于未来扩展，尚未实现，不得伪装成当前字段。履历保留单集质量摘要而不保留全部工作项：`episodes[{id, quality}]` + 六维质量 + 团队快照足以支持分集复盘，同时避免存档随工作项数量线性膨胀。
 
 **写入时机与来源**
 - 来源链固定为 `OfferSnapshot.ip_id → Project.ip_id → WorkRecord.ip_id → Archive.series`；不按标题猜测续作，不恢复线性 `previous_work_id`。

@@ -980,7 +980,7 @@ bool archive_work_record(const Json& record, std::int64_t company_week,
                                        "gate_completion_permille", "aborted_week", "penalty_paid", "quality", "quality_score", "rating",
                                        "commercial_revenue", "bd_gross", "bd_revenue", "committee_pool", "investor_share",
                                        "company_received", "finance_summary", "channel_breakdown", "episodes", "team",
-                                       "rules_status"})) {
+                                       "outsourcing_summary", "rules_status"})) {
         error("INV-22 " + path + " 根字段缺失或含未知字段");
         return false;
     }
@@ -1046,6 +1046,29 @@ bool archive_work_record(const Json& record, std::int64_t company_week,
     }
 
     const Json& finance = record.at("finance_summary");
+    {
+        const Json& summary = record.at("outsourcing_summary");
+        if (!archive_exact_fields(summary, {"contracts", "failed", "points", "spend"})) {
+            error("INV-22 " + path + ".outsourcing_summary 必须精确包含 contracts/failed/points/spend");
+            return false;
+        }
+        for (const char* key : {"contracts", "failed", "points", "spend"}) {
+            if (!archive_integer(summary.at(key), 0)) {
+                error("INV-22 " + path + ".outsourcing_summary." + key + " 必须是非负整数");
+                return false;
+            }
+        }
+        if (summary.at("failed").get<std::int64_t>() > summary.at("contracts").get<std::int64_t>()) {
+            error("INV-22 " + path + ".outsourcing_summary.failed 不能超过 contracts");
+            return false;
+        }
+        // 外包支出是项目直接成本的一部分，必须与 finance_summary.costs.outsourcing 对得上。
+        if (finance.at("costs").value("outsourcing", static_cast<std::int64_t>(0)) !=
+            summary.at("spend").get<std::int64_t>()) {
+            error("INV-22 " + path + ".outsourcing_summary.spend 必须等于 costs.outsourcing");
+            return false;
+        }
+    }
     if (!archive_exact_fields(finance, {"contract_received", "contract_refund", "investment_paid", "commercial_share", "bd_revenue",
                                         "success_reward", "penalty", "costs", "total_costs", "profit"})) {
         error("INV-22 archive.works[].finance_summary 根字段缺失或含未知字段: " + id);
@@ -3055,6 +3078,20 @@ SettlementOutcome settle_project(GameState& state, Project& work, const std::str
     const std::int64_t investment_paid = work.investment.value("paid", static_cast<std::int64_t>(0));
     const std::int64_t profit = budget - contract_refund + company_revenue - investment_paid - total_costs;
 
+    // 外包归因（DEC-VENDOR-003 的终态：项目结清时把合同聚合成一份履历快照，
+    // 保留"花多少、坏了几分、交出多少点"，随后合同实体仍随项目删除）。
+    std::int64_t outsourcing_contracts = 0;
+    std::int64_t outsourcing_failed = 0;
+    std::int64_t outsourcing_points = 0;
+    std::int64_t outsourcing_spend = 0;
+    for (const auto& contract : state.contracts) {
+        if (!contract.is_object() || contract.value("work_id", std::string{}) != work_id) continue;
+        ++outsourcing_contracts;
+        if (contract.value("status", std::string{}) == "failed") ++outsourcing_failed;
+        outsourcing_points += contract.at("work_done").get<std::int64_t>();
+        outsourcing_spend += contract.at("fee_paid").get<std::int64_t>();
+    }
+
     Json record = Json{{"id", work_id},
                        {"ip_id", work.ip_id ? Json(*work.ip_id) : Json(nullptr)},
                        {"offer_id", offer.value("id", std::string{})},
@@ -3094,6 +3131,10 @@ SettlementOutcome settle_project(GameState& state, Project& work, const std::str
                        {"channel_breakdown", channel_report},
                        {"episodes", episode_records},
                        {"team", team},
+                       {"outsourcing_summary", Json{{"contracts", outsourcing_contracts},
+                                                    {"failed", outsourcing_failed},
+                                                    {"points", outsourcing_points},
+                                                    {"spend", outsourcing_spend}}},
                        {"rules_status", "placeholder"}};
     if (!state.archive.contains("works") || !state.archive.at("works").is_array()) state.archive["works"] = Json::array();
     state.archive["works"].push_back(record);

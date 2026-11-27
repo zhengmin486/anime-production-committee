@@ -263,7 +263,7 @@ v4 固定九字段：`reason/weeks/final_funds/net_cash_change/total_projects/be
 | `Partner` / `Committee` | DA §7.4 + M0 §3 | `Json` 强形状校验 | Partner 8 字段、history 4 字段、Committee 6 字段与成员 2 字段已精确校验；INV-13 已断言，覆盖渠道归属、项目双向引用、active/closed 生命周期与 Archive 一致性 |
 | `MarketState` | M0 §3 / DEC-MARKET-001；固定 4 个企划槽 | **槽位/生命周期/周补充/热度/合作方候选已初始化** | 初始目录与热度内容仍为 fixture（#59 标定）；自定/提案槽生命周期透传 |
 
-`suppliers` / `contracts` / `partners` / `committees` 根数组是解析必填项；四类元素分别精确包含 9 / 15 / 8 / 6 个字段，未知字段与缺失字段均拒绝。active 合同必须指向 producing 项目。冻结契约要求终态合同仍保留可校验的项目与工作项引用，但当前 `settle_project` 会删除该项目合同；在 #53 明确终态归档形状前，这是一项已登记的实现缺口，不得通过删除引用校验或改写历史契约掩盖。规范化哈希按 id 排序 suppliers / contracts / partners / committees，并按集合语义排序 specialties、Partner.channels 与 Committee.members，因此目录遍历顺序不改变状态哈希。
+`suppliers` / `contracts` / `partners` / `committees` 根数组是解析必填项；四类元素分别精确包含 9 / 15 / 8 / 6 个字段，未知字段与缺失字段均拒绝。active 合同必须指向 producing 项目。冻结契约要求终态合同仍保留可校验的项目与工作项引用，但当前 `settle_project` 仍删除该项目合同实体；2026-11-27 负责人授权以 `archive.works[].outsourcing_summary{contracts,failed,points,spend}` 的快照形式保留外包履历，逐份合同的归档形状仍未定，删除合同实体本身仍是已登记缺口。规范化哈希按 id 排序 suppliers / contracts / partners / committees，并按集合语义排序 specialties、Partner.channels 与 Committee.members，因此目录遍历顺序不改变状态哈希。
 
 Vendor 周结算已按 DEC-VENDOR-003/004 实现：active 合同的 `weekly_cap` 计入共享容量；每周先按坐标随机执行正常、延误或返工，再检查完成；本周结算后的已结算周 `week >= due_week` 且仍未完成时转 failed。同一工作项的多合同按剩余需求比例和最大余数法分配，公共项与 gate 即使标记 `outsourceable=true` 也拒绝推进。公司关闭预演会将原状态中的 active 合同置为 failed。`initialize` 初始化 6 家基础目录，`sign_outsourcing` 已实现签约预留、签约即付清与 `due_week` 缓冲推导（缓冲系数为 `[PLACEHOLDER]`）；终态合同归档形状仍未实现，手工 fixture 的周交付仍不等于完整玩法验收。
 
@@ -271,7 +271,7 @@ Vendor 周结算已按 DEC-VENDOR-003/004 实现：active 合同的 `weekly_cap`
 
 ### 3.11 未冻结的形状
 
-`WorkRecord` 当前 31 字段载荷已于 §3.9 冻结；`episode_count/occurrence_issues/commercial_rank/episode_summary/committee_snapshot/major_events` 等未来扩展字段尚未实现，不得提前写入当前载荷。`Facility` 内部字段仍按对应批次跟踪；`temporary_contract` 三字段形状及 `end_week` 快照/延期同步语义已由 2026-11-27 决策冻结，形状校验、命令 8 签约与延期联动已实现。`Project.investment{percent,total,paid}`、`Project.extension`、`Project.delivery` 已由当前命令写入并实际使用，但其完整长期契约仍随对应批次收敛，不再标记为“命令未实现”。
+`WorkRecord` 当前 32 字段载荷（§3.9 的 31 字段 + 2026-11-27 授权的 `outsourcing_summary`）；`episode_count/occurrence_issues/commercial_rank/episode_summary/committee_snapshot/major_events` 等未来扩展字段尚未实现，不得提前写入当前载荷。`Facility` 内部字段仍按对应批次跟踪；`temporary_contract` 三字段形状及 `end_week` 快照/延期同步语义已由 2026-11-27 决策冻结，形状校验、命令 8 签约与延期联动已实现。`Project.investment{percent,total,paid}`、`Project.extension`、`Project.delivery` 已由当前命令写入并实际使用，但其完整长期契约仍随对应批次收敛，不再标记为“命令未实现”。
 
 ### 3.12 Q3/Q4 契约落地状态
 
@@ -466,7 +466,7 @@ M0 §4 共 **29 条**。当前 `validate()` 实际断言 **17 条**：`INV-01/02
 | 19 供应商周承诺 | ✅ | validate 按 supplier_id 汇总 active weekly_cap，超过容量或 int64 汇总溢出即拒绝；`sign_outsourcing` 签约前用同一口径预检可用余量 |
 | 20 合同项归属/累计交付 | ✅ | validate 校验供应商、项目、工作项、episode 容器与能力引用；按 item_id 汇总全部合同 work_done，不得超过工作项 work_total；终态释放容量 |
 | 21 week 只由 advance_week 改 | ✅ | |
-| 22 Archive 载荷/系列/终局一致性 | ✅ | INV-22 校验 31 字段 WorkRecord、aborted 状态与退款对账、渠道财务对账、IP 系列引用与追加顺序；命令前后快照测试验证历史前缀不变 |
+| 22 Archive 载荷/系列/终局一致性 | ✅ | INV-22 校验 32 字段 WorkRecord（含 outsourcing_summary）、aborted 状态与退款对账、渠道财务对账、IP 系列引用与追加顺序；命令前后快照测试验证历史前缀不变 |
 | 23 事件仲裁 | ✅ | |
 | 24 市场固定 4 槽/至少 2 个可承接/终身唯一 | 🔶 部分 | 初始 4/固定上限 4 与当前槽 id 唯一已断言；Finance 定金历史防删除后重插；周补位保障至少 2 个可承接，跨槽历史互斥未完整断言 |
 | 25 balance ≥0 / 预检失败破产 | 🔶 部分 | running 非负余额、无 pending 破产与 pending 终局默认分支已实现；bankrupt closing/ended 允许负余额，融资/贷款仍为未来预留 |

@@ -690,6 +690,7 @@
       "mode",
       "name",
       "offer_id",
+      "outsourcing_summary",
       "penalty_paid",
       "quality",
       "quality_score",
@@ -730,6 +731,12 @@
       "drawing",
       "sound",
       "story"
+    ],
+    "state.archive.works[].outsourcing_summary": [
+      "contracts",
+      "failed",
+      "points",
+      "spend"
     ],
     "state.archive.works[].team[]": [
       "id",
@@ -1574,7 +1581,7 @@
     "hash_normalizes_partner_and_committee_order": true
   },
   "archive_contract": {
-    "work_record_root_field_count": 31,
+    "work_record_root_field_count": 32,
     "work_record_shape": "state.archive.works[]",
     "series_source": "OfferSnapshot.ip_id -> Project.ip_id -> WorkRecord.ip_id -> Archive.series",
     "series_write": "completed/deadline/company_closed 交付结算与 WorkRecord 同次原子提交；aborted 保留 WorkRecord 但不写 series",

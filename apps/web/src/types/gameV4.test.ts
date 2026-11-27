@@ -39,7 +39,8 @@ function work(): V4WorkRecord {
       tv_multiplier: 1000, agency_fee_permille: 0, gross: 100, net: 50, revenue: 100, company_received: 50, owner: 'company'
     }],
     episodes: [{ id: 'ep01', quality: { dims: { story: 70, direction: 70, drawing: 70, animation: 70, art: 70, sound: 70 }, mean: 70 } }],
-    team: [{ id: 'staff_dir', name: '导演', role: 'director' }], rules_status: 'placeholder'
+    team: [{ id: 'staff_dir', name: '导演', role: 'director' }],
+    outsourcing_summary: { contracts: 0, failed: 0, points: 0, spend: 0 }, rules_status: 'placeholder'
   }
 }
 

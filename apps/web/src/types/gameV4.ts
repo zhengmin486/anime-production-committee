@@ -59,6 +59,13 @@ export interface V4TeamMember {
   role: V4StaffRole
 }
 
+export interface V4OutsourcingSummary {
+  contracts: number
+  failed: number
+  points: number
+  spend: number
+}
+
 export interface V4WorkRecord {
   id: string
   ip_id: string | null
@@ -90,6 +97,7 @@ export interface V4WorkRecord {
   channel_breakdown: V4ChannelRevenue[]
   episodes: V4EpisodeRecord[]
   team: V4TeamMember[]
+  outsourcing_summary: V4OutsourcingSummary
   rules_status: 'placeholder'
 }
 
@@ -173,7 +181,8 @@ export const isV4WorkRecord = (value: unknown): value is V4WorkRecord => {
     'start_week', 'end_week', 'end_reason', 'status', 'forced',
     'gate_completion_permille', 'aborted_week', 'penalty_paid', 'quality', 'quality_score', 'rating',
     'commercial_revenue', 'bd_gross', 'bd_revenue', 'committee_pool', 'investor_share', 'company_received', 'finance_summary',
-    'channel_breakdown', 'episodes', 'team', 'rules_status'])) return false
+    'channel_breakdown', 'episodes', 'team', 'outsourcing_summary', 'rules_status'])) return false
+  const outsourcing = value.outsourcing_summary as unknown as V4OutsourcingSummary
   if (!isText(value.id) || !nullableText(value.ip_id) || !isText(value.offer_id) || !isText(value.name)
     || !choice(value.source, ['publisher', 'studio', 'manga', 'light_novel', 'game', 'original']) || !isText(value.genre)
     || !choice(value.scale, ['ova', 'short', 'tv', 'movie']) || !choice(value.mode, ['contract', 'committee'])
@@ -191,7 +200,14 @@ export const isV4WorkRecord = (value: unknown): value is V4WorkRecord => {
     || !isV4FinanceSummary(value.finance_summary) || !arrayOf(value.channel_breakdown, isV4ChannelRevenue)
     || !arrayOf(value.episodes, isV4EpisodeRecord) || value.episodes.length === 0
     || !unique(value.episodes.map(({ id }) => id)) || !arrayOf(value.team, isV4TeamMember)
-    || !unique(value.team.map(({ id }) => id)) || value.rules_status !== 'placeholder') return false
+    || !unique(value.team.map(({ id }) => id))
+    || !exactFields(value.outsourcing_summary, ['contracts', 'failed', 'points', 'spend'])
+    || !integer(outsourcing.contracts, 0)
+    || !integer(outsourcing.failed, 0)
+    || !integer(outsourcing.points, 0)
+    || !integer(outsourcing.spend, 0)
+    || outsourcing.failed > outsourcing.contracts
+    || value.rules_status !== 'placeholder') return false
   if (value.finance_summary.penalty !== value.penalty_paid) return false
   if (value.end_reason === 'completed' && (value.forced || value.gate_completion_permille !== 1000)) return false
   if (!unique(value.channel_breakdown.map(({ window }) => window))) return false
