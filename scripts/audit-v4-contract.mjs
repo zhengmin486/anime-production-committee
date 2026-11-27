@@ -403,17 +403,10 @@ collect(hireReceipt.state, 'state', observed)
 const dismissReceipt = unwrap('dismiss_staff', { state: hireReceipt.state, staff_id: hireReceipt.staff_id })
 collect(dismissReceipt.state, 'state', observed)
 const temporaryStart = unwrap('start_work', { state: fundedInitialize(), offer_id: 'offer_01', mode: 'contract' })
-const temporaryCandidate = structuredClone(temporaryStart.state.recruitment.pool[0].staff)
-temporaryCandidate.id = 'temp_audit'
-temporaryCandidate.name = '审计临时候选'
-temporaryCandidate.employment = 'temporary'
-temporaryCandidate.weekly_salary = 50000
-temporaryCandidate.signing_fee = 100000
-temporaryCandidate.assignment_work_id = null
-temporaryCandidate.temporary_contract = null
-temporaryStart.state.recruitment.pool[temporaryStart.state.recruitment.pool.length - 1] = {
-  staff: temporaryCandidate, origin: 'regular', expires_week: null
-}
+// 直接用池里真实存在的临时用工卡：薪资/签约费由公式生成，validate 会校验，
+// 手工改造一个池候选（旧做法）现在会因为报价不合公式被判红。
+const temporaryCandidate = temporaryStart.state.recruitment.pool
+  .find((candidate) => candidate.origin === 'temporary').staff
 const temporaryReceipt = unwrap('hire_temporary', {
   state: temporaryStart.state, work_id: temporaryStart.work_id, candidate_id: temporaryCandidate.id
 })

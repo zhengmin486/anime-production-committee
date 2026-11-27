@@ -1674,6 +1674,24 @@ std::vector<std::string> validate(const GameState& state) {
         if (member.employment != "core" && member.employment != "temporary") {
             error("INV-01 staff.employment 非法: " + member.id);
         }
+        if (member.employment == "temporary") {
+            // 临时员工只能来自招聘池：职业必须是 DEC-STAFF-006 的八职业之一，
+            // 否则 profession_ability 无法定主能力，薪资公式也就无从校验。
+            if (!is_profession(member.role)) {
+                error("INV-01 临时员工职业必须是八个招聘职业之一: " + member.id);
+            }
+            // DEC-STAFF-009：临时工周薪 = 同能力正式员工标准周薪 x1.20，签约费 = 两周薪资。
+            // 这条校验挡住"坏存档注入低价临时工"——否则 1 元周薪的临时工等于无限产能。
+            const int primary_index = ability_index(profession_ability(member.role));
+            const int primary = primary_index < 0 ? 0 : member.abilities[static_cast<std::size_t>(primary_index)];
+            const std::int64_t expected_salary = (kSalaryBase + primary * kSalaryPerPrimary) * 120 / 100;
+            if (member.weekly_salary != expected_salary) {
+                error("INV-01 临时员工周薪必须为 (base+主能力x系数)x120%: " + member.id);
+            }
+            if (member.signing_fee != member.weekly_salary * 2) {
+                error("INV-01 临时员工签约费必须为两周薪资: " + member.id);
+            }
+        }
         if (member.employment == "core") {
             if (!member.temporary_contract.is_null()) {
                 error("INV-10 核心员工不得带临时合同: " + member.id);
@@ -2852,6 +2870,18 @@ SettlementOutcome settle_project(GameState& state, Project& work, const std::str
 
     std::int64_t company_share = 0;
     std::int64_t investor_share = 0;
+    // DEC-QUALITY-001：Q_min 合同验收。达标线取企划快照的 target_quality（0 = 未声明，不判违约）；
+    // Q_final 目前用 aggregate mean——核心审美奖励尚未实现，这是已登记的近似口径。
+    const int q_min = offer.value("target_quality", 0);
+    const bool quality_miss = !aborted && q_min > 0 && score < q_min;
+    const int quality_gap = quality_miss ? q_min - score : 0;
+    std::int64_t quality_penalty = 0;
+    if (quality_miss) {
+        // 每低 1 分扣制作费 2%，上限 30%（千分比 20×gap，封顶 300）。
+        const int rate_permille = std::min(300, quality_gap * 20);
+        quality_penalty = budget * rate_permille / 1000;
+    }
+
     std::int64_t reward = 0;
     if (!contract && !aborted) {
         const std::int64_t allocation_numerator = committee_pool * percent;
@@ -2862,7 +2892,8 @@ SettlementOutcome settle_project(GameState& state, Project& work, const std::str
         }
         company_share = allocation_numerator / 100;
         investor_share = committee_pool - company_share;
-    } else if (contract && !aborted && bd_revenue >= budget) {
+    } else if (contract && !aborted && bd_revenue >= budget && !quality_miss) {
+        // DEC-QUALITY-001：质量未达 Q_min 时取消承制成功奖励。
         reward = budget * 200 / 1000;   // [PLACEHOLDER] 承制成功奖励 20%
     }
     // DEC-PROJECT-001：中止按权威总工作量判定 50% 边界；委员会沉没投资与成本，不退款、不罚违约金。
@@ -2877,6 +2908,8 @@ SettlementOutcome settle_project(GameState& state, Project& work, const std::str
     } else if (!aborted && forced) {
         penalty = budget * (1000 - gcp) / 1000 * kForcedPenaltyPermille / 1000;
     }
+    // 质量违约与强制交付扣罚可以同时发生（未做完且做砸了），DEC-QUALITY-001 未规定互斥。
+    penalty += quality_penalty;
     const std::int64_t company_revenue = bd_revenue + company_share + reward;
     // #120：强制终局（破产 / 第 520 周）不能再让扣罚把现金推到负数，否则 INV-25 与
     // §14.7「直接破产终局」互相矛盾，公司会被永久卡在无法关闭的状态。可支付额 = 现有现金 + 本次收入；
@@ -2953,6 +2986,12 @@ SettlementOutcome settle_project(GameState& state, Project& work, const std::str
                                : forced ? std::min(0, kReputationDelta.at(rating))
                                         : kReputationDelta.at(rating);
     change_reputation(state, reputation_delta, aborted ? "项目中止" : "作品交付 " + rating + (forced ? "（强制）" : ""), week);
+    if (quality_miss) {
+        // DEC-QUALITY-001：未达 Q_min 另扣 5–10 点，具体值由企划/事件预设提供，缺省 5。
+        const int preset_penalty = offer.value("q_min_reputation_penalty", 5);
+        change_reputation(state, -std::clamp(preset_penalty, 5, 10),
+                          "质量未达 Q_min（" + std::to_string(score) + "/" + std::to_string(q_min) + "）", week);
+    }
 
     // 委员会关闭 + 伙伴关系沉淀
     if (work.committee_id) {
@@ -2968,8 +3007,10 @@ SettlementOutcome settle_project(GameState& state, Project& work, const std::str
                     if (m.value("partner_id", std::string{}) == partner.value("id", std::string{})) member = true;
                 }
                 if (!member) continue;
-                const int delta = aborted ? 0 : forced ? std::min(0, kRelationshipDelta.at(rating))
-                                                   : kRelationshipDelta.at(rating);
+                const int base_delta = aborted ? 0 : forced ? std::min(0, kRelationshipDelta.at(rating))
+                                                           : kRelationshipDelta.at(rating);
+                // DEC-QUALITY-001：质量未达 Q_min 额外降低委员会合作好感度；数值 DEC 未给，暂定 -2 [PLACEHOLDER]。
+                const int delta = base_delta + (quality_miss ? -2 : 0);
                 partner["relationship"] = std::clamp(partner.value("relationship", 50) + delta, 0, 100);
                 if (!partner.contains("history") || !partner.at("history").is_array()) partner["history"] = Json::array();
                 partner["history"].push_back(Json{{"week", week}, {"work_id", work_id}, {"delta", delta},
@@ -3093,6 +3134,9 @@ SettlementOutcome settle_project(GameState& state, Project& work, const std::str
                           {"investor_share", investor_share},
                           {"success_reward", reward},
                           {"contract_refund", contract_refund},
+                          {"q_min", q_min},
+                          {"quality_gap", quality_gap},
+                          {"quality_penalty", quality_penalty},
                           {"penalty", penalty},
                           {"penalty_paid", penalty},
                           {"penalty_waived", penalty_waived},

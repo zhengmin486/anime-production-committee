@@ -65,14 +65,33 @@ function funded(state, extra = 400_000_000) {
   return copy
 }
 
+// 把任意员工改造成"合法的临时员工"：职业必须是八职业之一（这里用 作画=drawing），
+// 报价按 (20000 + 主能力x300)x120% 与两周签约费推导，否则会被 validate 直接判红。
+function forceTemporary(member, patch = {}) {
+  member.role = '作画'
+  member.employment = 'temporary'
+  const primary = member.abilities.drawing
+  member.weekly_salary = Math.floor((20000 + primary * 300) * 120 / 100)
+  member.signing_fee = member.weekly_salary * 2
+  Object.assign(member, patch)
+  return member
+}
+
 function addTemporaryCandidate(state, id = 'temp_candidate_01') {
   const member = structuredClone(state.recruitment.pool[0].staff)
   member.id = id
   member.name = id
   member.employment = 'temporary'
   member.experience = Object.fromEntries(Object.keys(member.experience).map((ability) => [ability, 0]))
-  member.weekly_salary = 50000
-  member.signing_fee = 100000
+  // 临时员工报价必须与 validate 的公式一致：(base + 主能力x系数) x120%，签约费 = 两周薪资
+  const professionAbility = {
+    作画: 'drawing', 演出: 'direction', 脚本: 'planning', 摄影: 'postproduction',
+    监督: 'direction', 音乐: 'postproduction', 声优: 'postproduction', 美术: 'drawing'
+  }
+  const primaryAbility = professionAbility[member.role]
+  const primaryValue = primaryAbility ? member.abilities[primaryAbility] : 0
+  member.weekly_salary = Math.floor((20000 + primaryValue * 300) * 120 / 100)
+  member.signing_fee = member.weekly_salary * 2
   member.fatigue = 0
   member.assignment_work_id = null
   member.last_participation = null
@@ -208,40 +227,42 @@ test('DEC-STAFF-008：非红灯区间不重复扣除已计入利用率的疲劳�
 
 test('阶段 2-3：临时员工周薪同样进入刚性预检与唯一账本', () => {
   let state = setupTiny(21)
-  const temporary = state.staff.find((member) => member.id === 'staff_ka')
-  temporary.employment = 'temporary'
+  const cardIndex = state.recruitment.pool.findIndex((candidate) => candidate.origin === 'temporary')
+  const temporary = structuredClone(state.recruitment.pool[cardIndex].staff)
+  state.recruitment.pool.splice(cardIndex, 1)   // 解包入册必须从池里移除，否则 id 全局重复
   temporary.temporary_contract = { work_id: 'work_01', start_week: 0, end_week: 26 }
   temporary.assignment_work_id = 'work_01'
-  temporary.weekly_salary = 50000
+  state.staff.push(temporary)
   state = assign(state, 'staff_dir', 'work_01')
   state = assign(state, 'staff_ka', 'work_01')
   const experienceBefore = JSON.parse(JSON.stringify(temporary.experience))
   const result = ok('advance_week', { state })
-  assert.equal(result.report.funds.costs.salary, 578000)
-  assert.equal(result.report.funds.costs.temporary, 50000)
-  assert.deepEqual(result.state.staff.find((member) => member.id === 'staff_ka').experience, experienceBefore)
-  assert.equal(result.state.finance.entries.filter((entry) => entry.category === 'salary').length, 3)
+  assert.equal(result.report.funds.costs.salary, 786000)
+  assert.equal(result.report.funds.costs.temporary, temporary.weekly_salary)
+  assert.deepEqual(result.state.staff.find((member) => member.id === temporary.id).experience, experienceBefore)
+  assert.equal(result.state.finance.entries.filter((entry) => entry.category === 'salary').length, 4)
   assert.equal(result.state.finance.entries.filter((entry) => entry.category === 'temporary').length, 1)
-  const temporaryEntry = result.state.finance.entries.find((entry) => entry.id === 'w0.temporary.staff_ka.salary')
-  assert.equal(temporaryEntry.amount, -50000)
+  const temporaryEntry = result.state.finance.entries.find((entry) => entry.id === 'w0.temporary.' + temporary.id + '.salary')
+  assert.equal(temporaryEntry.amount, -temporary.weekly_salary)
   assert.equal(temporaryEntry.work_id, 'work_01')
   assert.equal(result.state.finance.opening_funds + result.state.finance.entries.reduce((sum, entry) => sum + entry.amount, 0), result.state.finance.balance)
 })
 
 test('临时员工不积累长期经验，结项后退出名册但保留团队快照', () => {
   let state = setupTiny(24)
-  const temporary = state.staff.find((member) => member.id === 'staff_ka')
-  temporary.employment = 'temporary'
+  const cardIndex = state.recruitment.pool.findIndex((candidate) => candidate.origin === 'temporary')
+  const temporary = structuredClone(state.recruitment.pool[cardIndex].staff)
+  state.recruitment.pool.splice(cardIndex, 1)
   temporary.temporary_contract = { work_id: 'work_01', start_week: 0, end_week: 26 }
   temporary.assignment_work_id = 'work_01'
+  state.staff.push(temporary)
   state = assign(state, 'staff_dir', 'work_01')
-  state = assign(state, 'staff_ka', 'work_01')
   state = ok('advance_week', { state }).state
-  assert.ok(allItems(state, 'work_01').some((item) => item.contributors.includes('staff_ka')))
+  assert.ok(allItems(state, 'work_01').some((item) => item.contributors.includes(temporary.id)))
   state = completeWork(state, 'work_01', 80)
   const delivered = ok('deliver_work', { state, work_id: 'work_01' })
-  assert.equal(delivered.state.staff.some((member) => member.id === 'staff_ka'), false)
-  assert.ok(delivered.state.archive.works[0].team.some((member) => member.id === 'staff_ka'))
+  assert.equal(delivered.state.staff.some((member) => member.id === temporary.id), false)
+  assert.ok(delivered.state.archive.works[0].team.some((member) => member.id === temporary.id))
 })
 
 test('周结算重复提交同一状态不产生双工资、双生产或双推进', () => {
@@ -510,10 +531,12 @@ test('#120 破产终局：在制合同项目的扣罚按可支付现金封顶，
   assert.equal(closed.state.events.pending.length, 0)
   assert.equal(closed.state.works[0].status, 'delivering')
 
-  // 关闭路径的结清在 finalize_delivery 落地：名义扣罚 51000000（预算 170M × 缺口 100% × 30%），
+  // 关闭路径的结清在 finalize_delivery 落地：名义扣罚 = 强制交付 51,000,000（170M × 缺口 100% × 30%）
+  // + 质量违约 51,000,000（Q_min 65 vs 0 分，2%/分封顶 30%）= 102,000,000；
   // 只能收走「现有现金 + 本次商业收入」，其余记 penalty_waived。
   const settled = ok('finalize_delivery', { state: closed.state, work_id: 'work_01' })
-  assert.equal(settled.report.penalty + settled.report.penalty_waived, 51000000)
+  assert.equal(settled.report.quality_penalty, 51000000)
+  assert.equal(settled.report.penalty + settled.report.penalty_waived, 102000000)
   assert.ok(settled.report.penalty_waived > 0)
   assert.equal(settled.state.finance.balance, 0, '扣罚不得把现金推成负数')
   // 归档扣罚等于实付金额，与账本一致；不产生负现金或欠款。
@@ -861,11 +884,10 @@ test('不变式：全局 id、公共项、归属、参与记录与贡献者都�
     state.staff[0].temporary_contract = { work_id: 'work_01', start_week: 0, end_week: 26 }
   }, 'INV-10 核心员工带临时合同')
   reject((state) => {
-    state.staff[1].employment = 'temporary'
+    forceTemporary(state.staff[1])
   }, 'INV-10 临时员工缺少合同')
   reject((state) => {
-    state.staff[1].employment = 'temporary'
-    state.staff[1].assignment_work_id = 'work_01'
+    forceTemporary(state.staff[1], { assignment_work_id: 'work_01' })
     state.staff[1].temporary_contract = { work_id: 'work_01', start_week: 0, end_week: 25 }
   }, 'INV-10 临时合同截止周未同步')
   const capped = JSON.parse(JSON.stringify(base))
@@ -1528,7 +1550,7 @@ test('D-07：延期原子同步本项目临时合同 end_week，失败不改写�
     const member = structuredClone(state.staff.find((entry) => entry.id === sourceId))
     member.id = id
     member.name = id
-    member.employment = 'temporary'
+    forceTemporary(member)
     member.assignment_work_id = workId
     member.temporary_contract = { work_id: workId, start_week: 0, end_week: 52 }
     state.staff.push(member)
@@ -1763,11 +1785,71 @@ test('DEC-PROJECT-001：委员会中止只核销沉没成本并零增量关闭�
   assert.equal(partner.history.at(-1).delta, 0)
 })
 
+test('INV-01：临时员工周薪与签约费必须按 DEC-STAFF-009 公式推导', () => {
+  const base = ok('initialize', { seed: 42 }).state
+  const index = base.recruitment.pool.findIndex((candidate) => candidate.origin === 'temporary')
+  const card = structuredClone(base.recruitment.pool[index].staff)
+  base.recruitment.pool.splice(index, 1)
+  base.staff.push(card)
+
+  const cheap = structuredClone(base)
+  cheap.staff.at(-1).weekly_salary = 1000
+  assert.equal(call('advance_week', { state: cheap }).error?.code, 'INVALID_STATE', '低价临时工必须被拒绝')
+
+  const badSigning = structuredClone(base)
+  badSigning.staff.at(-1).signing_fee = 1
+  assert.equal(call('advance_week', { state: badSigning }).error?.code, 'INVALID_STATE')
+
+  const badRole = structuredClone(base)
+  badRole.staff.at(-1).role = 'key_animator'
+  assert.equal(call('advance_week', { state: badRole }).error?.code, 'INVALID_STATE', '临时员工职业必须是八职业之一')
+})
+
+test('DEC-QUALITY-001：Q_min 未达标按 2%/分扣罚、扣声望与委员会好感', () => {
+  let state = funded(ok('initialize', { seed: 7 }).state)
+  state = ok('start_work', {
+    state, offer_id: 'offer_01', mode: 'committee', percent: 50,
+    committee_partner_ids: ['partner_tv', 'partner_stream']
+  }).state
+  state = completeWork(state, 'work_01', 40)   // 六维质量统一 40，低于 Q_min 65
+  const reputationBefore = state.company.reputation
+  const delivered = ok('deliver_work', { state, work_id: 'work_01' })
+  const settlement = delivered.report
+  assert.equal(settlement.q_min, 65)
+  assert.ok(settlement.quality_score < 65)
+  const expected = Math.floor(170000000 * Math.min(300, (65 - settlement.quality_score) * 20) / 1000)
+  assert.equal(settlement.quality_gap, 65 - settlement.quality_score)
+  assert.equal(settlement.quality_penalty, expected)
+  assert.equal(settlement.penalty, expected, '未强制交付时不该有完成度扣罚')
+  assert.equal(delivered.state.archive.works[0].finance_summary.penalty, expected)
+  // 声望：评级扣分 + Q_min 缺省 5 点
+  const qualityLog = delivered.state.company.reputation_log.find((entry) => entry.reason.includes('Q_min'))
+  assert.ok(qualityLog, '应写一条 Q_min 声望记录')
+  assert.equal(qualityLog.delta, -5)
+  assert.ok(delivered.state.company.reputation < reputationBefore)
+  // 委员会：额外 -2 好感度（评级 D 本身 -2，合计 -4）
+  const partner = delivered.state.partners.find((entry) => entry.id === 'partner_tv')
+  assert.equal(partner.history.at(-1).delta, -4)
+})
+
+test('DEC-QUALITY-001：质量达标时不产生质量扣罚', () => {
+  let state = funded(ok('initialize', { seed: 7 }).state)
+  state = ok('start_work', { state, offer_id: 'offer_01', mode: 'contract' }).state
+  state = completeWork(state, 'work_01', 90)
+  const firstCommon = state.works[0].common.items[0]
+  firstCommon.work_done = firstCommon.work_total
+  firstCommon.contributors = ['staff_dir']
+  const delivered = ok('deliver_work', { state, work_id: 'work_01' })
+  assert.equal(delivered.report.q_min, 65)
+  assert.ok(delivered.report.quality_score >= 65)
+  assert.equal(delivered.report.quality_penalty, 0)
+  assert.equal(delivered.report.penalty, 0)
+})
+
 test('DEC-PROJECT-001：中止解绑临时员工、释放外包产能并保留团队履历', () => {
   let state = ok('initialize', { seed: 7 }).state
   state = ok('start_work', { state, offer_id: 'offer_02', mode: 'contract' }).state
-  const temporary = state.staff.find((member) => member.id === 'staff_ka')
-  temporary.employment = 'temporary'
+  const temporary = forceTemporary(state.staff.find((member) => member.id === 'staff_ka'))
   temporary.temporary_contract = { work_id: 'work_01', start_week: 0, end_week: 52 }
   temporary.assignment_work_id = 'work_01'
   state = assign(state, 'staff_ka')
@@ -2905,9 +2987,13 @@ test('M2 到期强制交付：未达门槛在结算周自动交付，按完成�
   assert.equal(settlement.end_reason, 'deadline')
   assert.equal(settlement.forced, true)
   assert.ok(settlement.gate_completion_permille > 0 && settlement.gate_completion_permille < 1000)
-  // 170M 预算 × 缺口比例 × 30% 扣罚（逐层整数截断，与核心同序）
-  const expectedPenalty = Math.floor(Math.floor(170000000 * (1000 - settlement.gate_completion_permille) / 1000) * 300 / 1000)
-  assert.equal(settlement.penalty, expectedPenalty)
+  // 扣罚 = 强制交付扣罚 + 质量违约扣罚（两类独立叠加，DEC-QUALITY-001 只规定各自上限）
+  const forcedPenalty = Math.floor(Math.floor(170000000 * (1000 - settlement.gate_completion_permille) / 1000) * 300 / 1000)
+  const qualityPenalty = Math.floor(170000000 * Math.min(300, (settlement.q_min - settlement.quality_score) * 20) / 1000)
+  assert.equal(settlement.q_min, 65)
+  assert.equal(settlement.quality_penalty, qualityPenalty)
+  assert.ok(qualityPenalty > 0, '质量未达 Q_min 应产生扣罚')
+  assert.equal(settlement.penalty, forcedPenalty + qualityPenalty)
   assert.equal(result.report.funds.delta, result.state.finance.balance - balanceBefore)
   assert.equal(result.state.works.length, 0)
   const record = result.state.archive.works[0]
@@ -2915,7 +3001,7 @@ test('M2 到期强制交付：未达门槛在结算周自动交付，按完成�
   assert.equal(record.end_week, 52)
   assert.equal(record.forced, true)
   assert.equal(record.gate_completion_permille, settlement.gate_completion_permille)
-  assert.equal(record.finance_summary.penalty, expectedPenalty)
+  assert.equal(record.finance_summary.penalty, settlement.penalty)
   assert.equal(result.state.finance.entries.find((entry) => entry.category === 'penalty').week, 52)
   assert.equal(result.state.company.reputation_log.at(-1).week, 52)
   assert.equal(result.state.company.status, 'running')
@@ -3427,8 +3513,8 @@ test('hire_temporary：解包签约、项目合同、临时账目与延期联动
   const signing = hired.state.finance.entries.find((entry) => entry.id === `w0.temporary.${candidate.id}.signing`)
   assert.equal(signing.category, 'temporary')
   assert.equal(signing.work_id, started.work_id)
-  assert.equal(signing.amount, -100000)
-  assert.equal(hired.state.finance.balance, balanceBefore - 100000)
+  assert.equal(signing.amount, -candidate.signing_fee)
+  assert.equal(hired.state.finance.balance, balanceBefore - candidate.signing_fee)
 
   const extended = ok('request_extension', { state: hired.state, work_id: started.work_id })
   assert.equal(extended.state.staff.find((entry) => entry.id === candidate.id).temporary_contract.end_week, 56)
@@ -3437,9 +3523,9 @@ test('hire_temporary：解包签约、项目合同、临时账目与延期联动
   const salary = advanced.state.finance.entries.find((entry) => entry.id === `w0.temporary.${candidate.id}.salary`)
   assert.equal(salary.category, 'temporary')
   assert.equal(salary.work_id, started.work_id)
-  assert.equal(salary.amount, -50000)
+  assert.equal(salary.amount, -candidate.weekly_salary)
   assert.equal(advanced.report.funds.costs.salary, 786000)
-  assert.equal(advanced.report.funds.costs.temporary, 50000)
+  assert.equal(advanced.report.funds.costs.temporary, candidate.weekly_salary)
   assert.deepEqual(advanced.state.staff.find((entry) => entry.id === candidate.id).experience, experienceBefore)
   assert.equal(advanced.state.finance.opening_funds + advanced.state.finance.entries.reduce((sum, entry) => sum + entry.amount, 0), advanced.state.finance.balance)
 })
@@ -3541,7 +3627,7 @@ test('hire_temporary：错误守卫与资金不足失败原子', () => {
 
   const scouted = ok('scout', { state: funded(setupTiny(43)) }).state
   const expiring = scouted.recruitment.pool.at(-1)
-  expiring.staff.employment = 'temporary'
+  forceTemporary(expiring.staff)
   expiring.staff.temporary_contract = null
   scouted.company.week = expiring.expires_week
   assert.equal(call('hire_temporary', { state: scouted, work_id: 'work_01', candidate_id: expiring.staff.id }).error.code, 'NOT_FOUND')
@@ -3652,7 +3738,7 @@ test('hire_core：拒绝带临时合同或非 core 的池候选', () => {
   const state = ok('initialize', { seed: 42 }).state
   const candidate = state.recruitment.pool[0]
   const temporary = JSON.parse(JSON.stringify(state))
-  temporary.recruitment.pool[0].staff.employment = 'temporary'
+  forceTemporary(temporary.recruitment.pool[0].staff)
   temporary.recruitment.pool[0].staff.temporary_contract = { work_id: 'work_01', start_week: 0, end_week: 2 }
   const result = call('hire_core', { state: temporary, staff_id: candidate.staff.id })
   assert.equal(result.error.code, 'INVALID_INPUT')

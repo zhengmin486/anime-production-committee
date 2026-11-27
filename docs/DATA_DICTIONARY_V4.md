@@ -107,7 +107,7 @@ GameState {
 | `abilities` `experience` `potential` `revealed_potential` | **对象**（非数组） | 必填 | `实现` | 固定 6 键：`planning/direction/drawing/animation/management/postproduction`；C++ 是 `std::array`，JSON 是对象 |
 | `talent_type` `weekly_salary` `signing_fee` | string / int | 必填 | `实现` | `signing_fee` 默认 0；V4 不再使用 project_fee，历史 v3 字段按 `historical_fields` 隔离 |
 | `project_fee` | int | — | `historical_fields` | 仅 v3 历史字段；M0 §3/§14.6 已由 `signing_fee + weekly_salary` 取代，V4 Schema 禁止出现 |
-| `assignment_work_id` | string\|null | 是 | `实现` | INV-09；INV-10 校验临时员工归属恒等于合同项目 |
+| `assignment_work_id` | string\|null | 是 | `实现` | INV-09；INV-10 校验临时员工归属恒等于合同项目；临时员工职业必须是八招聘职业之一，周薪按 (20,000+主能力×300)×120%、签约费 = 两周薪资硬校验（挡坏存档注入低价临时工） |
 | `last_participation` | `{work_id,item_id,week}\|null` | 是 | `实现` | INV-11 |
 | `temporary_contract` | `{work_id,start_week,end_week}\|null` | 是 | `形状校验、签约与延期联动实现` | `end_week` 签约时快照项目 `deadline_week`；成功延期时同步更新；仅作预计结束周，不触发自动解约；`closing/delivering` 过渡态保留合同，`finalize_delivery` 实际结清时退出 |
 | `forced_rest`（休养期） | — | — | `待实现` | §14.10 / INV-28 / DEC-STAFF-009 的前置数据 |
