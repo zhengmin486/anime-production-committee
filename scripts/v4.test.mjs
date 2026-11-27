@@ -57,6 +57,12 @@ function setupTiny(seed = 7, workId = 'work_01') {
   return created.state
 }
 
+function markTemporary(member) {
+  member.employment = 'temporary'
+  member.weekly_salary = (20000 + member.abilities.drawing * 300) * 1200 / 1000
+  member.signing_fee = member.weekly_salary * 2
+}
+
 test('initialize 生成合法状态，同 seed 哈希一致', () => {
   const first = ok('initialize', { seed: 42 })
   const second = ok('initialize', { seed: 42 })
@@ -141,23 +147,22 @@ test('首周产出与独立手算逐项一致', () => {
 test('阶段 2-3：临时员工周薪同样进入刚性预检与唯一账本', () => {
   let state = setupTiny(21)
   const temporary = state.staff.find((member) => member.id === 'staff_ka')
-  temporary.employment = 'temporary'
-  temporary.weekly_salary = 50000
+  markTemporary(temporary)
   state = assign(state, 'staff_dir', 'work_01')
   state = assign(state, 'staff_ka', 'work_01')
   const experienceBefore = JSON.parse(JSON.stringify(temporary.experience))
   const result = ok('advance_week', { state })
-  assert.equal(result.report.funds.costs.salary, 130000)
+  assert.equal(result.report.funds.costs.salary, 134600)
   assert.deepEqual(result.state.staff.find((member) => member.id === 'staff_ka').experience, experienceBefore)
   assert.equal(result.state.finance.entries.filter((entry) => entry.category === 'salary').length, 3)
-  assert.equal(result.state.finance.entries.find((entry) => entry.id.endsWith('.salary.staff_ka')).amount, -50000)
+  assert.equal(result.state.finance.entries.find((entry) => entry.id.endsWith('.salary.staff_ka')).amount, -54600)
   assert.equal(result.state.finance.opening_funds + result.state.finance.entries.reduce((sum, entry) => sum + entry.amount, 0), result.state.finance.balance)
 })
 
 test('临时员工不积累长期经验，结项后退出名册但保留团队快照', () => {
   let state = setupTiny(24)
   const temporary = state.staff.find((member) => member.id === 'staff_ka')
-  temporary.employment = 'temporary'
+  markTemporary(temporary)
   state = assign(state, 'staff_dir', 'work_01')
   state = assign(state, 'staff_ka', 'work_01')
   state = ok('advance_week', { state }).state
@@ -166,6 +171,30 @@ test('临时员工不积累长期经验，结项后退出名册但保留团队�
   const delivered = ok('deliver_work', { state, work_id: 'work_01' })
   assert.equal(delivered.state.staff.some((member) => member.id === 'staff_ka'), false)
   assert.ok(delivered.state.archive.works[0].team.some((member) => member.id === 'staff_ka'))
+})
+
+test('临时员工弹性工位、工资、签约费与经验在运行时强制校验', () => {
+  const state = setupTiny(25)
+  markTemporary(state.staff.find((member) => member.id === 'staff_ka'))
+  const second = JSON.parse(JSON.stringify(state.staff.find((member) => member.id === 'staff_ka')))
+  second.id = 'staff_temp_2'
+  state.staff.push(second)
+  const validateState = (input) => call('set_plan', {
+    state: input,
+    work_id: input.works[0].id,
+    plan: input.works[0].plan,
+  })
+  assert.ok(validateState(state).error, 'T1 只允许 1 个临时员工')
+  state.company.reputation = 250
+  assert.equal(validateState(state).error, undefined, 'T2 允许 2 个临时员工')
+  second.weekly_salary += 1
+  assert.ok(validateState(state).error, '非法 1.20 倍工资必须拒绝')
+  second.weekly_salary -= 1
+  second.signing_fee += 1
+  assert.ok(validateState(state).error, '非法 2 倍签约费必须拒绝')
+  second.signing_fee -= 1
+  second.experience.animation = 1
+  assert.ok(validateState(state).error, '临时员工长期经验必须为零')
 })
 
 test('周结算重复提交同一状态不产生双工资、双生产或双推进', () => {
@@ -935,27 +964,46 @@ test('事件内容：非法卡被拒绝并定位到卡片与字段', () => {
   }])
   assert.ok(noDefault.issues.some((issue) => issue.field === 'options' && issue.message.includes('默认分支')))
 
-  // #121：§14.11 一次升级字段未冻结，非空配置必须拒绝加载，不能静默忽略。
-  const unfrozenFields = [
-    ['escalation', { description: '升级', expires_weeks: 1, options: [], timeout_option_id: 'accept' }],
-    ['timeout_option_id', 'accept'],
-    ['escalation_note', '需要二次处理']
+  // #121 / DEC-EVENT-003：升级字段已冻结；合法配置可加载，非法配置整卡拒绝。
+  const escalationCard = {
+    ...card,
+    expires_weeks: 2,
+    tier: 'major',
+    once_per_project: true,
+    cooldown_weeks: 0,
+    timeout_option_id: 'accept',
+    escalation: {
+      description: '升级：供应商催款',
+      expires_weeks: 2,
+      options: [
+        { id: 'soft', kind: 'abandon', label: '轻罚', cost: 10, effects: [] },
+        { id: 'hard', kind: 'abandon', label: '硬罚', cost: 20,
+          effects: [{ scope: 'instant', target: 'quality', value: -5 }] }
+      ],
+      timeout_option_id: 'hard'
+    },
+    escalation_note: '二次超时强制执行'
+  }
+  assert.equal(validate([escalationCard]).ok, true)
+  assert.deepEqual(validateCard(escalationCard, 'fixture.json'), [])
+
+  const badEscalations = [
+    [{ ...escalationCard, escalation: { ...escalationCard.escalation, expires_weeks: 3 } }, 'escalation.expires_weeks'],
+    [{ ...escalationCard, timeout_option_id: 'missing' }, 'timeout_option_id'],
+    [{ ...escalationCard, escalation: { ...escalationCard.escalation, timeout_option_id: 'missing' } }, 'escalation.timeout_option_id'],
+    [{ ...escalationCard, escalation: { ...escalationCard.escalation, escalation: {} } }, 'escalation.escalation'],
+    [{ ...escalationCard, tier: 'normal', once_per_project: false }, 'escalation'],
+    [{ ...escalationCard, expires_weeks: 0 }, 'escalation']
   ]
-  for (const [field, value] of unfrozenFields) {
-    const candidate = { ...card, [field]: value }
-    const runtime = validate([candidate])
-    assert.ok(runtime.issues.some(
-      (issue) => issue.field === field && issue.message.includes('未冻结')))
-    const content = validateCard(candidate, 'fixture.json')
-    assert.ok(content.some(
-      (issue) => issue.field === field && issue.message.includes('未冻结')))
+  for (const [candidate, field] of badEscalations) {
+    assert.ok(validate([candidate]).issues.some((issue) => issue.field === field), field)
+    assert.ok(validateCard(candidate, 'fixture.json').some((issue) => issue.field === field), field)
   }
   const nullPlaceholders = {
     ...card, escalation: null, timeout_option_id: null, escalation_note: null
   }
   assert.equal(validate([nullPlaceholders]).ok, true)
   assert.deepEqual(validateCard(nullPlaceholders, 'fixture.json'), [])
-
   const empty = ok('validate_event_catalog', { source: 'empty', catalog: { schema_version: 1, cards: [] } })
   assert.equal(empty.ok, false)
   assert.equal(empty.issues[0].field, 'cards')
@@ -1581,7 +1629,7 @@ test('DEC-PROJECT-001：中止解绑临时员工、释放外包产能并保留�
   let state = ok('initialize', { seed: 7 }).state
   state = ok('start_work', { state, offer_id: 'offer_02', mode: 'contract' }).state
   const temporary = state.staff.find((member) => member.id === 'staff_ka')
-  temporary.employment = 'temporary'
+  markTemporary(temporary)
   state = assign(state, 'staff_ka')
   const item = allItems(state, 'work_01')[0]
   item.work_done = 1
@@ -2593,6 +2641,122 @@ test('#120 结清/未结清状态都能 JSON 往返：不补字段、不推进�
   assert.equal(settledRoundTrip.events.pending.length, settledState.events.pending.length)
 })
 
+// #121：把限时事件改造成「合法升级配置」的夹具。轻罚 100、硬罚 200，
+// 数值完全来自预设，运行时不得乘倍。
+function escalationReady(state, workId = null) {
+  const event = workId === null
+    ? state.events.pending[0]
+    : state.events.pending.find((item) => item.work_id === workId)
+  event.options = [
+    { id: 'soft', label: '轻罚', kind: 'abandon', cost: 100, risk_hint: '', effects: [] },
+    { id: 'take', label: '接受', kind: 'accept', cost: 0, risk_hint: '', effects: [] }
+  ]
+  event.timeout_option_id = 'soft'
+  event.escalated = false
+  // 避免第 2 周阶段 6 强制交付抢在阶段 7 之前；升级用例只考察超时路径。
+  for (const work of state.works) work.deadline_week = 20
+  event.escalation = {
+    description: '供应商升级催款',
+    expires_weeks: 2,
+    triggered_week: 0,
+    options: [
+      { id: 'soft2', label: '轻罚', kind: 'abandon', cost: 0, risk_hint: '', effects: [] },
+      { id: 'hard', label: '硬罚', kind: 'abandon', cost: 200, risk_hint: '', effects: [] }
+    ],
+    timeout_option_id: 'hard'
+  }
+  return state
+}
+test('#121 首次超时：执行预设轻罚并原地升级，固定 2 周新期限且身份不变', () => {
+  const state = forceCash(escalationReady(timedEventState()), 2000000)
+  const week = state.company.week
+  const triggered = state.events.pending[0].triggered_week
+  const result = ok('advance_week', { state })
+  const pending = result.state.events.pending.find((item) => item.event_id === 'schedule_slip')
+  assert.ok(pending, '升级不移除 pending')
+  assert.equal(pending.escalated, true)
+  assert.equal(pending.expires_week, week + 1)
+  assert.equal(pending.viewed, true)
+  assert.equal(pending.triggered_week, triggered)
+  assert.equal(pending.work_id, 'work_01')
+  assert.deepEqual(pending.options.map((item) => item.id), ['soft2', 'hard'])
+  assert.deepEqual(result.report.events.expired.map((item) => item.option_id), ['soft'])
+  assert.equal(result.state.finance.entries.filter((entry) => entry.memo === 'schedule_slip' && entry.amount === -100).length, 1)
+  assert.equal(result.state.company.week, week + 1)
+})
+
+test('#121 二次超时：自动执行升级预设硬罚并移除 pending，不乘倍', () => {
+  const first = ok('advance_week', { state: forceCash(escalationReady(timedEventState()), 2000000) }).state
+  assert.equal(first.events.pending.length, 1)
+  const second = ok('advance_week', { state: first })
+  assert.equal(second.state.events.pending.length, 0)
+  assert.deepEqual(second.report.events.expired.map((item) => item.option_id), ['hard'])
+  const penalties = second.state.finance.entries.filter((entry) => entry.memo === 'schedule_slip')
+  assert.equal(penalties.filter((entry) => entry.amount === -200).length, 1)
+  assert.equal(penalties.filter((entry) => entry.amount === -400).length, 0, '不得自行按双倍扣款')
+  assert.equal(second.state.company.status, 'running')
+})
+
+test('#121：升级只处理目标事件，同周其他项目 pending 原样保留', () => {
+  const drawn = ok('advance_week', { state: twoProjectsNearDeadline() }).state
+  for (const event of drawn.events.pending) event.viewed = true
+  const state = escalationReady(drawn, 'work_a')
+  const target = state.events.pending.find((item) => item.work_id === 'work_a')
+  target.expires_week = state.company.week
+  const other = state.events.pending.find((item) => item.work_id === 'work_b')
+  other.expires_week = state.company.week + 3
+  const result = ok('advance_week', { state })
+  const kept = result.state.events.pending.find((item) => item.work_id === 'work_b')
+  assert.deepEqual(kept, other)
+  assert.equal(result.report.events.expired.filter((item) => item.work_id === 'work_b').length, 0)
+})
+
+test('#121 升级快照 JSON 往返：字段不丢、哈希稳定、不推进周数', () => {
+  const escalated = ok('advance_week', { state: forceCash(escalationReady(timedEventState()), 2000000) }).state
+  const roundTrip = JSON.parse(JSON.stringify(escalated))
+  assert.equal(ok('hash_state', { state: roundTrip }).hash, ok('hash_state', { state: escalated }).hash)
+  assert.equal(roundTrip.company.week, escalated.company.week)
+  assert.deepEqual(roundTrip.events.pending, escalated.events.pending)
+  assert.equal(roundTrip.events.pending[0].escalated, true)
+  assert.equal(roundTrip.events.pending[0].escalation.timeout_option_id, 'hard')
+})
+
+test('#121 同样输入重放：升级与二次超时结果逐位一致', () => {
+  const run = () => {
+    const first = ok('advance_week', { state: forceCash(escalationReady(timedEventState()), 2000000) }).state
+    const second = ok('advance_week', { state: first })
+    return ok('hash_state', { state: second.state }).hash
+  }
+  assert.equal(run(), run())
+})
+
+test('#121 二次硬罚沿用现金封顶：预设金额大于现金时不产生负余额', () => {
+  const state = forceCash(escalationReady(timedEventState()), 250000)
+  const event = state.events.pending[0]
+  event.escalation.triggered_week = state.company.week - 1
+  event.escalation.options[1].cost = 500000
+  event.escalated = true
+  event.options = event.escalation.options
+  event.expires_week = state.company.week
+  const result = ok('advance_week', { state })
+  assert.equal(result.state.events.pending.some((item) => item.event_id === 'schedule_slip'), false)
+  assert.equal(result.state.finance.balance, 0)
+  const entries = result.state.finance.entries.filter((entry) => entry.memo === 'schedule_slip')
+  assert.equal(entries.length, 1)
+  assert.ok(entries[0].amount < 0 && entries[0].amount > -500000, '只扣可支付现金，不按预设 500000 记欠款')
+})
+
+test('#121 非法升级快照原子拒绝：不推进、不扣款、哈希不变', () => {
+  const state = forceCash(escalationReady(timedEventState()), 2000000)
+  state.events.pending[0].escalated = true
+  state.events.pending[0].escalation = null
+  const before = ok('hash_state', { state }).hash
+  const failed = call('advance_week', { state })
+  assert.ok(failed.error)
+  assert.match(failed.error.message, /升级快照/)
+  assert.equal('state' in failed, false)
+  assert.equal(ok('hash_state', { state }).hash, before)
+})
 // ---------------- INV-27 监督岗位 ----------------
 
 function startedContract(offerId = 'offer_01', seed = 7) {
@@ -2754,6 +2918,7 @@ const scoutCtx = (state, extra = {}) => ({
   last_scout_week: state.recruitment.last_scout_week,
   balance: state.finance.balance,
   pity: state.recruitment.pity,
+  reputation: state.company.reputation,
   ...extra
 })
 
@@ -2789,6 +2954,19 @@ test('scout 成功：候选/保底/窗口/流水与 oracle 一致，同周第二
   assert.equal(entry.amount, -50000)
   assert.equal(result.state.finance.balance, 2000000 - 50000)
   assert.equal(call('scout', { state: result.state }).error.code, 'INVALID_PHASE')
+})
+
+test('scout 跨声望 Tier：能力、潜力与 1.20 倍工资和 oracle 一致', () => {
+  for (const reputation of [0, 100, 250, 600, 10000, 60000, 300000]) {
+    const state = ok('initialize', { seed: 42 }).state
+    state.company.reputation = reputation
+    const result = ok('scout', { state })
+    const expected = oracleScout(scoutCtx(state), state.recruitment.pool)
+    assert.equal(expected.error, null)
+    assert.deepEqual(result.state.recruitment.pool, expected.pool)
+    const candidate = result.state.recruitment.pool.find((entry) => entry.staff.id === result.added_ids[0]).staff
+    assert.ok(Number.isInteger(candidate.weekly_salary) && candidate.weekly_salary > 0)
+  }
 })
 
 test('scout 定向：role 与 focus_ability 的强制职业与 oracle 一致', () => {
@@ -2950,10 +3128,11 @@ test('dismiss_staff：已结项员工的 Archive 团队贡献同样阻止解雇'
   assert.equal(ok('hash_state', { state }).hash, before)
 })
 
-test('advance_week 招聘池周步骤：部分轮换与 oracle rotatePool 一致', () => {
+test('advance_week 招聘池周步骤：按当前声望 Tier 轮换且与 oracle 一致', () => {
   const state = ok('initialize', { seed: 42 }).state
+  state.company.reputation = 300000
   const advanced = ok('advance_week', { state }).state
-  const expected = rotatePool(state.recruitment.pool, 42, 1)
+  const expected = rotatePool(state.recruitment.pool, 42, 1, { reputation: state.company.reputation })
   assert.deepEqual(advanced.recruitment.pool, expected.pool)
   assert.equal(advanced.company.week, 1)
 })

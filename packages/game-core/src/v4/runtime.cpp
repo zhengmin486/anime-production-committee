@@ -482,9 +482,8 @@ bool replace_supervisor_post(GameState& state, const std::string& work_id, const
 }
 
 // ---- 招聘（M0 §14.13.1 / DEC-STAFF-006/007）----
-// 生成逻辑逐位镜像 scripts/lib/recruit-oracle.mjs（规则样本）：坐标式随机、
-// 无计数器入档；保底计数只存 recruitment.pity。数值全部 [PLACEHOLDER]，
-// 由 #59/#58 标定；改规则先改用例与 M0 §14.13，再改这里。
+// 生成逻辑逐位镜像 scripts/lib/recruit-oracle.mjs（规则样本）：坐标式随机、无计数器入档。
+// Tier 能力/潜力/工资已按 2026-11-27 归档；池容量、轮换、保底与签约费仍是 [PLACEHOLDER]。
 constexpr std::int64_t kScoutFee = 50000;          // [PLACEHOLDER]
 constexpr int kScoutCount = 1;                     // [PLACEHOLDER]
 constexpr int kScoutWindowWeeks = 2;               // [PLACEHOLDER] 讨论范围 1–2 周
@@ -497,6 +496,7 @@ constexpr int kPitySsr = 50;                       // [PLACEHOLDER] 未冻结
 constexpr int kSigningFeePerAbility = 1000;        // [PLACEHOLDER]
 constexpr int kSalaryBase = 20000;                 // [PLACEHOLDER]
 constexpr int kSalaryPerPrimary = 300;             // [PLACEHOLDER]
+constexpr int kCandidateSalaryPermille = 1200;
 // 设施扩建尚未实现，当前采用 #63 已确认的开局正式编制。
 constexpr int kCoreStaffCapacityBase = 4;
 
@@ -519,6 +519,46 @@ std::string profession_ability(const std::string& profession) {
     return kernel::staff_specialty(probe);
 }
 
+int reputation_tier(std::int64_t reputation) {
+    if (reputation < 100) return 0;
+    if (reputation < 250) return 1;
+    if (reputation < 600) return 2;
+    if (reputation < 2000) return 3;
+    if (reputation < 10000) return 4;
+    if (reputation < 60000) return 5;
+    if (reputation < 300000) return 6;
+    return 7;
+}
+
+struct TierProfile {
+    int min_ability;
+    int max_ability;
+    int potential_cap;
+};
+
+TierProfile tier_profile(std::int64_t reputation) {
+    const int tier = reputation_tier(reputation);
+    if (tier <= 1) return {42, 52, 55};
+    if (tier <= 4) return {56, 65, 68};
+    return {66, 74, 76};
+}
+
+int temporary_workstation_capacity(std::int64_t reputation) {
+    const int tier = reputation_tier(reputation);
+    if (tier <= 1) return 1;
+    if (tier <= 3) return 2;
+    if (tier <= 5) return 3;
+    return 4;
+}
+
+std::int64_t standard_weekly_salary(int primary) {
+    return kSalaryBase + static_cast<std::int64_t>(primary) * kSalaryPerPrimary;
+}
+
+std::int64_t candidate_weekly_salary(int primary) {
+    return standard_weekly_salary(primary) * kCandidateSalaryPermille / 1000;
+}
+
 std::uint32_t purpose_recruit() { return kernel::hash_text("recruit"); }
 std::uint32_t purpose_recruit_regular() { return kernel::hash_text("recruit_regular"); }
 std::uint32_t purpose_recruit_scout() { return kernel::hash_text("recruit_scout"); }
@@ -536,7 +576,8 @@ struct GeneratedCandidate {
 
 // 候选内部子坐标 index*16+k（k=0..15），与 oracle generateCandidate 逐位一致。
 GeneratedCandidate generate_candidate(std::uint32_t seed, int week, int index, std::uint32_t purpose,
-                                      const std::optional<std::string>& forced_profession, const Pity& pity) {
+                                      const std::optional<std::string>& forced_profession, const Pity& pity,
+                                      std::int64_t reputation) {
     const auto sub = [&](int k) {
         return kernel::draw(seed, week, kernel::Stream::staff, purpose,
                             static_cast<std::uint32_t>(index * 16 + k));
@@ -555,26 +596,24 @@ GeneratedCandidate generate_candidate(std::uint32_t seed, int week, int index, s
     } else {
         result.tier = "n";
     }
-    const int primary_base = result.tier == "ssr" ? 65 : (result.tier == "sr" ? 45 : 20);
-    const int primary_span = result.tier == "ssr" ? 36 : 31;
-    const int primary = primary_base + static_cast<int>(sub(2) % static_cast<std::uint32_t>(primary_span));
+    const TierProfile profile = tier_profile(reputation);
+    const int primary_span = profile.max_ability - profile.min_ability + 1;
+    const int primary = profile.min_ability + static_cast<int>(sub(2) % static_cast<std::uint32_t>(primary_span));
 
     int ability_sum = 0;
     for (int i = 0; i < kAbilityCount; ++i) {
         const bool is_primary = kAbilities[static_cast<std::size_t>(i)] == primary_ability;
         const int value = is_primary ? primary : 5 + static_cast<int>(sub(3 + i) % 41);
         member.abilities[static_cast<std::size_t>(i)] = value;
+        member.potential[static_cast<std::size_t>(i)] = std::min(value + 4, profile.potential_cap);
         ability_sum += value;
-        // 注意：潜力子坐标固定 k=9（与 oracle 一致），不按能力维度展开。
-        const int gain = is_primary ? 10 + static_cast<int>(sub(9) % 31) : static_cast<int>(sub(9) % 41);
-        member.potential[static_cast<std::size_t>(i)] = std::min(100, value + gain);
     }
     member.id = "cand_" + hex32(purpose) + "_" + std::to_string(week) + "_" + std::to_string(index);
     member.name = member.role + "_" + std::to_string(week) + "_" + std::to_string(index);
     member.employment = "core";
     member.talent_type = kTalentArchetypes[sub(15) % 8];
     member.signing_fee = ability_sum * kSigningFeePerAbility;
-    member.weekly_salary = kSalaryBase + primary * kSalaryPerPrimary;
+    member.weekly_salary = candidate_weekly_salary(primary);
     member.fatigue = 0;
     member.morale = 60;
     return result;
@@ -599,7 +638,8 @@ std::vector<PoolCandidate> expire_candidates(const std::vector<PoolCandidate>& p
 
 // 常规池部分轮换：先到期清理，再确定性选 kRotateCount 个常规槽替换；
 // 未选中候选逐字段不变；scout 候选不参与轮换。轮换生成不带保底计数（与 oracle 一致）。
-std::vector<PoolCandidate> rotate_pool(const std::vector<PoolCandidate>& pool, std::uint32_t seed, int week) {
+std::vector<PoolCandidate> rotate_pool(const std::vector<PoolCandidate>& pool, std::uint32_t seed, int week,
+                                      std::int64_t reputation) {
     const auto alive = expire_candidates(pool, week);
     std::vector<PoolCandidate> regulars;
     std::vector<PoolCandidate> scouts;
@@ -624,7 +664,7 @@ std::vector<PoolCandidate> rotate_pool(const std::vector<PoolCandidate>& pool, s
         if (std::find(slots.begin(), slots.end(), static_cast<int>(i)) == slots.end()) kept.push_back(regulars[i]);
     }
     for (const int slot : slots) {
-        auto generated = generate_candidate(seed, week, slot, purpose_recruit(), std::nullopt, Pity{});
+        auto generated = generate_candidate(seed, week, slot, purpose_recruit(), std::nullopt, Pity{}, reputation);
         PoolCandidate candidate;
         candidate.staff = std::move(generated.staff);
         candidate.origin = "regular";
@@ -639,7 +679,7 @@ std::vector<PoolCandidate> rotate_pool(const std::vector<PoolCandidate>& pool, s
 Recruitment initial_recruitment(std::uint32_t seed) {
     Recruitment recruitment;
     for (int i = 0; i < kPoolCap; ++i) {
-        auto generated = generate_candidate(seed, 0, i, purpose_recruit(), std::nullopt, Pity{});
+        auto generated = generate_candidate(seed, 0, i, purpose_recruit(), std::nullopt, Pity{}, 100);
         PoolCandidate candidate;
         candidate.staff = std::move(generated.staff);
         candidate.origin = "regular";
@@ -1562,6 +1602,7 @@ std::vector<std::string> validate(const GameState& state) {
     }
 
     std::set<std::string> staff_ids;
+    int temporary_staff_count = 0;
     for (const auto& member : state.staff) {
         claim_id(member.id, "staff");
         if (!staff_ids.insert(member.id).second) error("INV-02 staff.id 重复: " + member.id);
@@ -1576,6 +1617,24 @@ std::vector<std::string> validate(const GameState& state) {
         if (member.employment != "core" && member.employment != "temporary") {
             error("INV-01 staff.employment 非法: " + member.id);
         }
+        if (member.employment == "temporary") {
+            ++temporary_staff_count;
+            const int primary = ability_index(profession_ability(member.role));
+            if (primary >= 0) {
+                const auto expected_salary = candidate_weekly_salary(member.abilities[static_cast<std::size_t>(primary)]);
+                if (member.weekly_salary != expected_salary) {
+                    error("INV-01 临时员工周薪必须为同能力正式员工的 1.20 倍: " + member.id);
+                }
+                if (member.signing_fee != expected_salary * 2) {
+                    error("INV-01 临时员工签约费必须为周薪的 2 倍: " + member.id);
+                }
+            }
+            for (int i = 0; i < kAbilityCount; ++i) {
+                if (member.experience[static_cast<std::size_t>(i)] != 0) {
+                    error("INV-01 临时员工不得积累长期经验: " + member.id);
+                }
+            }
+        }
         if (member.last_participation) {
             // INV-11：参与记录严格是"上一周"或 null。跨周保留会让磨合判定
             // 与存档校验各有一套时间语义，所以周结算里没产出就清空。
@@ -1583,6 +1642,9 @@ std::vector<std::string> validate(const GameState& state) {
                 error("INV-11 last_participation.week 必须是上一周或 null: " + member.id);
             }
         }
+    }
+    if (temporary_staff_count > temporary_workstation_capacity(state.company.reputation)) {
+        error("INV-01 项目临时员工超过当前声望 Tier 的弹性工位");
     }
 
     // 招聘池（§14.13.1）：候选不是员工——不进名册约束（INV-09/10/11 不适用），
@@ -1895,11 +1957,36 @@ std::vector<std::string> validate(const GameState& state) {
         if (event.triggered_week < 0 || event.triggered_week > state.company.week) {
             error("INV-23 triggered_week 越界: " + event.event_id);
         }
-        if (event.expires_week && *event.expires_week < event.triggered_week) {
-            error("INV-23 expires_week 早于触发周: " + event.event_id);
+        // #121：升级后的期限以升级周为基准（固定 2 周窗口），原触发周保持不变。
+        const int deadline_base = (event.escalated && event.escalation.has_value())
+                                      ? event.escalation->triggered_week : event.triggered_week;
+        if (event.expires_week && *event.expires_week < deadline_base) {
+            error("INV-23 expires_week 早于期限基准周: " + event.event_id);
         }
-        if (event.expires_week && *event.expires_week > event.triggered_week + 7) {
+        if (event.expires_week && *event.expires_week > deadline_base + 7) {
             error("INV-29 expires_week 超出八周处理上限: " + event.event_id);
+        }
+        if (event.escalated && !event.escalation.has_value()) {
+            error("INV-29 已升级事件缺少升级快照: " + event.event_id);
+        }
+        if (event.escalation.has_value()) {
+            const auto& esc = *event.escalation;
+            if (esc.expires_weeks != 2) error("INV-29 升级窗口必须固定为 2 周: " + event.event_id);
+            if (esc.options.empty()) error("INV-29 升级快照缺少替换选项: " + event.event_id);
+            if (std::none_of(esc.options.begin(), esc.options.end(),
+                             [](const EventOptionView& option) { return option.kind == "abandon"; })) {
+                error("INV-29 升级选项缺少 abandon 分支: " + event.event_id);
+            }
+            const bool hard_branch = std::any_of(esc.options.begin(), esc.options.end(),
+                [&esc](const EventOptionView& option) {
+                    return option.id == esc.timeout_option_id &&
+                           (option.kind == "abandon" || option.kind == "decline");
+                });
+            if (!hard_branch) error("INV-29 二次硬罚分支引用无效: " + event.event_id);
+            if (event.escalated && event.expires_week &&
+                *event.expires_week != esc.triggered_week + 1) {
+                error("INV-29 升级期限不是固定 2 周窗口: " + event.event_id);
+            }
         }
         if (event.expires_week &&
             std::none_of(event.options.begin(), event.options.end(),
@@ -2738,6 +2825,15 @@ const EventOptionView* default_event_option(const PendingEvent& pending) {
     return nullptr;
 }
 
+// #121：按选项 id 查找冻结快照中的分支；只认保守类型，避免误把玩家正向选项当超时惩罚。
+const EventOptionView* find_timeout_option(const PendingEvent& pending, const std::string& option_id) {
+    for (const auto& option : pending.options) {
+        if (option.id != option_id) continue;
+        return (option.kind == "abandon" || option.kind == "decline") ? &option : nullptr;
+    }
+    return nullptr;
+}
+
 // #120：强制终局的 pending 结清。破产与第 520 周已经没有玩家决策机会，但事件不能丢弃、
 // 也不能留下指向已关闭项目的悬空条目，因此逐条执行冻结快照里的默认保守分支：
 //   1. 顺序固定为 (work_id, event_id) 排序，与数组顺序、项目遍历顺序无关；
@@ -3081,7 +3177,8 @@ std::string scout(const std::string& input) {
         Json added_ids = Json::array();
         Pity pity = state.recruitment.pity;
         for (int i = 0; i < kScoutCount; ++i) {
-            auto generated = generate_candidate(state.seed, week, i, purpose_recruit_scout(), forced, pity);
+            auto generated = generate_candidate(state.seed, week, i, purpose_recruit_scout(), forced, pity,
+                                                state.company.reputation);
             pity = advance_pity(pity, generated.tier);
             PoolCandidate candidate;
             candidate.staff = std::move(generated.staff);
@@ -3466,8 +3563,30 @@ std::string advance_week(const std::string& input) {
         });
         Json expired = Json::array();
         for (const auto& pending : due_events) {
-            const EventOptionView* option = default_event_option(pending);
-            if (option == nullptr) return fail_stage(7, "INVALID_STATE", "限期事件缺少 abandon 默认分支");
+            // #121 / DEC-EVENT-003：升级事件二次超时 → 执行预设硬罚，不乘倍，移除 pending。
+            if (pending.escalated) {
+                if (!pending.escalation.has_value()) {
+                    return fail_stage(7, "INVALID_STATE", "已升级事件缺少升级快照");
+                }
+                const EventOptionView* hard = find_timeout_option(pending, pending.escalation->timeout_option_id);
+                if (hard == nullptr) return fail_stage(7, "INVALID_STATE", "二次硬罚分支引用无效");
+                if (!apply_event_option(state, pending, *hard, week, true)) {
+                    return fail_stage(7, "INVALID_STATE", "到期事件归属项目不存在");
+                }
+                auto& events = state.events.pending;
+                const auto hit = std::find_if(events.begin(), events.end(), [&pending](const PendingEvent& item) {
+                    return item.work_id == pending.work_id && item.event_id == pending.event_id;
+                });
+                if (hit == events.end()) return fail_stage(7, "INVALID_STATE", "到期事件重复处理");
+                events.erase(hit);
+                expired.push_back(Json{{"work_id", pending.work_id}, {"event_id", pending.event_id},
+                                       {"option_id", hard->id}, {"automatic", true}});
+                continue;
+            }
+            const EventOptionView* option = pending.timeout_option_id.empty()
+                                                ? default_event_option(pending)
+                                                : find_timeout_option(pending, pending.timeout_option_id);
+            if (option == nullptr) return fail_stage(7, "INVALID_STATE", "限期事件缺少可用的保守超时分支");
             if (!apply_event_option(state, pending, *option, week, true)) {
                 return fail_stage(7, "INVALID_STATE", "到期事件归属项目不存在");
             }
@@ -3476,7 +3595,15 @@ std::string advance_week(const std::string& input) {
                 return item.work_id == pending.work_id && item.event_id == pending.event_id;
             });
             if (hit == events.end()) return fail_stage(7, "INVALID_STATE", "到期事件重复处理");
-            events.erase(hit);
+            if (pending.escalation.has_value()) {
+                // 首次超时：轻罚已入账，原地替换内容快照并设置固定 2 周新期限；身份与 viewed 不变。
+                hit->options = pending.escalation->options;
+                hit->expires_week = week + 1;
+                hit->escalation->triggered_week = week;
+                hit->escalated = true;
+            } else {
+                events.erase(hit);
+            }
             expired.push_back(Json{{"work_id", pending.work_id}, {"event_id", pending.event_id},
                                    {"option_id", option->id}, {"automatic", true}});
         }
@@ -3485,7 +3612,7 @@ std::string advance_week(const std::string& input) {
         const int next_week = week + 1;
         // 招聘池进入新周先清理到期 scout 窗口，再部分轮换常规池。
         // 市场释放到期锁定 → 自然过期 → 自然补充；破产路径已在阶段 2 提前返回。
-        state.recruitment.pool = rotate_pool(state.recruitment.pool, state.seed, next_week);
+        state.recruitment.pool = rotate_pool(state.recruitment.pool, state.seed, next_week, state.company.reputation);
         state.market = weekly_market_step(state.market, state.seed, next_week, state.company.reputation);
 
         // ---- 阶段 8：随机事件抽取与周数 +1 ----

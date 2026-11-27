@@ -109,11 +109,13 @@ GameState {
 | `project_fee` | int | — | `historical_fields` | 仅 v3 历史字段；M0 §3/§14.6 已由 `signing_fee + weekly_salary` 取代，V4 Schema 禁止出现 |
 | `assignment_work_id` | string\|null | 是 | `实现` | INV-09；INV-10 尚无完整检查 |
 | `last_participation` | `{work_id,item_id,week}\|null` | 是 | `实现` | INV-11 |
-| `temporary_contract` | Json\|null | 是 | `实现`（透传） | 临时员工不积累长期经验；结项后按项目契约退出名册，团队快照保留其贡献 |
+| `temporary_contract` | Json\|null | 是 | `实现`（透传） | 弹性工位、1.20 倍周薪、2 倍签约费与零长期经验已校验；正式契约载荷、招聘命令与结项退出流程仍待实现 |
 | `forced_rest`（休养期） | — | — | `待实现` | §14.10 / INV-28 / DEC-STAFF-009 的前置数据 |
 | 监督岗位 | `Project.supervisor_staff_id` | string\|null | `实现`（基础职业资格） | 项目内岗位，不修改 `Staff.role`；INV-27 校验唯一性、资格与 `assignment_work_id` 归属 |
 
 **监督（INV-27 / §14.8 / DEC-STAFF-008）现状**：`Project.supervisor_staff_id` 已实现并在所有 producing 项目上严格校验；开工自动定岗，调离在任监督须原子 Swap/Replace，无合格替补则拒绝。当前资格只使用 `director/animation_director/production_manager` 基础职业集合；演出/作画/脚本转任阈值仍按 D-03 待裁决，不自行猜测。
+
+**临时员工输入现状（2026-11-27）**：运行时按公司声望 Tier 统一执行弹性工位 `1/1/2/2/3/3/4/4`，并校验临时员工周薪为同能力正式员工的 1.20 倍、签约费为周薪 2 倍、长期经验为零。能力档与潜力规则和招聘候选人共享；`hire_temporary`、`temporary_contract` 正式形状及设施派生核心编制尚未实现。
 
 ### 3.3 `Project`
 
@@ -198,7 +200,7 @@ GameState {
 | 触发时冻结 `name/cooldown_weeks/once_per_project/options/effects` | `实现` | `resolve_event` 不回查内容目录 |
 | `expires_week` | `实现` | 限期事件为 `triggered_week + expires_weeks - 1`；非限期为 null；阶段 7 到期执行冻结的 `abandon` 默认分支 |
 | `episode_id` / `stage` / `item_id` | `待裁决` D-09 | DA §7.6 与 M0 §3 不一致 |
-| `escalation` | `待裁决` D-09 | 字段名已出现，但升级载荷未冻结 |
+| `escalation` / 默认超时处罚 | `实现`（#128） | 卡片与 pending 快照校验升级载荷；首次超时轻罚并原地升级，期限 2 周，二次超时执行硬罚后移除；正式目录尚无带明确处罚数值的限时卡 |
 | 展示字段 `description/foreshadow/category/polarity/tier` | `待实现` | 快照只有 `name` |
 | 内容目录 `event_catalog_info` | `实现` | 卡片 schema 见 EVENT_CONTENT_PIPELINE §2 |
 
@@ -247,12 +249,16 @@ v4 固定九字段：`reason/weeks/final_funds/net_cash_change/total_projects/be
 
 | 聚合 | 契约形状 | 代码 | 缺口影响 |
 | --- | --- | --- | --- |
-| `Supplier` | DA §7.4 + M0 §3 | `Json` 强形状校验 | 9 字段精确载荷、专业枚举/唯一性、数值边界与全局 id 已校验；目录初始化与命令 9 未实现 |
+| `Supplier` | DA §7.4 + M0 §3 | `Json` 强形状校验 + `scripts/lib/supplier-oracle.mjs` | 9 字段精确载荷、专业枚举/唯一性、数值边界与全局 id 已校验；目录校验要求 reliability 为 0..100 整数，共享产能与三级可靠性公式已有测试；正式目录初始化与命令 9 未实现 |
 | `OutsourceContract` | DA §7.4 | `Json` 强形状校验 | 15 字段精确载荷、供应商/项目/工作项/单集/能力引用、费用与生命周期已校验；INV-19/20 已断言；签约、周交付、费用与可靠性失败未实现 |
 | `Partner` / `Committee` | DA §7.4 + M0 §3 | `Json` 强形状校验 | Partner 8 字段、history 4 字段、Committee 6 字段与成员 2 字段已精确校验；INV-13 已断言，覆盖渠道归属、项目双向引用、active/closed 生命周期与 Archive 一致性 |
 | `MarketState` | M0 §3 / DEC-MARKET-001；固定 4 个企划槽 | **槽位/生命周期/周补充/热度/合作方候选已初始化** | 初始目录与热度内容仍为 fixture（#59 标定）；自定/提案槽生命周期透传 |
 
 `suppliers` / `contracts` / `partners` / `committees` 根数组是解析必填项；四类元素分别精确包含 9 / 15 / 8 / 6 个字段，未知字段与缺失字段均拒绝。active 合同必须指向 producing 项目；终态合同仍保留可校验的项目与工作项引用。规范化哈希按 id 排序 suppliers / contracts / partners / committees，并按集合语义排序 specialties、Partner.channels 与 Committee.members，因此目录遍历顺序不改变状态哈希。状态校验通过不等于签约玩法开放：`weekly_cap` 推导、付款节奏、可靠性失败和项目终止释放仍未实现。
+
+**供应商输入现状（2026-11-27）**：`scripts/lib/supplier-oracle.mjs` 已定义九字段目录校验、`base_contract_cap`、normal/emergency 周产能与确定性可靠性三级判定；`reliability` 不接受 null，返工倒扣 `max(1, weekly_cap//4)`。当前初始化仍为 `suppliers=[]`，六类正式供应商记录尚未提供，因此不能宣称每家 reliability 均有合法初值；签约与周交付也未接入 C++ runtime。
+
+**特殊商业机会输入现状（2026-11-27）**：`content/opportunities.json` 已提供五类正式参数，`scripts/lib/opportunity-oracle.mjs` 校验质量/声望/热度门槛、各作品规模检查次数、同作品同类型互斥、多命中固定顺序权重轮盘及坐标式确定性；`npm run validate:opportunities` 与 `npm run test:opportunities` 覆盖输入规则。接受、履约、收入区间取整和结算尚未接入 C++ runtime，不得把目录与抽取 oracle 视为可玩闭环。
 
 **Partnership 运行时现状（2026-11-27）**：`Partner.history[]` 固定为 `{week, work_id, delta, reason}`，只能引用已归档作品且 `week` 必须等于对应 WorkRecord 的 `end_week`；`Committee.members[]` 固定为 `{partner_id, channel}`，成员与渠道均不得重复，渠道必须属于该伙伴，`bd_dvd` 不挂成员。active Committee 必须与同一 `mode=committee` 项目双向引用，项目可处于 `producing` 或 `delivering`（公司关闭后等待结清），且 `formed_week=opened_week`；closed Committee 不得继续引用活动项目，其 `formed_week/closed_week` 必须与对应 Archive WorkRecord 的 `start_week/end_week` 一致。以上均纳入 INV-13；单状态校验不能证明 history 历史前缀从未被改写，追加顺序由命令前后快照测试约束。
 
@@ -277,7 +283,7 @@ PoolCandidate { staff: Staff, expires_week: uint | null, origin: "regular" | "sc
 - 常规招聘池每周部分轮换（周结算固定步骤，先清理到期窗口再替换部分常规槽）；scout 候选不参与常规轮换，只按各自窗口到期。Scout 每周至多一次（`last_scout_week ≠ week`）；候选 `expires_week` 是首个不可签约周，regular 候选为 `null`。
 - DEC-MARKET-001/#59 已确认招聘市场固定 4 个候选人展示槽，四槽全部属于 Recruitment，与企划市场完全独立；临时员工不进入候选池。当前 `pool` 仍沿用 6 个 regular 候选加 scout 的占位实现，尚未拆出四个展示槽身份、自由人才池、冷却与同身份重现，不得宣称最新四槽生命周期已实现。
 - 生成逻辑与随机坐标逐位镜像 `scripts/lib/recruit-oracle.mjs`（规则样本）；池容量、轮换数、窗口周数、概率与费用全部 `[PLACEHOLDER]`，由 #59/#58 标定。职业→主能力映射沿用 DEC-STAFF-006 提案（DISC-11 细化前不改）。
-- 2026-11-27 招聘市场设计归档要求通用随机简历按声望 Tier 生成，周薪由同能力全职工资公式乘 1.20 得出；当前 §14.13 的稀有度/保底生成与 `salary_base + primary × salary_per_primary` 仍是 #99 的 `[PLACEHOLDER]`。两套口径的衔接、档位随机分布与取整尚未裁决；在 #7/#53 收口前不得把当前占位生成误称为已实现最新设计。
+- 2026-11-27 归档的 Tier 能力、潜力与工资规则已接入 C++/JS：T0–T1 主能力 42–52、潜力上限 55，T2–T4 为 56–65/68，T5–T7 为 66–74/76；各能力潜力为 `min(value+4, cap)`，候选人与临时员工周薪为同能力正式员工的 1.20 倍。现有 `n/sr/ssr` 与 pity 只保留保底推进，不再决定能力档；工资基数 `salary_base=20000`、`salary_per_primary=300` 仍是 #99 的 `[PLACEHOLDER]`，不得把派生金额当作已标定的绝对薪酬。
 - 员工报酬统一 `signing_fee + weekly_salary`，不再使用 `project_fee`；签约费走 Finance `salary` 流水（`w{week}.salary.{staff_id}.signing`），scout 费用走 `operations`（`w{week}.operations.scout`），见 §3.7。
 - `dismiss_staff` 现行 INV-12 校验要求 contributors 引用在籍员工，冻结文本只要求"参与过"；有制作参与记录（含已结项 Archive 团队快照）的员工暂拒解雇（`INVALID_PHASE`），离职历史引用语义待 #53 裁决（缺口登记 #7），不删改 contributors、不放宽校验。
 - `hire_core` 只接受 `employment=core` 且 `temporary_contract=null` 的池候选；scout 候选在 `week >= expires_week` 后即使仍留在输入状态中也返回 `NOT_FOUND`，不得签约。
@@ -458,7 +464,7 @@ M0 §4 共 **29 条**。当前 `validate()` 实际断言 **17 条**：`INV-01/02
 | 26 存档无派生值 | ❌ | 无黑名单检查 |
 | 27 每项目恰一名监督 | ✅ | `Project.supervisor_staff_id` + 资格/归属/重复校验 |
 | 28 forced_rest | ❌ | 无字段 |
-| 29 限时事件 | 🔶 部分 | 期限、默认分支、稳定顺序与防重复已实现；升级载荷未冻结 |
+| 29 限时事件 | 🔶 部分 | 期限、默认分支、稳定顺序、一次升级与二次超时硬罚已实现；正式目录尚无带明确处罚数值的限时卡 |
 
 ---
 

@@ -28,11 +28,77 @@ const OPS = ['<', '<=', '>', '>=']
 const KINDS = ['accept', 'abandon', 'overtime', 'decline', 'outsource', 'extension']
 const SCOPES = ['instant', 'stage', 'project']
 const TARGETS = ['quality', 'work_done', 'fatigue', 'morale', 'funds']
-// 已提出但未冻结的升级字段（#121 → #13/#53）。允许 null 占位，非空即拒绝加载。
-const UNFROZEN_ESCALATION_KEYS = ['escalation', 'timeout_option_id', 'escalation_note']
+// #121 / DEC-EVENT-003：一次升级字段已冻结。null/undefined 表示不升级；
+// 非空配置必须满足下方全部约束，否则整卡拒绝加载（fail-closed）。
+const TIMEOUT_KINDS = ['abandon', 'decline']
 
 const isInt = (value) => Number.isInteger(value)
 const isText = (value) => typeof value === 'string' && value.length > 0
+
+function validateOptionList(options, prefix, card, fail) {
+  if (!Array.isArray(options) || options.length === 0) {
+    fail(prefix, `${prefix} 必须是非空数组`)
+    return []
+  }
+  const optionIds = new Set()
+  options.forEach((option, index) => {
+    const where = `${prefix}[${index}]`
+    if (typeof option !== 'object' || option === null) return fail(where, '选项必须是对象')
+    if (!isText(option.id)) fail(`${where}.id`, '缺少选项 id')
+    else if (optionIds.has(option.id)) fail(`${where}.id`, `重复的选项 id`)
+    else optionIds.add(option.id)
+    if (!isText(option.label)) fail(`${where}.label`, '缺少选项文案')
+    if (!KINDS.includes(option.kind)) fail(`${where}.kind`, '未知选项类型')
+    if (!isInt(option.cost) || option.cost < 0 || option.cost > 2000000) fail(`${where}.cost`, 'cost 必须在 0..2,000,000')
+    if (!Array.isArray(option.effects)) return fail(`${where}.effects`, 'effects 必须是数组')
+    option.effects.forEach((effect, effectIndex) => {
+      const ep = `${where}.effects[${effectIndex}]`
+      if (typeof effect !== 'object' || effect === null) return fail(ep, '效果必须是对象')
+      if (!SCOPES.includes(effect.scope)) fail(`${ep}.scope`, 'scope 只能是 instant/stage/project')
+      if (!TARGETS.includes(effect.target)) return fail(`${ep}.target`, '未知效果类型')
+      if (!isInt(effect.value) || effect.value === 0) fail(`${ep}.value`, 'value 必须是非零整数')
+      if (effect.stage !== undefined && !STAGES.includes(effect.stage)) fail(`${ep}.stage`, '未知阶段')
+      if (effect.stage !== undefined && effect.scope !== 'stage') fail(`${ep}.stage`, '只有 scope=stage 才能写 stage')
+      if (effect.stage && Array.isArray(card.stages) && card.stages.length > 0 && !card.stages.includes(effect.stage)) {
+        fail(`${ep}.stage`, '效果阶段不在卡片适用阶段内')
+      }
+      if (['fatigue', 'morale', 'funds'].includes(effect.target) && effect.scope !== 'instant') {
+        fail(`${ep}.scope`, `${effect.target} 只能即时结算`)
+      }
+      if (effect.target === 'funds' && effect.value > 0) fail(`${ep}.value`, '事件收入分类未定：funds 只能为负')
+      if (effect.target === 'funds' && effect.value < -2000000) fail(`${ep}.value`, '单次扣款不能超过 2,000,000')
+    })
+  })
+  return options
+}
+
+function validateEscalation(card, fail) {
+  const timeout = card.timeout_option_id
+  const note = card.escalation_note
+  if (note !== undefined && note !== null && typeof note !== 'string') fail('escalation_note', 'escalation_note 必须是字符串')
+  const esc = card.escalation
+  if (esc === undefined || esc === null) {
+    if (timeout !== undefined && timeout !== null && !isText(timeout)) fail('timeout_option_id', 'timeout_option_id 必须是字符串')
+    else if (isText(timeout) && !card.options?.some((option) => option?.id === timeout && TIMEOUT_KINDS.includes(option.kind))) {
+      fail('timeout_option_id', 'timeout_option_id 必须指向本卡 options 中 kind=abandon/decline 的一项')
+    }
+    return
+  }
+  if (typeof esc !== 'object' || Array.isArray(esc)) return fail('escalation', 'escalation 必须是对象或 null')
+  if (!(card.expires_weeks > 0)) fail('escalation', '只有限时事件（expires_weeks>0）可配置升级')
+  if (card.tier !== 'major') fail('escalation', 'escalation 只允许 major 事件')
+  if (esc.escalation !== undefined && esc.escalation !== null) fail('escalation.escalation', '升级最多一层，禁止嵌套升级')
+  if (!isText(esc.description)) fail('escalation.description', '缺少升级描述')
+  if (!isInt(esc.expires_weeks) || esc.expires_weeks !== 2) fail('escalation.expires_weeks', '升级后处理期限固定为 2 周')
+  const upgraded = validateOptionList(esc.options, 'escalation.options', card, fail)
+  if (!upgraded.some((option) => option?.kind === 'abandon')) fail('escalation.options', '升级选项必须含 abandon 默认分支')
+  if (!isText(timeout) || !card.options?.some((option) => option?.id === timeout && TIMEOUT_KINDS.includes(option.kind))) {
+    fail('timeout_option_id', '配置升级时 timeout_option_id 必须指向本卡 options 中 kind=abandon/decline 的一项')
+  }
+  if (!isText(esc.timeout_option_id) || !upgraded.some((option) => option?.id === esc.timeout_option_id && TIMEOUT_KINDS.includes(option.kind))) {
+    fail('escalation.timeout_option_id', '二次硬罚分支必须指向 escalation.options 中 kind=abandon/decline 的一项')
+  }
+}
 
 export function validateCard(card, source) {
   const issues = []
@@ -68,12 +134,6 @@ export function validateCard(card, source) {
     fail('expires_weeks', 'expires_weeks 必须在 0..8')
   }
 
-  // #121：§14.11 的一次升级字段尚未在 #13/#53 冻结。允许 null 占位（event_catalog.example.json 既有写法），
-  // 但任何非空升级配置必须拒绝加载——否则运行时会静默忽略，内容侧误以为升级已生效。
-  for (const key of UNFROZEN_ESCALATION_KEYS) {
-    if (card[key] === undefined || card[key] === null) continue
-    fail(key, `§14.11 一次升级字段尚未冻结（#13/#53），当前拒绝加载非空 ${key}`)
-  }
 
   if (typeof card.trigger !== 'object' || card.trigger === null) fail('trigger', '缺少 trigger 对象')
   else {
@@ -83,41 +143,9 @@ export function validateCard(card, source) {
   }
   if (!isText(card.description)) fail('description', '缺少 description')
 
-  if (!Array.isArray(card.options) || card.options.length === 0) {
-    fail('options', 'options 必须是非空数组')
-    return issues
-  }
-  const optionIds = new Set()
-  card.options.forEach((option, index) => {
-    const where = `options[${index}]`
-    if (typeof option !== 'object' || option === null) return fail(where, '选项必须是对象')
-    if (!isText(option.id)) fail(`${where}.id`, '缺少选项 id')
-    else if (optionIds.has(option.id)) fail(`${where}.id`, '重复的选项 id')
-    else optionIds.add(option.id)
-    if (!isText(option.label)) fail(`${where}.label`, '缺少选项文案')
-    if (!KINDS.includes(option.kind)) fail(`${where}.kind`, '未知选项类型')
-    if (!isInt(option.cost) || option.cost < 0 || option.cost > 2000000) fail(`${where}.cost`, 'cost 必须在 0..2,000,000')
-    if (!Array.isArray(option.effects)) return fail(`${where}.effects`, 'effects 必须是数组')
-    option.effects.forEach((effect, effectIndex) => {
-      const ep = `${where}.effects[${effectIndex}]`
-      if (typeof effect !== 'object' || effect === null) return fail(ep, '效果必须是对象')
-      if (!SCOPES.includes(effect.scope)) fail(`${ep}.scope`, 'scope 只能是 instant/stage/project')
-      if (!TARGETS.includes(effect.target)) return fail(`${ep}.target`, '未知效果类型')
-      if (!isInt(effect.value) || effect.value === 0) fail(`${ep}.value`, 'value 必须是非零整数')
-      if (effect.stage !== undefined && !STAGES.includes(effect.stage)) fail(`${ep}.stage`, '未知阶段')
-      if (effect.stage !== undefined && effect.scope !== 'stage') fail(`${ep}.stage`, '只有 scope=stage 才能写 stage')
-      if (effect.stage && Array.isArray(card.stages) && card.stages.length > 0 && !card.stages.includes(effect.stage)) {
-        fail(`${ep}.stage`, '效果阶段不在卡片适用阶段内')
-      }
-      if (['fatigue', 'morale', 'funds'].includes(effect.target) && effect.scope !== 'instant') {
-        fail(`${ep}.scope`, `${effect.target} 只能即时结算`)
-      }
-      if (effect.target === 'funds' && effect.value > 0) fail(`${ep}.value`, '事件收入分类未定：funds 只能为负')
-      if (effect.target === 'funds' && effect.value < -2000000) fail(`${ep}.value`, '单次扣款不能超过 2,000,000')
-    })
-  })
-
-  const hasKind = (kind) => card.options.some((option) => option?.kind === kind)
+  validateOptionList(card.options, 'options', card, fail)
+  validateEscalation(card, fail)
+  const hasKind = (kind) => Array.isArray(card.options) && card.options.some((option) => option?.kind === kind)
   if (card.polarity === 'negative' && !hasKind('abandon')) fail('options', '负面事件必须有 abandon 选项')
   if (card.polarity === 'positive' && (!hasKind('accept') || !hasKind('decline'))) {
     fail('options', '正面事件必须有 accept 与 decline 选项')

@@ -38,7 +38,10 @@
     "validate:market": "node scripts/check-market-cases.mjs docs/fixtures/market_cases.json",
     "test:market": "node --test scripts/lib/coordinate-random.test.mjs scripts/market.test.mjs",
     "validate:recruit": "node scripts/check-recruit-cases.mjs docs/fixtures/recruit_cases.json",
-    "test:recruit": "node --test scripts/recruit.test.mjs"
+    "validate:opportunities": "node scripts/validate-opportunity-catalog.mjs",
+    "test:recruit": "node --test scripts/recruit.test.mjs",
+    "test:suppliers": "node --test scripts/supplier.test.mjs",
+    "test:opportunities": "node --test scripts/opportunity.test.mjs"
   },
   "devDependencies": {
     "playwright-core": "1.65.1"

@@ -189,11 +189,6 @@
       "field": "episode_id",
       "path": "state.events.pending[]",
       "ref": "§3.8 / D-09"
-    },
-    {
-      "field": "escalation",
-      "path": "state.events.pending[]",
-      "ref": "§3.8 / D-09"
     }
   ],
   "future_contract": {
@@ -585,6 +580,27 @@
     ]
   },
   "optional_paths": {
+    "state.events.pending[].escalation": [
+      "description",
+      "expires_weeks",
+      "options",
+      "timeout_option_id",
+      "triggered_week"
+    ],
+    "state.events.pending[].escalation.options[]": [
+      "cost",
+      "effects",
+      "id",
+      "kind",
+      "label",
+      "risk_hint"
+    ],
+    "state.events.pending[].escalation.options[].effects[]": [
+      "scope",
+      "stage",
+      "target",
+      "value"
+    ],
     "report.events.expired[]": [
       "automatic",
       "event_id",
@@ -983,11 +999,14 @@
     ],
     "state.events.pending[]": [
       "cooldown_weeks",
+      "escalated",
+      "escalation",
       "event_id",
       "expires_week",
       "name",
       "once_per_project",
       "options",
+      "timeout_option_id",
       "triggered_week",
       "viewed",
       "work_id"

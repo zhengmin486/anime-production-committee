@@ -1,0 +1,110 @@
+{
+  "schema_version": 1,
+  "opportunities": [
+    {
+      "id": "brand_collaboration",
+      "name": "品牌联名",
+      "min_quality": 62,
+      "min_reputation_tier": 1,
+      "min_heat_permille": 900,
+      "trigger_permille": 350,
+      "prelaunch_cost": 3000000,
+      "income_min": 8000000,
+      "income_max": 14000000,
+      "heat_bonus_permille": 0,
+      "work_total": 250,
+      "duration_weeks": 4,
+      "weight": 30,
+      "checkpoints": {
+        "ova": { "small": 1, "medium": 1, "large": 2 },
+        "short": { "small": 2, "medium": 2, "large": 2 },
+        "tv": { "small": 3, "medium": 3, "large": 4 },
+        "movie": { "small": 2, "medium": 2, "large": 2 }
+      }
+    },
+    {
+      "id": "live_event",
+      "name": "活动演出",
+      "min_quality": 70,
+      "min_reputation_tier": 2,
+      "min_heat_permille": 1000,
+      "trigger_permille": 280,
+      "prelaunch_cost": 6000000,
+      "income_min": 15000000,
+      "income_max": 26000000,
+      "heat_bonus_permille": 0,
+      "work_total": 400,
+      "duration_weeks": 6,
+      "weight": 25,
+      "checkpoints": {
+        "ova": { "small": 1, "medium": 1, "large": 2 },
+        "short": { "small": 2, "medium": 2, "large": 2 },
+        "tv": { "small": 3, "medium": 3, "large": 4 },
+        "movie": { "small": 2, "medium": 2, "large": 2 }
+      }
+    },
+    {
+      "id": "early_screening",
+      "name": "先行上映",
+      "min_quality": 75,
+      "min_reputation_tier": 2,
+      "min_heat_permille": 1050,
+      "trigger_permille": 220,
+      "prelaunch_cost": 10000000,
+      "income_min": 22000000,
+      "income_max": 38000000,
+      "heat_bonus_permille": 100,
+      "work_total": 600,
+      "duration_weeks": 6,
+      "weight": 20,
+      "checkpoints": {
+        "ova": { "small": 1, "medium": 1, "large": 2 },
+        "short": { "small": 2, "medium": 2, "large": 2 },
+        "tv": { "small": 3, "medium": 3, "large": 4 },
+        "movie": { "small": 2, "medium": 2, "large": 2 }
+      }
+    },
+    {
+      "id": "game_collaboration",
+      "name": "游戏联动",
+      "min_quality": 78,
+      "min_reputation_tier": 3,
+      "min_heat_permille": 1100,
+      "trigger_permille": 180,
+      "prelaunch_cost": 12000000,
+      "income_min": 30000000,
+      "income_max": 55000000,
+      "heat_bonus_permille": 0,
+      "work_total": 800,
+      "duration_weeks": 8,
+      "weight": 15,
+      "checkpoints": {
+        "ova": { "small": 1, "medium": 1, "large": 2 },
+        "short": { "small": 2, "medium": 2, "large": 2 },
+        "tv": { "small": 3, "medium": 3, "large": 4 },
+        "movie": { "small": 2, "medium": 2, "large": 2 }
+      }
+    },
+    {
+      "id": "pachinko",
+      "name": "弹珠机",
+      "min_quality": 80,
+      "min_reputation_tier": 4,
+      "min_heat_permille": 1150,
+      "trigger_permille": 120,
+      "prelaunch_cost": 15000000,
+      "income_min": 45000000,
+      "income_max": 85000000,
+      "heat_bonus_permille": 0,
+      "work_total": 900,
+      "duration_weeks": 10,
+      "weight": 10,
+      "checkpoints": {
+        "ova": { "small": 1, "medium": 1, "large": 2 },
+        "short": { "small": 2, "medium": 2, "large": 2 },
+        "tv": { "small": 3, "medium": 3, "large": 4 },
+        "movie": { "small": 2, "medium": 2, "large": 2 }
+      }
+    }
+  ]
+}

@@ -5,11 +5,12 @@ import {
   hashText, draw, drawBelow, PURPOSE,
   generateCandidate, advancePity, scoutGuard, scout,
   expireCandidates, rotatePool, unpackOnHire,
+  reputationTier, tierProfile, temporaryWorkstationCapacity,
+  standardWeeklySalary, candidateWeeklySalary, temporaryWeeklySalary, temporarySigningFee,
 } from './lib/recruit-oracle.mjs'
 
 // ---- 坐标式随机：与 kernel.cpp 同一算法的性质测试 ----
-// 注：本机无 em++，无法与 C++ 逐位对拍；draw 为 kernel.cpp 的逐行 BigInt 镜像，
-// C++ 侧接入时须用同一坐标做对拍测试（交接要求见 PR 描述）。
+// draw 为 kernel.cpp 的逐行 BigInt 镜像；C++ 逐位对拍由 scripts/v4.test.mjs 的 WASM 用例覆盖。
 
 test('hashText 与 FNV-1a 32 位已知向量一致', () => {
   assert.equal(hashText(''), 2166136261)
@@ -61,16 +62,55 @@ test('候选形状符合 v4 Staff 契约（signing_fee+weekly_salary，无 proje
   assert.equal(staff.temporary_contract, null)
   const primary = PROFESSION_ABILITY[staff.role]
   const primaryValue = staff.abilities[primary]
-  assert.equal(
-    staff.weekly_salary,
-    DEFAULT_PARAMS.salary_base + primaryValue * DEFAULT_PARAMS.salary_per_primary,
-  )
-  assert.ok(primaryValue >= 20 && primaryValue <= 100)
+  assert.equal(staff.weekly_salary, candidateWeeklySalary(primaryValue))
+  assert.equal(staff.weekly_salary, standardWeeklySalary(primaryValue) * 1200 / 1000)
+  assert.ok(primaryValue >= 42 && primaryValue <= 52)
   for (const ability of ABILITIES) {
     assert.ok(staff.abilities[ability] >= 0 && staff.abilities[ability] <= 100)
-    assert.ok(staff.potential[ability] >= staff.abilities[ability] && staff.potential[ability] <= 100)
+    assert.equal(staff.potential[ability], Math.min(staff.abilities[ability] + 4, 55))
     assert.equal(staff.experience[ability], 0)
     assert.equal(staff.revealed_potential[ability], false)
+  }
+})
+
+test('声望 Tier 边界、候选能力/潜力与工资定位使用冻结映射', () => {
+  const boundaries = [
+    [0, 0], [99, 0], [100, 1], [249, 1], [250, 2], [599, 2],
+    [600, 3], [1999, 3], [2000, 4], [9999, 4], [10000, 5],
+    [59999, 5], [60000, 6], [299999, 6], [300000, 7],
+  ]
+  for (const [reputation, tier] of boundaries) assert.equal(reputationTier(reputation), tier)
+  for (const [reputation, min, max, cap] of [
+    [100, 42, 52, 55], [250, 56, 65, 68], [600, 56, 65, 68],
+    [2000, 56, 65, 68], [10000, 66, 74, 76], [60000, 66, 74, 76],
+  ]) {
+    for (let index = 0; index < 32; index++) {
+      const { staff } = generateCandidate(42, 3, index, { reputation, profession: '作画' })
+      const primary = staff.abilities.drawing
+      assert.ok(primary >= min && primary <= max)
+      for (const ability of ABILITIES) {
+        assert.equal(staff.potential[ability], Math.min(staff.abilities[ability] + 4, cap))
+      }
+      assert.equal(staff.weekly_salary, standardWeeklySalary(primary) * 1200 / 1000)
+      assert.ok(Number.isSafeInteger(staff.weekly_salary) && staff.weekly_salary > 0)
+    }
+  }
+  assert.deepEqual(tierProfile(100), { min: 42, max: 52, potential_cap: 55, workstations: 1 })
+  assert.deepEqual(tierProfile(250), { min: 56, max: 65, potential_cap: 68, workstations: 2 })
+  assert.deepEqual(tierProfile(10000), { min: 66, max: 74, potential_cap: 76, workstations: 4 })
+})
+
+test('临时员工弹性工位按 T0–T7 映射，工资与签约费共享正式员工公式', () => {
+  for (const [reputation, capacity] of [
+    [0, 1], [100, 1], [250, 2], [600, 2], [2000, 3],
+    [10000, 3], [60000, 4], [300000, 4],
+  ]) assert.equal(temporaryWorkstationCapacity(reputation), capacity)
+  for (let primary = 42; primary <= 74; primary++) {
+    const salary = temporaryWeeklySalary(primary)
+    assert.equal(salary, candidateWeeklySalary(primary))
+    assert.equal(salary, standardWeeklySalary(primary) * 1200 / 1000)
+    assert.equal(temporarySigningFee(salary), salary * 2)
+    assert.ok(Number.isSafeInteger(salary) && salary > 0)
   }
 })
 

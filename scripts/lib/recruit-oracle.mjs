@@ -8,8 +8,8 @@
 // 目标 Staff 形状 = signing_fee + weekly_salary（PR #94 后的 v4 契约）；
 // M1 model.hpp 仍含 project_fee 属已知缺口（M0 §14.3），本模块不以其为目标。
 //
-// 全部数值为 [PLACEHOLDER]（见 DEFAULT_PARAMS），由 #59/#58 标定；
-// 职业→能力映射是 DEC-STAFF-006 留给员工模块的提案，未冻结。
+// 池容量、轮换、窗口、保底与签约费仍为 [PLACEHOLDER]；Tier 能力、潜力与 1.20 倍工资
+// 按 2026-11-27 归档规则。职业→能力映射是 DEC-STAFF-006 留给员工模块的提案，未冻结。
 //
 // 随机：逐位镜像 packages/game-core/src/v4/kernel.cpp 的 draw/splitmix64/hash_text，
 // 坐标 (seed, week, stream, purpose, index)，无计数器、无调用顺序依赖。
@@ -58,7 +58,56 @@ export const DEFAULT_PARAMS = Object.freeze({
   signing_fee_per_ability: 1000,   // [PLACEHOLDER]
   salary_base: 20000,              // [PLACEHOLDER]
   salary_per_primary: 300,         // [PLACEHOLDER]
+  candidate_salary_permille: 1200,
 })
+
+export const TIER_PROFILES = Object.freeze({
+  early: Object.freeze({ min: 42, max: 52, potential_cap: 55, workstations: 1 }),
+  mid: Object.freeze({ min: 56, max: 65, potential_cap: 68, workstations: 2 }),
+  late: Object.freeze({ min: 66, max: 74, potential_cap: 76, workstations: 4 }),
+})
+
+export function reputationTier(reputation) {
+  if (reputation < 100) return 0
+  if (reputation < 250) return 1
+  if (reputation < 600) return 2
+  if (reputation < 2000) return 3
+  if (reputation < 10000) return 4
+  if (reputation < 60000) return 5
+  if (reputation < 300000) return 6
+  return 7
+}
+
+export function tierProfile(reputation) {
+  const tier = reputationTier(reputation)
+  if (tier <= 1) return TIER_PROFILES.early
+  if (tier <= 4) return TIER_PROFILES.mid
+  return TIER_PROFILES.late
+}
+
+export function temporaryWorkstationCapacity(reputation) {
+  const tier = reputationTier(reputation)
+  if (tier <= 1) return 1
+  if (tier <= 3) return 2
+  if (tier <= 5) return 3
+  return 4
+}
+
+export function standardWeeklySalary(primary, params = DEFAULT_PARAMS) {
+  return params.salary_base + primary * params.salary_per_primary
+}
+
+export function candidateWeeklySalary(primary, params = DEFAULT_PARAMS) {
+  return standardWeeklySalary(primary, params) * params.candidate_salary_permille / 1000
+}
+
+export function temporaryWeeklySalary(primary, params = DEFAULT_PARAMS) {
+  return candidateWeeklySalary(primary, params)
+}
+
+export function temporarySigningFee(weeklySalary) {
+  return weeklySalary * 2
+}
 
 // ---- 坐标式随机（共享 kernel.cpp 参考实现）----
 
@@ -94,14 +143,13 @@ export function generateCandidate(seed, week, index, opts = {}) {
   const profession = opts.profession ?? PROFESSIONS[subBelow(1, PROFESSIONS.length)]
   const primaryAbility = PROFESSION_ABILITY[profession]
   const tier = tierOf(subBelow(0, 1000), pity, params)
-
-  const primaryRange = { n: [20, 31], sr: [45, 31], ssr: [65, 36] }[tier]
-  const primary = primaryRange[0] + subBelow(2, primaryRange[1])
+  const profile = tierProfile(opts.reputation ?? 100)
+  const primary = profile.min + subBelow(2, profile.max - profile.min + 1)
 
   const abilityValues = ABILITIES.map((ability, i) =>
     ability === primaryAbility ? primary : 5 + subBelow(3 + i, 41))
-  const potentialValues = abilityValues.map((value, i) =>
-    Math.min(100, value + (ABILITIES[i] === primaryAbility ? 10 + subBelow(9, 31) : subBelow(9, 41))))
+  const potentialValues = abilityValues.map((value) =>
+    Math.min(value + 4, profile.potential_cap))
   const abilitySum = abilityValues.reduce((sum, value) => sum + value, 0)
   const toAbilityObject = (values) => Object.fromEntries(ABILITIES.map((ability, i) => [ability, values[i]]))
 
@@ -116,7 +164,7 @@ export function generateCandidate(seed, week, index, opts = {}) {
     revealed_potential: toAbilityObject(ABILITIES.map(() => false)),
     talent_type: TALENT_ARCHETYPES[subBelow(15, TALENT_ARCHETYPES.length)],
     signing_fee: abilitySum * params.signing_fee_per_ability,
-    weekly_salary: params.salary_base + primary * params.salary_per_primary,
+    weekly_salary: candidateWeeklySalary(primary, params),
     fatigue: 0,
     morale: 60,
     departure_warning: false,
@@ -164,6 +212,7 @@ export function scout(ctx, pool, opts = {}) {
       profession: forced,
       pity,
       params,
+      reputation: ctx.reputation ?? 100,
     })
     pity = advancePity(pity, tier)
     added.push({ staff, expires_week: ctx.week + params.scout_window_weeks, origin: 'scout' })
@@ -203,7 +252,9 @@ export function rotatePool(pool, seed, week, opts = {}) {
   const kept = regulars.filter((_, i) => !slots.includes(i))
   const added = []
   for (const slot of slots.sort((a, b) => a - b)) {
-    const { staff } = generateCandidate(seed, week, slot, { purpose: PURPOSE.recruit, params })
+    const { staff } = generateCandidate(seed, week, slot, {
+      purpose: PURPOSE.recruit, params, reputation: opts.reputation ?? 100,
+    })
     added.push({ staff, expires_week: null, origin: 'regular' })
   }
   const regularPool = [...kept, ...added].slice(0, params.pool_cap)
