@@ -107,9 +107,9 @@ GameState {
 | `abilities` `experience` `potential` `revealed_potential` | **对象**（非数组） | 必填 | `实现` | 固定 6 键：`planning/direction/drawing/animation/management/postproduction`；C++ 是 `std::array`，JSON 是对象 |
 | `talent_type` `weekly_salary` `signing_fee` | string / int | 必填 | `实现` | `signing_fee` 默认 0；V4 不再使用 project_fee，历史 v3 字段按 `historical_fields` 隔离 |
 | `project_fee` | int | — | `historical_fields` | 仅 v3 历史字段；M0 §3/§14.6 已由 `signing_fee + weekly_salary` 取代，V4 Schema 禁止出现 |
-| `assignment_work_id` | string\|null | 是 | `实现` | INV-09；INV-10 尚无完整检查 |
+| `assignment_work_id` | string\|null | 是 | `实现` | INV-09/10；核心员工单项目归属，临时员工归属必须与合同项目一致 |
 | `last_participation` | `{work_id,item_id,week}\|null` | 是 | `实现` | INV-11 |
-| `temporary_contract` | `{work_id,start_week,end_week}\|null` | 是 | `形状已冻结；命令8待实现` | `end_week` 签约时快照项目 `deadline_week`；成功延期时同步更新；仅作预计结束周，不触发自动解约 |
+| `temporary_contract` | `{work_id,start_week,end_week}\|null` | 是 | `实现` | core 必须为 null；temp 必须指向 producing 项目且 `end_week=project.deadline_week`；签约时快照、成功延期时同步更新，仅作展示/审计不触发自动解约；临时员工不积累长期经验，结项后退出名册，团队快照保留贡献 |
 | `forced_rest`（休养期） | — | — | `待实现` | §14.10 / INV-28 / DEC-STAFF-009 的前置数据 |
 | 监督岗位 | `Project.supervisor_staff_id` | string\|null | `实现`（基础职业资格） | 项目内岗位，不修改 `Staff.role`；INV-27 校验唯一性、资格与 `assignment_work_id` 归属 |
 
@@ -210,7 +210,7 @@ GameState {
 
 | 分组 | 字段 | 约束 |
 | --- | --- | --- |
-| 身份与企划 | `id, ip_id, offer_id, name, source, genre, scale, mode, investment_percent` | `ip_id` 为非空字符串或 null；source 为 publisher/studio/manga/light_novel/game/original；scale 为 ova/short/tv/movie；contract 投资比例为 0，committee 为 10..100 的 10 倍数 |
+| 身份与企划 | `id, ip_id, offer_id, name, source, genre, scale, mode, investment_percent` | `ip_id` 为非空字符串或 null；source 为 publisher/studio/manga/light_novel/game/original/market（market 为正常生成的企划来源）；scale 为 ova/short/tv/movie；contract 投资比例为 0，committee 为 10..100 的 10 倍数 |
 | 时间与结论 | `start_week, end_week, end_reason, status, forced, gate_completion_permille, aborted_week, penalty_paid` | 0..520 且不倒退；end_reason 为 completed/deadline/company_closed/aborted；status 为 DELIVERED/ABORTED；completed 必须 forced=false 且完成度=1000；aborted 必须 status=ABORTED、aborted_week=end_week，非 aborted 的 aborted_week=null；penalty_paid 必须等于 finance_summary.penalty |
 | 质量 | `quality, quality_score, rating` | quality 为 `{dims{六维}, mean}`，六维与均值均为 0..100 整数，均值四舍五入；rating 按 S≥85/A≥75/B≥65/C≥50/D 分档 |
 | 商业汇总 | `commercial_revenue, bd_gross, bd_revenue, committee_pool, investor_share, company_received` | 非负整数；由 `channel_breakdown` 精确对账 |
@@ -226,7 +226,7 @@ GameState {
 - `Σcosts = total_costs`；允许类目为 salary/production/temporary/outsourcing/events/extension/distribution/penalty/development，不要求全部出现。
 - `profit = contract_received - contract_refund + commercial_share + success_reward - investment_paid - total_costs`。penalty 已计入 costs 时不再重复扣除。
 
-`episodes[]` 当前固定为 `{id, quality}`；`team[]` 当前固定为 `{id, name, role}`，角色枚举与项目岗位快照一致。完整键树见 `docs/v4-contract-shape.json`，TypeScript 守卫见 `apps/web/src/types/gameV4.ts`，不得用 v3 WorkRecord 代替。
+`episodes[]` 当前固定为 `{id, quality}`；`team[]` 当前固定为 `{id, name, role}`，角色枚举与项目岗位快照一致，接受旧七岗位代码以及 DEC-STAFF-006 的八职业身份（作画/演出/脚本/摄影/监督/音乐/声优/美术）。完整键树见 `docs/v4-contract-shape.json`，TypeScript 守卫见 `apps/web/src/types/gameV4.ts`，不得用 v3 WorkRecord 代替。
 
 #### 3.9.2 系列写入时机与来源
 
@@ -243,22 +243,24 @@ v4 固定九字段：`reason/weeks/final_funds/net_cash_change/total_projects/be
 
 ### 3.10 `Supplier` / `OutsourceContract` / `Partner` / `Committee` / `MarketState`
 
-`initialize_game` 实测输出：`suppliers=[]`、`contracts=[]`、`committees=[]`、`market` 含 4 个初始槽位与四类热度、`partners` 含电视台/配信/出版三个初始合作方。
+`initialize_game` 实测输出：`suppliers` 含曙光作画协力/回声后期工作室/星音制作/青叶企划社四个供应商，`contracts=[]`、`committees=[]`、`market` 含 4 个初始槽位与四类热度、`partners` 含电视台/配信/出版三个初始合作方。
 
 | 聚合 | 契约形状 | 代码 | 缺口影响 |
 | --- | --- | --- | --- |
-| `Supplier` | DA §7.4 + M0 §3 | `Json` 强形状校验 | 9 字段精确载荷、专业枚举/唯一性、数值边界与全局 id 已校验；目录初始化与命令 9 未实现 |
-| `OutsourceContract` | DA §7.4 | `Json` 强形状校验 | 15 字段精确载荷、供应商/项目/工作项/单集/能力引用、费用与生命周期已校验；INV-19/20 已断言；签约、周交付、费用与可靠性失败未实现 |
+| `Supplier` | DA §7.4 + M0 §3 | `Json` 强形状校验 | 9 字段精确载荷、专业枚举/唯一性、数值边界与全局 id 已校验；四供应商目录已初始化，数值与经济平衡仍待标定 |
+| `OutsourceContract` | DA §7.4 | `Json` 强形状校验 | 15 字段精确载荷、供应商/项目/工作项/单集/能力引用、费用与生命周期已校验；INV-19/20 已断言；签约、全额预付、周交付、可靠性失败和终态释放已实现；供应商质量对工作项质量的贡献仍待实现 |
 | `Partner` / `Committee` | DA §7.4 + M0 §3 | `Json` 强形状校验 | Partner 8 字段、history 4 字段、Committee 6 字段与成员 2 字段已精确校验；INV-13 已断言，覆盖渠道归属、项目双向引用、active/closed 生命周期与 Archive 一致性 |
 | `MarketState` | M0 §3 / DEC-MARKET-001；固定 4 个企划槽 | **槽位/生命周期/周补充/热度/合作方候选已初始化** | 初始目录与热度内容仍为 fixture（#59 标定）；自定/提案槽生命周期透传 |
 
-`suppliers` / `contracts` / `partners` / `committees` 根数组是解析必填项；四类元素分别精确包含 9 / 15 / 8 / 6 个字段，未知字段与缺失字段均拒绝。active 合同必须指向 producing 项目；终态合同仍保留可校验的项目与工作项引用。规范化哈希按 id 排序 suppliers / contracts / partners / committees，并按集合语义排序 specialties、Partner.channels 与 Committee.members，因此目录遍历顺序不改变状态哈希。状态校验通过不等于签约玩法开放：`weekly_cap` 推导、付款节奏、可靠性失败和项目终止释放仍未实现。
+`suppliers` / `contracts` / `partners` / `committees` 根数组是解析必填项；四类元素分别精确包含 9 / 15 / 8 / 6 个字段，未知字段与缺失字段均拒绝。active 合同必须指向 producing 项目；终态合同仍保留可校验的项目与工作项引用。规范化哈希按 id 排序 suppliers / contracts / partners / committees，并按集合语义排序 specialties、Partner.channels 与 Committee.members，因此目录遍历顺序不改变状态哈希。
+
+**Vendor 运行时现状（2026-11-27）**：`sign_outsourcing` 原子完成解锁/专业/依赖/工作项余量/公司共享产能/现金预检、合同创建与 `outsourcing` 全额预付流水。`weekly_cap` 按供应商总池、speed 与 normal/emergency 倍率冻结；active 合同按供应商汇总占用产能，同一工作项按剩余需求比例和最大余数法分配。每周按合同 id 稳定顺序产出 normal/delay/rework，返工倒扣已交付量；完成或到 `due_week` 转终态并释放预留。`due_week=min(project.deadline_week,520)`，避免公司硬终局之后产生非法合同。周回执 `report.outsourcing[]` 固定为 `{id,result,points,weekly_cap,work_done,status}`。
 
 **Partnership 运行时现状（2026-11-27）**：`Partner.history[]` 固定为 `{week, work_id, delta, reason}`，只能引用已归档作品且 `week` 必须等于对应 WorkRecord 的 `end_week`；`Committee.members[]` 固定为 `{partner_id, channel}`，成员与渠道均不得重复，渠道必须属于该伙伴，`bd_dvd` 不挂成员。active Committee 必须与同一 `mode=committee` 项目双向引用，项目可处于 `producing` 或 `delivering`（公司关闭后等待结清），且 `formed_week=opened_week`；closed Committee 不得继续引用活动项目，其 `formed_week/closed_week` 必须与对应 Archive WorkRecord 的 `start_week/end_week` 一致。以上均纳入 INV-13；单状态校验不能证明 history 历史前缀从未被改写，追加顺序由命令前后快照测试约束。
 
 ### 3.11 未冻结的形状
 
-`WorkRecord` 当前 31 字段载荷已于 §3.9 冻结；`episode_count/occurrence_issues/commercial_rank/episode_summary/committee_snapshot/major_events` 等未来扩展字段尚未实现，不得提前写入当前载荷。`Facility` 内部字段仍按对应批次跟踪；`temporary_contract` 三字段形状及 `end_week` 快照/延期同步语义已由 2026-11-27 决策冻结，命令 8 与延期联动仍待运行时实现。`Project.investment{percent,total,paid}`、`Project.extension`、`Project.delivery` 已由当前命令写入并实际使用，但其完整长期契约仍随对应批次收敛，不再标记为“命令未实现”。
+`WorkRecord` 当前 31 字段载荷已于 §3.9 冻结；`episode_count/occurrence_issues/commercial_rank/episode_summary/committee_snapshot/major_events` 等未来扩展字段尚未实现，不得提前写入当前载荷。`Facility` 仍按 D-07/D-10 跟踪；`temporary_contract{work_id,start_week,end_week}` 已由命令 8 与 INV-10 冻结并实现，`end_week` 跟随项目 `deadline_week` 且延期时同步。`Project.investment{percent,total,paid}`、`Project.extension`、`Project.delivery` 已由当前命令写入并实际使用，但其完整长期契约仍随对应批次收敛，不再标记为“命令未实现”。
 
 ### 3.12 Q3/Q4 契约落地状态
 
@@ -279,8 +281,9 @@ PoolCandidate { staff: Staff, expires_week: uint | null, origin: "regular" | "sc
 - 生成逻辑与随机坐标逐位镜像 `scripts/lib/recruit-oracle.mjs`（规则样本）；池容量、轮换数、窗口周数、概率与费用全部 `[PLACEHOLDER]`，由 #59/#58 标定。职业→主能力映射沿用 DEC-STAFF-006 提案（DISC-11 细化前不改）。
 - 2026-11-27 招聘市场设计归档要求通用随机简历按声望 Tier 生成，周薪由同能力全职工资公式乘 1.20 得出；当前 §14.13 的稀有度/保底生成与 `salary_base + primary × salary_per_primary` 仍是 #99 的 `[PLACEHOLDER]`。两套口径的衔接、档位随机分布与取整尚未裁决；在 #7/#53 收口前不得把当前占位生成误称为已实现最新设计。
 - 员工报酬统一 `signing_fee + weekly_salary`，不再使用 `project_fee`；签约费走 Finance `salary` 流水（`w{week}.salary.{staff_id}.signing`），scout 费用走 `operations`（`w{week}.operations.scout`），见 §3.7。
-- `dismiss_staff` 历史贡献者解雇语义已按 2026-11-27 负责人裁决收口：INV-12 的 contributors 是历史事实引用，不要求员工仍在当前 Staff 名册；允许满足命令 7 其他守卫的历史参与者解雇，历史 contributors 与 Archive 团队快照保持不变。实现/validator 回归仍待完成。
+- `dismiss_staff` 历史贡献者解雇语义已按 2026-11-27 负责人裁决收口：INV-12 的 contributors 是历史事实引用，不要求员工仍在当前 Staff 名册；允许满足命令 7 其他守卫的历史参与者解雇，历史 contributors 与既有 Archive 团队快照保持不变。对应 validator 与命令回归已随本次实现完成。
 - `hire_core` 只接受 `employment=core` 且 `temporary_contract=null` 的池候选；scout 候选在 `week >= expires_week` 后即使仍留在输入状态中也返回 `NOT_FOUND`，不得签约。
+- **临时员工来源阻塞（2026-11-27）**：`hire_temporary(work_id,candidate_id)`、INV-10、周薪与 `temporary_contract{work_id,start_week,end_week}` 已实现，合同结束周同步为 `min(project.deadline_week,520)`。但 M0 §5/§14.13.1 仍要求从 `recruitment.pool` 解包候选，DEC-MARKET-001 又明确项目临时员工不进入招聘候选池；当前 `generate_candidate` 只生成 core，池、轮换和 scout 均不产生临时身份。因此正常来源尚未裁决，现有输入夹具只能证明命令与状态校验，不能宣称正常临时招聘已可玩；不得擅自把临时候选塞入招聘池来绕过冲突。
 
 **Offer 生命周期（M0 §14.13.2，市场槽已实现）**：
 
@@ -298,12 +301,13 @@ Offer 新增：expires_week, locked_until, lock_used, deposit_paid, offer_source
 - 正式签约时定金 100% 抵扣（仅市场槽且锁定期内 `week < locked_until`）：抵扣额从已对账的 Finance 定金流水推导，不直接信任 `deposit_paid` 快照；`start_work` 现金守卫与 `investment_paid` 流水按 `应付款 − min(已对账定金, 应付款)` 计算。Finance 保留 `investment_paid/contract_received` 两笔账，不重复记录定金。
 - 周结算阶段 7 先执行下一周开场的招聘/市场步（释放到期锁定 → 自然过期，锁定期内受保护 → 补满全部空槽），再进入阶段 8 抽取事件；存活企划逐字段不变，不是清空重抽。补位时优先保证至少 2 个企划的 `min_reputation` 不高于公司声望。生成坐标 `draw(seed, week, market/offer_gen, index*16+k)` 逐位镜像 `scripts/lib/market-oracle.mjs`；有效期分布仍为 `[PLACEHOLDER]`（#59/M7）。
 - 现行边界（缺口登记 #6）：初始 4 槽沿用 M1 fixture 目录（内容与到期窗口待 #59 标定，`expires_week=3` 为 PLACEHOLDER）；热度仍为静态 fixture，坐标热度生成随内容标定迁移；承制模式无应付投资额，按冻结公式抵扣为 0，定金是否随 `contract_received` 返还待裁决；自定/提案槽生命周期字段透传不强制，`lock_offer` 仅作用于市场槽；非 TV 蓝图尚未注册，当前生成器只产出 `tv_standard` 企划，非 TV 规模映射仍待标定。
+- 自然企划（M3 修复，2026-11-27）：周补位生成器现提供六个合法 `channel_potentials`，比例沿用原创草稿占位基线 2000/1200/1000/500/500/400‰（国内配信/海外/周边/音乐/电视/BD），`channels_baseline=["bd_dvd"]`，`allowed_modes=["contract","committee"]`，候选合作方为 `partner_tv/partner_stream/partner_pub`；C++ 与 `scripts/lib/market-oracle.mjs` 坐标逐位一致。自然 `source=market` 企划可经正常命令完成 BD 收入与 Archive，但这些比例、有效期和热度仍是占位内容，不代表经济平衡已验收。
 
 ---
 
 ## 4. 命令矩阵
 
-M0 §5 冻结 **23 条命令**。核心实际导出 **27 个绑定入口**：21 个已接入的 §5 命令、3 个测试/内部别名、3 个状态/内容工具。文档命令数与实现覆盖度必须分开，不能继续使用旧的 22 条基线。
+M0 §5 冻结 **23 条命令**。核心实际导出 **29 个绑定入口**：23 个 §5 命令均已接入、3 个测试/内部别名、3 个状态/内容工具。`hire_temporary` 已有完整命令实现，但正常候选来源仍受 §3.12 的契约冲突阻塞，不得把“入口已实现”写成“正常招聘流程已可玩”。文档命令数与实现覆盖度必须分开，不能继续使用旧的 22 条基线。
 
 | # | 命令 | 入口 | 输入（实测必填） | 主要错误码（实测） | 回执（实测） | 状态 |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -313,9 +317,9 @@ M0 §5 冻结 **23 条命令**。核心实际导出 **27 个绑定入口**：21 
 | 4 | `assign_staff(staff_id, work_id\|null)` | ✅ | `state, staff_id, work_id` | `NOT_FOUND/INVALID_PHASE/INVALID_STATE` | `{state}` | `实现`；监督原子 Swap/Replace |
 | 5 | `hire_core(staff_id)` | ✅ | `state, staff_id`（池中候选 id） | `NOT_FOUND/INVALID_PHASE/INSUFFICIENT_FUNDS/CAPACITY_EXCEEDED` | `{state, staff_id}` | `实现`；从 Recruitment 解包，当周可分配（§14.4）；编制 [PLACEHOLDER] |
 | 6 | `scout(role?, focus_ability?)` | ✅ | `state`；`role/focus_ability` 至多一个 | `INVALID_INPUT/INVALID_PHASE/INSUFFICIENT_FUNDS` | `{state, added_ids}` | `实现`；每周至多一次；窗口/费用 [PLACEHOLDER] |
-| 7 | `dismiss_staff(staff_id)` | ✅ | `state, staff_id` | `NOT_FOUND/INVALID_INPUT/INVALID_PHASE` | `{state}` | `实现`；监督原子替换；历史 contributors 不阻止解雇，validator 回归待完成 |
-| 8 | `hire_temporary(work_id, candidate_id)` | ❌ | — | — | — | `待实现` |
-| 9 | `sign_outsourcing(work_id, item_id, supplier_id, work_total, mode)` | ❌ | — | — | — | `待实现` |
+| 7 | `dismiss_staff(staff_id)` | ✅ | `state, staff_id` | `NOT_FOUND/INVALID_INPUT/INVALID_PHASE` | `{state}` | `实现`；监督原子替换；历史 contributors 不阻止解雇 |
+| 8 | `hire_temporary(work_id, candidate_id)` | ✅ | `state, work_id, candidate_id` | `NOT_FOUND/INVALID_PHASE/INVALID_INPUT/CAPACITY_EXCEEDED/INSUFFICIENT_FUNDS/COMPANY_ENDED` | `{state, staff_id, signing_fee, weekly_salary}` | 命令、合同、归属与计薪已实现；`end_week` 跟随 `deadline_week` 并随延期同步；正常临时候选来源受契约冲突阻塞（§3.12） |
+| 9 | `sign_outsourcing(work_id, item_id, supplier_id, work_total, mode)` | ✅ | `state, work_id, item_id, supplier_id, work_total, mode` | `NOT_FOUND/INVALID_PHASE/DEPENDENCY_UNMET/CAPACITY_EXCEEDED/INSUFFICIENT_FUNDS/INVALID_INPUT/COMPANY_ENDED` | `{state, contract_id, weekly_cap, fee_total}` | 签约、共享产能预留与全额预付已实现；供应商质量贡献待实现（§3.10） |
 | 10 | `deliver_work(work_id)` | ✅ | `state, work_id` | `NOT_FOUND/INVALID_PHASE/GATE_UNMET/INVALID_STATE` | `{state, report}` | `实现`；pending 守卫拒绝交付 |
 | 11 | `abort_work(work_id)` | ✅ | `state, work_id` | `NOT_FOUND/INVALID_PHASE/COMPANY_ENDED/INVALID_STATE` | `{state, report}` | `实现`；50% 违约金/退款、声望重罚、Archive 履历、负余额破产见 §3.9/M0 §14.14 |
 | 12 | `create_custom_offer(name, source, scale, style)` | ✅ | `state` + 命令参数 | `INVALID_INPUT/INVALID_PHASE` | `{state}` | `实现` |
@@ -323,7 +327,7 @@ M0 §5 冻结 **23 条命令**。核心实际导出 **27 个绑定入口**：21 
 | 14 | `reject_proposal()` | ✅ | `state` | `NOT_FOUND` | `{state}` | `实现` |
 | 15 | `buy_tv_service(work_id)` | ✅ | `state, work_id` | `NOT_FOUND/MODE_NOT_ALLOWED/INVALID_PHASE/INSUFFICIENT_FUNDS` | `{state}` | `实现` |
 | 16 | `request_extension(work_id)` | ✅ | `state, work_id` | `NOT_FOUND/MODE_NOT_ALLOWED/INVALID_PHASE/INSUFFICIENT_FUNDS` | `{state}` | `实现` |
-| 17 | `advance_week()` | ✅ | `state` | `INVALID_PHASE/INVALID_STATE/NOT_IMPLEMENTED/INTERNAL_ERROR` | `{state, report}` | `实现`；pending 终局与事件升级载荷仍阻塞 |
+| 17 | `advance_week()` | ✅ | `state` | `INVALID_PHASE/INVALID_STATE/INTERNAL_ERROR` | `{state, report}` | `实现`；pending 终局已覆盖，事件升级载荷仍未冻结 |
 | 18 | `resolve_event(work_id, event_id, option_id)` | ✅ | `state, work_id, event_id, option_id` | `NOT_FOUND/INVALID_INPUT/INSUFFICIENT_FUNDS/INVALID_STATE` | `{state, message}` | `实现` |
 | 19 | `end_company()` | ✅ | `state` | `INVALID_PHASE/INVALID_STATE` | `{state}` | `实现` |
 | 20 | `finalize_delivery(work_id)` | ✅ | `state, work_id` | `NOT_FOUND/INVALID_PHASE/INVALID_STATE` | `{state, report, company_status}` | `实现` |
@@ -333,9 +337,9 @@ M0 §5 冻结 **23 条命令**。核心实际导出 **27 个绑定入口**：21 
 
 非 §5 命令：`hash_state(state)`（工具）、`validate_event_catalog` / `event_catalog_info`（内容工具）、`initialize` / `instantiate_work` / `set_plan`（别名）。
 
-### 4.1 未实现命令的回执
+### 4.1 未实现行为的回执
 
-M0 §6 的 `NOT_IMPLEMENTED` 当前用于非整除委员会净池分配；事件升级实现合入前仍拒绝非空升级配置。返回错误信封且不携带 `state`，不清事件、不关闭项目、不伪造处罚或归档、不静默舍入。破产/第 520 周携带 pending 时已按稳定顺序执行默认保守分支后进入强制终局，不再返回 `NOT_IMPLEMENTED`。
+M0 §5 的 23 条命令均已有入口。`NOT_IMPLEMENTED` 不再用于非整除委员会净池分配；该路径已按 M0 §14.14.2 的最大余数法原子结算。当前核心不产生 `NOT_IMPLEMENTED`；未冻结的事件升级载荷不得写入现有 pending 形状，也不得伪造升级效果。失败信封不携带 `state`，不清事件、不关闭项目、不伪造处罚或归档。破产/第 520 周携带 pending 时已按稳定顺序执行默认保守分支后进入强制终局。
 
 ### 4.2 通用信封
 
@@ -376,16 +380,19 @@ report {
   settlements[]: { work_id, end_reason, archived, rating, penalty, ... }
   events: { drawn, count, events[]{event_id, work_id}, expired[]{work_id, event_id, option_id, automatic} }
   funds:  { delta, balance, costs{salary, operations, production} }
+  outsourcing[]: { id, result, points, weekly_cap, work_done, status }
 }
 ```
 
 - 破产回执使用 `mode="bankrupt"`、`bankrupt=true`、`skipped=true`、`gap`，`works/staff/settlements` 为空，`funds.delta=0`。
 - `funds.costs` 只有 3 个键，与 14 类 category 不对应，登记 D-13。
 - `report` 不是 DA §9.4 的 `WeekReceipt`；后者是前端派生读模型，边界见 D-14。
+- `report.outsourcing[]` 只在存在外包合同 tick 时出现，固定六字段；`result` 为 normal/delay/rework，`status` 为结算后的合同状态。没有合同时省略该数组，不影响 `report` 根七字段。
 - 交付/结清的 `report.settlements[]` 同时记录 `bd_gross`（BD/DVD 毛收入）与 `bd_revenue`（公司 50% 所得）；`commercial_revenue` 为全部开放窗口毛收入，`committee_pool` 为非 BD 净池，`commercial_share + investor_share = committee_pool`。
 - `report.settlements[].penalty_waived`（#120 裁决 B1）：仅在 `bankrupt` / `time_limit` 终局清算中可能出现，等于名义扣罚与实付扣罚之差，语义为「因终局可用现金不足而未能收取的部分」，不是规则豁免、不改变名义扣罚金额；主动 `voluntary` 关闭不封顶、该字段恒为 0（现金不足原子拒绝，无回执）。归档 `archive.works[].finance_summary.penalty` 只记实付，与账本一致。
 - 外部代理按 DEC-COMM-001 使用 450/400/350‰；当前“同类成功合作”从 Archive 中 `end_reason=completed` 且 `channel_breakdown[]` 对应渠道 `net>0` 的已完成作品派生，不新增持久化计数字段。
-- 非整除净池分配的取整顺序与余数归属尚未冻结，出现时原子返回 `NOT_IMPLEMENTED`；通用前置商业成本输入字段亦未冻结，登记 D-16。
+- 非整除净池按 M0 §14.14.2 最大余数法分配：先取各份额 floor，再按余数降序补发；当前只持久化玩家与其余成员合计两份额，以 `company.id/committee_id` 字典序作为并列键。委员会公司所得再按非 BD 渠道净额权重、净额上限和稳定索引拆分，BD 公司所得独立保留；逐渠道 `0 ≤ company_received ≤ net`，非 BD 展示拆分之和必须等于 `report.settlements[].commercial_share`。
+- `fixed_prelaunch_cost/channel_overhead_bps` 的输入字段、支付时点与 Finance/Archive 映射仍未实现，登记 D-16；不得把上述整数分配实现误称为完整前置成本结算。
 
 ### 5.2 其余命令回执
 
@@ -397,6 +404,8 @@ report {
 | `adopt_proposal` / `reject_proposal` | `state, offer_id` / `state` | 采纳转草稿；拒绝只清提案 |
 | `buy_tv_service` | `state, paid, multiplier` | 电视台成员不可重复购买 |
 | `request_extension` | `state, deadline_week` | 延期费记 production |
+| `hire_temporary` | `state, staff_id, signing_fee, weekly_salary` | 合同截止 `min(project.deadline_week,520)`；正常候选来源仍阻塞 |
+| `sign_outsourcing` | `state, contract_id, weekly_cap, fee_total` | 费用全额预付；截止 `min(project.deadline_week,520)` |
 | `end_company` | `state, report` | `report` 含 status/end_reason/closing_projects |
 | `initialize_game/set_work_plan/assign_staff` | `state` | 无附加回执 |
 | `start_work` | `state, work_id, committee_id` | 承制项目 `committee_id=null` |
@@ -427,7 +436,7 @@ M0 §5 的“工作副本 + 一次提交”在已实现命令上成立：守卫�
 
 ## 6. 不变式实现对照
 
-M0 §4 共 **29 条**。当前 `validate()` 实际断言 **17 条**：`INV-01/02/03/04/06/07/09/11/12/16/18/21/23/24/25/27/29`。
+M0 §4 共 **29 条**。当前 `validate()` 实际断言 **22 条**：`INV-01/02/03/04/06/07/09/10/11/12/13/16/18/19/20/21/22/23/24/25/27/29`；部分覆盖另计，未断言条目不因命令入口存在而自动视为完成。
 
 | INV | 断言 | 位置/缺口 |
 | --- | --- | --- |
@@ -440,16 +449,16 @@ M0 §4 共 **29 条**。当前 `validate()` 实际断言 **17 条**：`INV-01/02
 | 07 每集门槛项 | ✅ | |
 | 08 可交付 ⇔ 门槛项全交付 | ❌ | 派生函数存在，无断言 |
 | 09 assignment 合法 | ✅ | |
-| 10 同周单归属 / 临时=合同项目 | ❌ | 依赖命令 8 |
+| 10 同周单归属 / 临时=合同项目 | ✅ | 临时合同三字段、归属项目、结束周上限与 core 空合同已校验；正常来源仍阻塞 |
 | 11 last_participation.week | ✅ | |
 | 12 contributors | ✅ | |
-| 13 委员会成员/渠道唯一 | ❌ | 无数据 |
+| 13 委员会成员/渠道唯一 | ✅ | 成员/渠道/项目双向引用、生命周期及 Archive 一致性 |
 | 14 投资与 committee_id | 🔶 部分 | `Project.committee_id` 已实现；立项/结算使用，validate 未完整断言 |
 | 15 allowed_modes | ❌ | 无 Offer 数据 |
 | 16 余额恒等式 | ✅ | |
 | 17 单笔单 category / 收入边界 | 🔶 部分 | 交付收入已走 Finance；完整类别边界未独立断言 |
 | 18 reserved loans/solvency 默认值与禁用状态 | ✅ | `loans=[]`、`solvency.state="normal"`、时间字段为 null、`gap=0`；crisis/非空 loans/非默认 reserved 子字段拒绝 |
-| 19 供应商周承诺 | ✅ | validate 按 supplier_id 汇总 active weekly_cap，超过容量或 int64 汇总溢出即拒绝；命令 9 未实现 |
+| 19 供应商周承诺 | ✅ | validate 按 supplier_id 汇总 active weekly_cap，超过容量或 int64 汇总溢出即拒绝；签约与终态释放已实现 |
 | 20 合同项归属/累计交付 | ✅ | validate 校验供应商、项目、工作项、episode 容器与能力引用；按 item_id 汇总全部合同 work_done，不得超过工作项 work_total；终态释放容量 |
 | 21 week 只由 advance_week 改 | ✅ | |
 | 22 Archive 载荷/系列/终局一致性 | ✅ | INV-22 校验 31 字段 WorkRecord、aborted 状态与退款对账、渠道财务对账、IP 系列引用与追加顺序；命令前后快照测试验证历史前缀不变 |
@@ -497,11 +506,11 @@ M0 §4 共 **29 条**。当前 `validate()` 实际断言 **17 条**：`INV-01/02
 | D-09 | pending 扩展字段 | C | §3.8 | `expires_week` 已实现；`episode_id/escalation` 与升级载荷仍待冻结 |
 | D-10 | 未实现形状冻结节奏 | B | §3.10/§4.1 | 随实现批次冻结 |
 | D-11 | 别名是否保留 | B | §4 | 命令实现后评估移除 |
-| D-12 | 未实现命令 NOT_IMPLEMENTED 占位 | B | §4.1 | 当前仅用于非整除委员会净池分配；事件升级实现前拒绝非空升级配置，不为未实现载荷猜测成功回执 |
+| D-12 | 未实现行为 NOT_IMPLEMENTED 占位 | B | §4.1 | 23 条命令均已有入口，当前核心不产生该码；非整除分配已实现，未冻结事件升级载荷仍不得伪造成功回执 |
 | D-13 | report 成本分解 | B | §5.1 | 建议按 category 汇总 |
 | D-14 | report/WeekReceipt 边界 | B/C | §5.1 | report 为结算回执，WeekReceipt 为前端派生 |
 | D-15 | resolve_event 回执效果 | B | §5.2 | 建议增补，不改变业务规则 |
-| D-16 | 前置商业成本输入与净池分配舍入 | B/C | §5.1；M4 对账 fixture §6 | 输入字段、取整顺序和余数归属未冻结；当前不新增字段，非整除分配原子拒绝 |
+| D-16 | 前置商业成本输入与净池分配舍入 | B/C | §5.1；M0 §14.14.2 | 最大余数法及两份额并列键已实现；`fixed_prelaunch_cost/channel_overhead_bps` 的输入字段、支付时点和财务映射仍未实现，不得提前新增字段 |
 
 ---
 
@@ -516,8 +525,8 @@ npm run test:v4 && npm run audit:v4
 1. **命令面**：绑定源与导出清单精确一致；M0 命令表 23 条、编号连续；`view_event=22`、`lock_offer=23`；未实现命令出现入口即红。
 2. **键树**：逐路径断言字段集合完全相等；动态业务 id 映射归一化；可选路径存在即校验。
 3. **解析必填**：逐个删除字段，必须 `INVALID_INPUT`；包括 reserved fields 与 `signing_fee/weekly_salary`。
-4. **回执键**：18 条已实现命令返回键逐一相等。
-5. **初始化空聚合**：锁定当前空形状。
+4. **回执键**：23 个已实现命令返回键逐一相等。
+5. **初始化形状**：锁定初始化时各聚合的实际形状；`suppliers/partners/market.slots` 非空，`contracts/committees/finance.entries` 为空。
 6. **字段分类**：`reserved_fields` 必须存在；`historical_fields` 不得进入 V4；`contract_required_missing` 与 `future_contract` 不得悄悄实现。
 7. **当前行为**：reserved 默认值、非空 loans、crisis、非默认 solvency 子字段、负余额、未来融资类目与 `arrange_financing` 边界。
 8. **账本**：产出类目、冻结类目、id 前缀与 INV-02 唯一性。
@@ -593,7 +602,7 @@ npm run test:v4 && npm run audit:v4
 | `committees` | start_work 成立；交付后关闭 | 当前仅单项目委员会主链 |
 | `market` | 初始化；原创草稿、采纳/拒绝、start_work 消费企划；lock_offer 锁定快照；advance_week 周补充/过期/释放 | 初始目录与热度内容待 #59 标定；竞争仍属 M3 缺口 |
 | `archive` | 交付/中止追加 works；交付按 IP 写 series；finalize_company 写 company_result | 只追加；aborted 不写 series；终局 pending 按冻结快照执行默认保守分支后结清 |
-| `suppliers/contracts` | 初始化空聚合；解析与 validate 读取 | 强形状、INV-19/20 与规范化哈希已实现；供应商目录、签约、周交付、费用、可靠性失败和项目终止释放尚未实现 |
+| `suppliers/contracts` | initialize 写四供应商；sign_outsourcing 写合同；advance_week 写进度/状态；deliver_work/abort_work 释放或保留终态 | 目录、共享产能、签约预付、周交付、可靠性失败与项目终止释放已实现；供应商质量对 Q_item 的贡献仍未实现，数值与经济平衡未验收 |
 
 ### 10.8 跨模块共享值
 
@@ -617,16 +626,26 @@ npm run test:v4 && npm run audit:v4
 
 | 级 | 项 |
 | --- | --- |
-| P0 | initialize 原子范围不足；report/WeekReceipt 边界；未实现命令无 NOT_IMPLEMENTED |
+| P0 | initialize 原子范围不足；report/WeekReceipt 边界；未实现行为不得伪造成功回执 |
 | P1 | 事件效果代写 Staff/Project/Finance；事件升级载荷 |
-| P2 | market 竞争与热度内容标定；Archive 扩展履历；前置商业成本输入；非整除净池取整；更多伙伴/关系玩法 |
-| P3 | 供应商/外包；Facility；系列续作玩法（Archive 系列写入已完成）；hire_temporary 载荷（D-07/D-10）；招聘四展示槽/自由池/冷却；其余未冻结载荷 |
+| P2 | market 竞争与热度内容标定；Archive 扩展履历；前置商业成本输入；委员会邀请/接受与诉求事件；更多伙伴/关系玩法 |
+| P3 | 供应商质量贡献；Facility；系列续作玩法（Archive 系列写入已完成）；临时候选正常来源契约冲突；招聘四展示槽/自由池/冷却；其余未冻结载荷 |
 
 `loans/solvency` 不再列入删除阻塞；其当前约束由 INV-18/INV-25 与 reserved 审计保证。`project_fee` 不再列入 V4 待改名项；历史 v3 字段保留，V4 统一使用 `signing_fee`。
 
 ### 11.2 端到端 fixture 现状
 
-当前可执行链路：`initialize_game → start_work → assign_staff → 多周 advance_week → view_event → resolve_event → deliver_work → end_company/finalize_delivery → finalize_company`。承制与委员会模式均可贯通“交付 → Archive → Finance”；命令 10/19/20/21 已实现。`abort_work` 可按权威进度完成承制退款/违约金、委员会沉没核销、声望重罚、WorkRecord/Finance 归档和资源释放；破产或第 520 周携带 pending 时，按 `(work_id,event_id)` 顺序只执行冻结快照中的默认保守分支并移除对应 pending，再进入既有终局结清路径。事件升级仍待独立契约与实现，详见 `M2_M4_PROJECT_LOOP.md`。
+当前可执行链路：`initialize_game → start_work → assign_staff → set_work_plan → sign_outsourcing → 多周 advance_week（report.outsourcing）→ view_event → resolve_event → deliver_work → end_company/finalize_delivery → finalize_company`。自然 Market Offer 可经 `start_work` 建立 `source=market` 项目；承制与委员会模式均可贯通“交付 → Archive → Finance/Partnership”。`abort_work` 可按权威进度完成承制退款/违约金、委员会沉没核销、声望重罚、WorkRecord/Finance 归档和人员/合同释放；破产或第 520 周携带 pending 时，按 `(work_id,event_id)` 顺序只执行冻结快照中的默认保守分支并移除对应 pending，再进入既有终局结清路径。`scripts/v4-pressure.test.mjs` 用真实 WASM 命令验证双项目 520 周、存档确定性重放、终局结清与合同释放；该脚本注入高额开局资金仅隔离状态不变量，不构成经济平衡证据。临时招聘正常来源、供应商质量贡献、前置商业成本、委员会邀请/接受与诉求事件仍有明确缺口，事件升级亦待独立契约与实现，详见 `M2_M4_PROJECT_LOOP.md`。
+
+**2026-11-27 本地分层验收记录**：
+
+- **真实 v4 WASM 核心**：`npm run test:v4` 153/153 通过，覆盖双项目人员隔离、共享供应商产能、外包周结算、委员会分账、Archive/Finance 不变量、事件、中止、关闭与第 520 周终局；`npm run audit:v4` 通过 59 条形状、24 条回执、23 条命令及 reserved/historical 字段检查。此前 520 周压力运行达到 `week=520 / reason=time_limit / starts=43 / contracts=66 / resolved=360 / archive=43`，存档重放一致；高额资金夹具只证明确定性，不证明经济平衡。
+- **前端单元与类型**：`npm run typecheck` 通过；`npm run test:unit` 288/288 通过，含企划契约、合作渠道 `publishing`、切换企划恢复默认合作模式、委员会参数与存档覆盖确认。
+- **真实 Edge 浏览器（Playwright Core，本地静态服务）**：`npm run test:browser:v4` 3/3 通过。用例分别覆盖委员会＋承制双项目、招聘竞争、外包、周结算/事件、覆盖保存、刷新读档、主动关闭逐项结清、Archive/Finance 对账；自然市场企划经合法临界存档在界面正常交付；375px 工作台无横向溢出且键盘可达。截图位于 `build/browser-tests/v4-welcome-desktop.png`、`v4-production-desktop.png`、`v4-final-ledger-desktop.png`、`v4-production-375.png`，已实际查看。
+- **既有 v3/原型浏览器回归**：`npm run test:browser` 13/13 通过，含真实 WASM 重放、IndexedDB、加载失败、强制交付、原型事件/关闭/财务及 375px/768px 响应式验收。
+- **既有原生基线**：`npm run test:native` 86/88 通过；`Validation.NumericBoundsAndSchema` 与 `ValidatorCompatibility.DynamicOffersAndTheirOwnFields` 两项仍使用旧断言，把当前合法的动态员工 ID 与大额安全整数预算误判为非法。本次未放宽核心或改写旧测试，不能把原生基线称为全绿。
+
+以上证据证明已实现链路可操作且状态/现金对账一致；规则数值仍为 placeholder，不能据此宣称经济平衡、完整临时招聘或全部 M4 合作玩法已完成。
 
 ### 11.3 #53 验收项自查
 

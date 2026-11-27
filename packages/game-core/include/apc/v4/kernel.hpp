@@ -68,6 +68,8 @@ std::vector<ItemCandidate> order_candidates(const Project& work);
 std::vector<ItemAssignment> allocate(const Project& work, const std::vector<const Staff*>& staff, int team_permille = 1000);
 
 // ---- 产出与质量 ----
+inline constexpr int kQualityMax = 105;
+
 struct ProductionResult {
     int points = 0;                                  // 实际写入工作项的点数
     int quality_gain = 0;                            // 本次质量变化（六维之和，可为负）

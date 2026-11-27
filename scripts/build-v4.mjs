@@ -1,11 +1,8 @@
 #!/usr/bin/env node
-// 构建 v4 M1 测试用 wasm 模块（不经过 CMake）。
-//
-// 为什么单独一条路径：M1 需要在本机无 cmake/ninja 时也能产出可运行证据。
-// 正式产物仍由 CMake 构建（见 packages/game-core/CMakeLists.txt 的 v4 目标）。
+// 构建 v4 WASM 模块（不经过 CMake）：node 供契约测试，web 供浏览器游玩。
 //
 // 用法：
-//   node scripts/build-v4.mjs
+//   node scripts/build-v4.mjs [node|web]
 //   环境变量：EMXX（em++ 路径）、JSON_INCLUDE（nlohmann/json.hpp 所在 include 目录）
 import { existsSync, mkdirSync, readdirSync, statSync, writeFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
@@ -14,7 +11,12 @@ import { spawnSync } from 'node:child_process'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const core = join(root, 'packages', 'game-core')
-const out = join(root, 'build', 'v4')
+const target = process.argv[2] ?? 'node'
+if (target !== 'node' && target !== 'web') {
+  console.error('构建目标必须是 node 或 web。')
+  process.exit(1)
+}
+const out = target === 'web' ? join(root, 'apps', 'web', 'public', 'wasm') : join(root, 'build', 'v4')
 mkdirSync(out, { recursive: true })
 
 const windows = process.platform === 'win32'
@@ -139,7 +141,7 @@ const args = [
   '-sMODULARIZE=1',
   '-sEXPORT_ES6=1',
   '-sEXPORT_NAME=createV4',
-  '-sENVIRONMENT=node',
+  `-sENVIRONMENT=${target}`,
   '-sALLOW_MEMORY_GROWTH=1',
   '-sFILESYSTEM=0',
   '-o',
@@ -156,6 +158,7 @@ const args = [
 
 console.log(`em++: ${emxx}`)
 console.log(`json: ${jsonInclude}`)
+console.log(`target: ${target}`)
 // Windows 下 em++.bat 需要经 cmd 调用，否则 spawn 会直接失败且不产生输出
 const needsShell = windows && /\.(bat|cmd)$/i.test(emxx)
 const command = needsShell ? 'cmd.exe' : emxx

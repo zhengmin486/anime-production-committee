@@ -22,7 +22,6 @@ constexpr int kSupervisorSwitchLoss = 100;   // 监督换项目：团队级扣 1
 constexpr int kQualityApproach = 300;        // 质量评级向本周样本靠拢 30%
 constexpr int kCarryOverPermille = 600;      // 质量传递上限：依赖质量的 60%
 constexpr int kCarryOverOffset = 40;         // 质量传递上限：+40
-constexpr int kQualityMax = 105;             // v0.5：质量分上限（展示分仍截顶 100）
 
 int clamp(int value, int low, int high) { return std::max(low, std::min(high, value)); }
 

@@ -2,6 +2,7 @@
 import { readFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
+import { isDeepStrictEqual } from 'node:util'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const shape = JSON.parse(readFileSync(join(root, 'docs', 'v4-contract-shape.json'), 'utf8'))
@@ -52,6 +53,32 @@ vendorState.contracts = [{
   item_id: 'work_audit.common.series_comp', ability: 'planning', mode: 'normal', work_total: 60,
   work_done: 0, weekly_cap: 60, fee_total: 2400, fee_paid: 0, signed_week: 0, due_week: 26, status: 'active'
 }]
+const outsourcingBase = structuredClone(assigned.state)
+outsourcingBase.company.week = 12
+const outsourcingReceipt = unwrap('sign_outsourcing', {
+  state: outsourcingBase, work_id: 'work_audit', item_id: 'work_audit.common.series_comp',
+  supplier_id: 'supplier_plan', work_total: 40, mode: 'normal'
+})
+const outsourcingWeekReceipt = unwrap('advance_week', { state: outsourcingReceipt.state })
+const temporaryBase = structuredClone(assigned.state)
+const temporaryCandidateId = temporaryBase.recruitment.pool[0].staff.id
+const temporaryReceipt = call('hire_temporary', {
+  state: temporaryBase, work_id: 'work_audit', candidate_id: temporaryCandidateId
+})
+if (temporaryReceipt.error?.code !== 'INVALID_INPUT') {
+  fail(`正常招聘池不得被临时身份绕过：hire_temporary 实际 ${temporaryReceipt.error ? `${temporaryReceipt.error.code}: ${temporaryReceipt.error.message}` : '成功返回'}`)
+}
+const temporaryState = structuredClone(assigned.state)
+const temporaryMember = structuredClone(temporaryState.staff[0])
+temporaryMember.id = 'staff_temp_audit'
+temporaryMember.employment = 'temporary'
+temporaryMember.assignment_work_id = 'work_audit'
+temporaryMember.last_participation = null
+temporaryMember.temporary_contract = { work_id: 'work_audit', start_week: 0, end_week: 26 }
+temporaryState.staff.push(temporaryMember)
+const temporaryStateReceipt = unwrap('assign_staff', {
+  state: temporaryState, staff_id: temporaryMember.id, work_id: 'work_audit'
+})
 let state = assigned.state
 // 形状审计要跑满"触发 → 查看 → 处理（带支出）"闭环，不能被周固定成本在第 9 周上下把现金烧穿；
 // 同时保持 INV-16 恒等式（balance = opening_funds + Σentries），所以期初与余额同额抬升。
@@ -408,6 +435,10 @@ collect(marketWeekReceipt.state, 'state', observed)
 
 collect(state, 'state', observed)
 collect(vendorState, 'state', observed)
+collect(outsourcingReceipt.state, 'state', observed)
+collect(outsourcingWeekReceipt.state, 'state', observed)
+collect(outsourcingWeekReceipt.report, 'report', observed)
+collect(temporaryStateReceipt.state, 'state', observed)
 collect(pendingState, 'state', observed)
 collect(drawnReport, 'report', observed)
 const dynamic = new Set(shape.dynamic_key_maps)
@@ -532,13 +563,23 @@ const receipts = {
   reject_proposal: Object.keys(rejectReceipt).filter((key) => key !== 'error'),
   scout: Object.keys(scoutReceipt).filter((key) => key !== 'error'),
   hire_core: Object.keys(hireReceipt).filter((key) => key !== 'error'),
+  sign_outsourcing: Object.keys(outsourcingReceipt).filter((key) => key !== 'error'),
   dismiss_staff: Object.keys(dismissReceipt).filter((key) => key !== 'error'),
   lock_offer: Object.keys(lockReceipt).filter((key) => key !== 'error'),
   hash_state: Object.keys(unwrap('hash_state', { state })).filter((key) => key !== 'error')
 }
 if (viewReceipt) receipts.view_event = Object.keys(viewReceipt).filter((key) => key !== 'error')
 if (resolveReceipt) receipts.resolve_event = Object.keys(resolveReceipt).filter((key) => key !== 'error')
+const blockedReceipts = { hire_temporary: temporaryReceipt }
 for (const [command, expected] of Object.entries(shape.receipt_keys)) {
+  if (Object.hasOwn(blockedReceipts, command)) {
+    const response = blockedReceipts[command]
+    if (!response.error || Object.keys(response).length !== 1
+      || typeof response.error.code !== 'string' || typeof response.error.message !== 'string') {
+      fail(`阻塞命令错误回执形状非法：${command}`)
+    }
+    continue
+  }
   const actual = receipts[command]
   if (!actual) {
     fail(`回执未采集：${command}`)
@@ -552,7 +593,7 @@ for (const [command, expected] of Object.entries(shape.receipt_keys)) {
 // ---- 5. initialize_game 的空聚合（§3.10 缺口登记） ----
 for (const [path, expected] of Object.entries(shape.empty_at_initialize)) {
   const actual = path.split('.').slice(1).reduce((node, key) => (node == null ? node : node[key]), init.state)
-  const same = JSON.stringify(actual) === JSON.stringify(expected)
+  const same = isDeepStrictEqual(actual, expected)
   if (!same) {
     fail(`初始化聚合已变化 ${path}: 期望 ${JSON.stringify(expected)} 实际 ${JSON.stringify(actual)?.slice(0, 120)}`)
   }
@@ -648,6 +689,9 @@ expectInvalidState('reserved solvency.state=crisis', (probe) => { probe.finance.
 expectInvalidState('reserved solvency.since_week 非空', (probe) => { probe.finance.solvency.since_week = 1 }, 'INV-18')
 expectInvalidState('reserved solvency.deadline_week 非空', (probe) => { probe.finance.solvency.deadline_week = 2 }, 'INV-18')
 expectInvalidState('reserved solvency.gap 非零', (probe) => { probe.finance.solvency.gap = 1 }, 'INV-18')
+expectInvalidState('核心员工携带临时合同', (probe) => {
+  probe.staff[0].temporary_contract = { work_id: 'work_missing', start_week: 0, end_week: 1 }
+}, 'INV-10')
 const archiveProbes = [
   ['WorkRecord 根字段缺失', (archive) => { delete archive.works[0].team }],
   ['WorkRecord 未知字段', (archive) => { archive.works[0].previous_work_id = null }],
@@ -685,13 +729,20 @@ for (const path of ['state.suppliers[]', 'state.contracts[]']) {
     fail(`${path} 未同步登记到 paths 与 contract_fields`)
   }
 }
-if (!shape.vendor_contract.status_validation_implemented || shape.vendor_contract.sign_outsourcing_implemented ||
-    shape.vendor_contract.weekly_delivery_implemented || shape.vendor_contract.fee_settlement_implemented ||
-    shape.vendor_contract.reliability_failure_implemented) {
-  fail('Vendor 当前仅实现状态校验，不得宣称签约、周交付、费用或可靠性失败已实现')
+if (!shape.vendor_contract.status_validation_implemented || !shape.vendor_contract.sign_outsourcing_implemented ||
+    !shape.vendor_contract.weekly_delivery_implemented || !shape.vendor_contract.fee_settlement_implemented ||
+    !shape.vendor_contract.reliability_failure_implemented ||
+    shape.vendor_contract.capacity_invariant !== 'sum(active weekly_cap by supplier_id) <= capacity_per_week' ||
+    shape.vendor_contract.delivery_invariant !== 'sum(work_done by item_id across contracts) <= work_item.work_total') {
+  fail('Vendor 签约、周交付、费用、可靠性失败或共享产能/交付不变量未完整冻结')
 }
 const vendorProbes = [
-  ['供应商 active 产能超卖', (probe) => { probe.contracts.push({ ...probe.contracts[0], id: 'contract_overflow', weekly_cap: 41 }) }, 'INV-19'],
+  ['供应商 active 产能超卖', (probe) => {
+    probe.contracts.push({
+      ...probe.contracts[0], id: 'contract_overflow', episode_id: 'ep01', item_id: 'work_audit.ep01.script',
+      work_total: 41, work_done: 0, weekly_cap: 41
+    })
+  }, 'INV-19'],
   ['合同工作项错引', (probe) => { probe.contracts[0].item_id = 'work_audit.missing' }, 'INV-20'],
   ['合同公共项 episode 错引', (probe) => { probe.contracts[0].episode_id = 'ep01' }, 'INV-20'],
   ['同项累计交付超限', (probe) => {
@@ -899,7 +950,9 @@ if (failures.length) {
   process.exit(1)
 }
 console.log(
-  `v4 契约形状审计通过：${Object.keys(shape.paths).length} 条形状、${Object.keys(shape.receipt_keys).length} 条回执、` +
+  `v4 契约形状审计通过：${Object.keys(shape.paths).length} 条形状、` +
+    `${Object.keys(shape.receipt_keys).length - Object.keys(blockedReceipts).length} 条可观测成功回执、` +
+    `${Object.keys(blockedReceipts).length} 条阻塞命令错误回执、` +
     `${shape.commands.documented_total} 条命令（view_event=22 / lock_offer=23）、` +
     `${shape.reserved_fields.length} 个 reserved 字段、` +
     `${shape.invariants.asserted_in_validate.length}/${shape.invariants.declared_total} 条不变式有断言、` +

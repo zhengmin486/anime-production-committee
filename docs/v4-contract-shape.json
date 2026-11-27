@@ -33,10 +33,7 @@
       "instantiate_work",
       "set_plan"
     ],
-    "documented_not_exported": [
-      "hire_temporary",
-      "sign_outsourcing"
-    ],
+    "documented_not_exported": [],
     "exported": [
       "abort_work",
       "adopt_proposal",
@@ -52,6 +49,7 @@
       "finalize_delivery",
       "hash_state",
       "hire_core",
+      "hire_temporary",
       "initialize",
       "initialize_game",
       "instantiate_work",
@@ -62,6 +60,7 @@
       "scout",
       "set_plan",
       "set_work_plan",
+      "sign_outsourcing",
       "start_work",
       "validate_event_catalog",
       "view_event"
@@ -476,7 +475,62 @@
         "type": "publisher"
       }
     ],
-    "state.suppliers": [],
+    "state.suppliers": [
+      {
+        "capacity_per_week": 120,
+        "id": "supplier_draw",
+        "name": "曙光作画协力",
+        "price_per_unit": 4000,
+        "quality": 68,
+        "reliability": 82,
+        "speed": 80,
+        "specialties": [
+          "drawing",
+          "animation"
+        ],
+        "unlocked_week": 0
+      },
+      {
+        "capacity_per_week": 80,
+        "id": "supplier_post",
+        "name": "回声后期工作室",
+        "price_per_unit": 5000,
+        "quality": 74,
+        "reliability": 78,
+        "speed": 70,
+        "specialties": [
+          "postproduction"
+        ],
+        "unlocked_week": 0
+      },
+      {
+        "capacity_per_week": 60,
+        "id": "supplier_sound",
+        "name": "星音制作",
+        "price_per_unit": 4500,
+        "quality": 70,
+        "reliability": 86,
+        "speed": 65,
+        "specialties": [
+          "management"
+        ],
+        "unlocked_week": 0
+      },
+      {
+        "capacity_per_week": 40,
+        "id": "supplier_plan",
+        "name": "青叶企划社",
+        "price_per_unit": 5500,
+        "quality": 76,
+        "reliability": 90,
+        "speed": 60,
+        "specialties": [
+          "planning",
+          "direction"
+        ],
+        "unlocked_week": 12
+      }
+    ],
     "state.works": []
   },
   "error_codes": {
@@ -511,8 +565,7 @@
       "INVALID_PHASE",
       "INVALID_STATE",
       "MODE_NOT_ALLOWED",
-      "NOT_FOUND",
-      "NOT_IMPLEMENTED"
+      "NOT_FOUND"
     ]
   },
   "invariants": {
@@ -524,6 +577,7 @@
       "INV-06",
       "INV-07",
       "INV-09",
+      "INV-10",
       "INV-11",
       "INV-12",
       "INV-13",
@@ -907,6 +961,7 @@
     "report": [
       "events",
       "funds",
+      "outsourcing",
       "settlements",
       "staff",
       "week",
@@ -931,6 +986,14 @@
       "operations",
       "production",
       "salary"
+    ],
+    "report.outsourcing[]": [
+      "id",
+      "points",
+      "result",
+      "status",
+      "weekly_cap",
+      "work_done"
     ],
     "report.staff[]": [
       "fatigue",
@@ -1104,7 +1167,6 @@
       "name",
       "offer_source_type",
       "origin",
-      "previous_work_id",
       "required_works",
       "scale",
       "source",
@@ -1215,6 +1277,11 @@
       "management",
       "planning",
       "postproduction"
+    ],
+    "state.staff[].temporary_contract": [
+      "end_week",
+      "start_week",
+      "work_id"
     ],
     "state.suppliers[]": [
       "capacity_per_week",
@@ -1441,6 +1508,12 @@
     "set_work_plan": [
       "state"
     ],
+    "sign_outsourcing": [
+      "contract_id",
+      "fee_total",
+      "state",
+      "weekly_cap"
+    ],
     "start_work": [
       "committee_id",
       "state",
@@ -1458,6 +1531,12 @@
     "hire_core": [
       "staff_id",
       "state"
+    ],
+    "hire_temporary": [
+      "signing_fee",
+      "staff_id",
+      "state",
+      "weekly_salary"
     ],
     "dismiss_staff": [
       "state"
@@ -1532,10 +1611,10 @@
   },
   "vendor_contract": {
     "status_validation_implemented": true,
-    "sign_outsourcing_implemented": false,
-    "weekly_delivery_implemented": false,
-    "fee_settlement_implemented": false,
-    "reliability_failure_implemented": false,
+    "sign_outsourcing_implemented": true,
+    "weekly_delivery_implemented": true,
+    "fee_settlement_implemented": true,
+    "reliability_failure_implemented": true,
     "capacity_invariant": "sum(active weekly_cap by supplier_id) <= capacity_per_week",
     "delivery_invariant": "sum(work_done by item_id across contracts) <= work_item.work_total"
   },
