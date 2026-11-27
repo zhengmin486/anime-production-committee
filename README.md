@@ -234,6 +234,8 @@ Sites 官方插件本地打包约束：单文件不超过 50 MiB，整体发布 
 - [事件内容填写指南](docs/EVENT_CONTENT_GUIDE.md)
 - [事件内容流水线（#50：卡片 schema、加载与校验）](docs/EVENT_CONTENT_PIPELINE.md)
 - [Event 终局 pending 的结清语义（#120）](docs/EVENT_TERMINAL_SETTLEMENT.md)
+- [Event 限时升级与二次超时（#121）](docs/EVENT_ESCALATION.md)
+- [Event 应急外包编排准备（#122）](docs/EVENT_VENDOR_ORCHESTRATION.md)
 - [M2 项目全链路 + M4 商业结算](docs/M2_M4_PROJECT_LOOP.md)
 - [当前进度与方向](docs/PROGRESS.md)
 - [素材盘点：图片、图标、背景、字体与缺口（2026-11-24）](docs/ASSET_INVENTORY_2026-11-24.md)

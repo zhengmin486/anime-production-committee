@@ -66,6 +66,12 @@ struct Participation {
     int week = 0;
 };
 
+struct ContributorSnapshot {
+    std::string id;
+    std::string name;
+    std::string role;
+};
+
 struct Staff {
     std::string id;
     std::string name;
@@ -168,6 +174,7 @@ struct Project {
     // INV-27/§14.8：监督是项目内岗位，不写进 Staff.role（DEC-STAFF-008），
     // 也不用"归属里角色是监督者"推导——那样多人主责与原子换班都无法表达。
     std::optional<std::string> supervisor_staff_id;
+    std::vector<ContributorSnapshot> contributor_snapshots;
     std::optional<std::string> ip_id;
     std::optional<std::string> committee_id;
     Json tv_service = nullptr;             // M4：{channel, paid_week, fee}
@@ -224,6 +231,16 @@ struct EventOptionView {
     std::vector<EffectView> effects;
 };
 
+// #121 / DEC-EVENT-003：一次升级的冻结快照。升级只替换本条 pending 的内容，
+// 沿用同一 (work_id, event_id)；timeout_option_id 指向 options[] 中的硬罚分支。
+struct EscalationView {
+    std::string description;
+    int expires_weeks = 0;    // 冻结值 2：升级后的处理窗口
+    int triggered_week = 0;   // 升级发生的周（期限基准，不改原触发周）
+    std::vector<EventOptionView> options;
+    std::string timeout_option_id;
+};
+
 struct PendingEvent {
     std::string event_id;
     std::string name;         // 快照：结算回执不依赖可能变化的内容目录
@@ -234,6 +251,10 @@ struct PendingEvent {
     bool once_per_project = false;
     bool viewed = false;      // INV-23：未查看阻塞周推进，查看不等于处理
     std::vector<EventOptionView> options;
+    // 旧存档缺这些字段时按 timeout_option_id=""、escalated=false、escalation=null 处理。
+    std::string timeout_option_id;  // 首次超时轻罚分支（指向 options[]）
+    bool escalated = false;         // 最多升级一次
+    std::optional<EscalationView> escalation;
 };
 
 struct WorkEventState {

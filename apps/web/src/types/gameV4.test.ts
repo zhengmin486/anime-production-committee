@@ -1,6 +1,7 @@
 import { describe, expect, expectTypeOf, it } from 'vitest'
 import { isCompanyResult, isV4Archive, isV4CompanyResult, isV4WorkRecord, isWorkRecord, V4_STAFF_ROLES } from './gameV4'
 import type { V4Archive, V4CompanyResult, V4WorkRecord } from './gameV4'
+import { isV4Market, isV4Offer, type V4Market } from './gameV4State'
 import { isCompanyResult as isV3CompanyResult, isWorkRecord as isV3WorkRecord } from './gameV3'
 
 function changed(source: unknown, path: string, value: unknown, remove = false): unknown {
@@ -102,6 +103,7 @@ describe('v4 完整 WorkRecord 契约', () => {
     const value = work()
     expect(isV4WorkRecord(value)).toBe(true)
     expect(isV4WorkRecord(JSON.parse(JSON.stringify(value)))).toBe(true)
+    expect(isV4WorkRecord({ ...value, source: 'market' })).toBe(true)
     expect(isV3WorkRecord(value)).toBe(false)
     expectTypeOf(isWorkRecord(value)).toEqualTypeOf<boolean>()
   })
@@ -118,6 +120,24 @@ describe('v4 完整 WorkRecord 契约', () => {
         expect(isV4WorkRecord(changed(work(), path, invalid)), `${path}: ${String(invalid)}`).toBe(false)
       }
     }
+  })
+
+  it('quality_score 与 Q_final 同标尺接受 100/101/105，拒绝 106 并保持 JSON 往返', () => {
+    for (const qualityScore of [100, 101, 105]) {
+      const value = { ...work(), quality_score: qualityScore, rating: 'S' as const }
+      expect(isV4WorkRecord(value), String(qualityScore)).toBe(true)
+      expect(isV4WorkRecord(JSON.parse(JSON.stringify(value))), String(qualityScore)).toBe(true)
+    }
+    expect(isV4WorkRecord({ ...work(), quality_score: 106, rating: 'S' })).toBe(false)
+  })
+
+  it('channel quality_factor 接受至 1040 并保持边界 JSON 往返', () => {
+    for (const qualityFactor of [1000, 1010, 1040]) {
+      const value = changed(work(), 'channel_breakdown.0.quality_factor', qualityFactor)
+      expect(isV4WorkRecord(value), String(qualityFactor)).toBe(true)
+      expect(isV4WorkRecord(JSON.parse(JSON.stringify(value))), String(qualityFactor)).toBe(true)
+    }
+    expect(isV4WorkRecord(changed(work(), 'channel_breakdown.0.quality_factor', 1041))).toBe(false)
   })
 
   it('校验质量均值、评级、合作比例、结束原因与唯一快照 id', () => {
@@ -137,6 +157,11 @@ describe('v4 完整 WorkRecord 契约', () => {
     for (const role of V4_STAFF_ROLES) {
       expect(isV4WorkRecord(changed(work(), 'team.0.role', role)), role).toBe(true)
     }
+    const value = work()
+    value.team = ['director', '作画', '演出', '脚本', '摄影', '监督', '音乐', '声优', '美术']
+      .map((role, index) => ({ id: `staff_${index}`, name: `成员 ${index}`, role: role as V4WorkRecord['team'][number]['role'] }))
+    expect(isV4WorkRecord(value)).toBe(true)
+    expect(isV4WorkRecord(changed(value, 'team.0.role', '主管'))).toBe(false)
     expect(isV4WorkRecord(changed(work(), 'team.0.role', 'producer'))).toBe(false)
   })
 
@@ -150,6 +175,41 @@ describe('v4 完整 WorkRecord 契约', () => {
     expect(isV4WorkRecord(changed(work(), 'finance_summary.total_costs', 101))).toBe(false)
     expect(isV4WorkRecord(changed(work(), 'finance_summary.profit', 949))).toBe(false)
     expect(isV4WorkRecord({ ...work(), channel_breakdown: [...work().channel_breakdown, ...work().channel_breakdown] })).toBe(false)
+  })
+
+  it('外包汇总必填且与成本对账', () => {
+    const value = work()
+    value.outsourcing_summary = { contracts: 2, failed: 1, points: 30, spend: 40 }
+    value.finance_summary.costs = { production: 60, outsourcing: 40 }
+    expect(isV4WorkRecord(value)).toBe(true)
+    expect(isV4WorkRecord(changed(value, 'outsourcing_summary.failed', 3))).toBe(false)
+    expect(isV4WorkRecord(changed(value, 'outsourcing_summary.points', -1))).toBe(false)
+    expect(isV4WorkRecord(changed(value, 'outsourcing_summary.spend', 41))).toBe(false)
+  })
+
+  it('接受委员会净池分配与 BD 公司所得并精确对账', () => {
+    const value = work()
+    value.mode = 'committee'
+    value.investment_percent = 30
+    value.commercial_revenue = 592
+    value.bd_gross = 92
+    value.bd_revenue = 46
+    value.committee_pool = 500
+    value.investor_share = 350
+    value.company_received = 196
+    value.finance_summary = {
+      ...value.finance_summary, investment_paid: 600, commercial_share: 196, bd_revenue: 46,
+      costs: { production: 1100 }, total_costs: 1100, profit: -504
+    }
+    value.channel_breakdown = [
+      { window: 'domestic_streaming', potential: 500, quality_factor: 1000, heat_factor: 1000, reputation_factor: 1000,
+        tv_multiplier: 1000, agency_fee_permille: 0, gross: 500, net: 500, revenue: 500, company_received: 150, owner: 'committee_pool' },
+      { window: 'bd_dvd', potential: 92, quality_factor: 1000, heat_factor: 1000, reputation_factor: 1000,
+        tv_multiplier: 1000, agency_fee_permille: 0, gross: 92, net: 46, revenue: 92, company_received: 46, owner: 'company' }
+    ]
+    expect(isV4WorkRecord(value)).toBe(true)
+    expect(isV4WorkRecord(changed(value, 'investor_share', 349))).toBe(false)
+    expect(isV4WorkRecord(changed(value, 'finance_summary.commercial_share', 195))).toBe(false)
   })
 
   it('校验中止状态、周、实际违约金与退款利润', () => {
@@ -166,6 +226,53 @@ describe('v4 完整 WorkRecord 契约', () => {
     penalized.finance_summary.total_costs = 250
     penalized.finance_summary.profit = 500
     expect(isV4WorkRecord(penalized)).toBe(true)
+  })
+})
+
+describe('v4 企划契约', () => {
+  const offer = () => ({
+    id: 'offer_01', name: '星海邮差', source: 'publisher', genre: 'sf', scale: 'tv', contract_budget: 1200000,
+    duration_weeks: 26, target_quality: 70, audience_base: 600, commercial_potential: 700,
+    channel_potentials: { domestic_streaming: 1800000 }, channels_baseline: ['domestic_streaming', 'tv'],
+    allowed_modes: ['contract', 'committee'], committee_candidates: ['partner_tv', 'partner_stream'],
+    min_reputation: 0, required_works: [], blueprint_id: 'tv_standard', episode_count: 12,
+    workload_scale_permille: 1000, origin: 'publisher', style: 'standard', offer_source_type: 'market',
+    deposit_basis: 1200000, expires_week: 3, locked_until: null, lock_used: false, deposit_paid: 0,
+  })
+
+  it('接受核心的成员 ID 数组与千分制商业潜力', () => {
+    expect(isV4Offer(offer())).toBe(true)
+    expect(isV4Offer({ ...offer(), commercial_potential: 1000 })).toBe(true)
+    expect(isV4Offer({ ...offer(), commercial_potential: 1001 })).toBe(false)
+    expect(isV4Offer({ ...offer(), committee_candidates: [{ id: 'partner_tv' }] })).toBe(false)
+    expect(isV4Offer({ ...offer(), previous_work_id: null })).toBe(false)
+  })
+})
+
+describe('v4 市场状态契约', () => {
+  const market = (): V4Market => ({
+    heat: { sf: { level: 'high', changed_week: 0 } },
+    slots: [],
+    custom_offer: null,
+    proposal: null,
+    refresh_week: 0,
+    last_competition_round: 0,
+    competitors: [],
+  })
+
+  it('接受运行时七字段市场及 JSON 往返', () => {
+    expect(isV4Market(market())).toBe(true)
+    expect(isV4Market(JSON.parse(JSON.stringify(market())))).toBe(true)
+    expect(isV4Market({ ...market(), custom_offer: { id: 'custom_01' }, proposal: { id: 'proposal_01' }, competitors: [{}] })).toBe(true)
+  })
+
+  it('拒绝缺字段、未知字段、非法热度和负数竞争轮次', () => {
+    for (const key of Object.keys(market())) {
+      expect(isV4Market(changed(market(), key, undefined, true)), key).toBe(false)
+    }
+    expect(isV4Market({ ...market(), slots_extra: [] })).toBe(false)
+    expect(isV4Market(changed(market(), 'heat.sf.level', 'normal'))).toBe(false)
+    expect(isV4Market(changed(market(), 'last_competition_round', -1))).toBe(false)
   })
 })
 

@@ -265,6 +265,13 @@ GameState decode_state(const Json& request) {
     if (!state.at("archive").at("works").is_array() || !state.at("archive").at("series").is_array()) {
         throw Json::type_error::create(302, "archive.works/series 必须是数组", nullptr);
     }
+    for (const auto& record : state.at("archive").at("works")) {
+        require(record, "outsourcing_summary", "archive.works[]");
+        const auto& summary = record.at("outsourcing_summary");
+        for (const char* key : {"contracts", "failed", "points", "spend"}) {
+            require(summary, key, "archive.works[].outsourcing_summary");
+        }
+    }
     require(state.at("events"), "pending", "events");
     if (!state.at("events").at("pending").is_array()) {
         throw Json::type_error::create(302, "events.pending 必须是数组", nullptr);
@@ -850,6 +857,8 @@ Json generate_offer(std::uint32_t seed, int week, int index, const std::string& 
     const std::int64_t budget = 170000000;
     const int deposit_rate = source_type == "ip_visit" ? kDepositIpPermille : kDepositTvSmallPermille;
     const std::string id = "offer_" + hex32(purpose_offer_gen()) + "_" + std::to_string(week) + "_" + std::to_string(index);
+    // 渠道比例沿用原创草稿占位基线，待 #59/M7 标定。
+    const auto potential = [budget](int permille) { return budget * permille / 1000; };
     return Json{{"id", id},
                 {"name", genre + "_" + scale + "_" + std::to_string(week) + "_" + std::to_string(index)},
                 {"source", "market"},
@@ -860,13 +869,17 @@ Json generate_offer(std::uint32_t seed, int week, int index, const std::string& 
                 {"target_quality", 65},
                 {"audience_base", 1000 + static_cast<int>(sub(5) % 9000)},
                 {"commercial_potential", static_cast<int>(sub(6) % 101)},
-                {"channel_potentials", Json::object()},
-                {"channels_baseline", Json::array({"bd"})},
+                {"channel_potentials", Json{{"domestic_streaming", potential(2000)},
+                                            {"overseas", potential(1200)},
+                                            {"merchandise", potential(1000)},
+                                            {"music", potential(500)},
+                                            {"tv", potential(500)},
+                                            {"bd_dvd", potential(400)}}},
+                {"channels_baseline", Json::array({"bd_dvd"})},
                 {"allowed_modes", Json::array({"contract", "committee"})},
-                {"committee_candidates", Json::array()},
+                {"committee_candidates", Json::array({"partner_tv", "partner_stream", "partner_pub"})},
                 {"min_reputation", std::min(static_cast<int>(sub(7) % 120), reputation_cap)},
                 {"required_works", Json::array()},
-                {"previous_work_id", nullptr},
                 {"blueprint_id", "tv_standard"},
                 {"episode_count", episode_count_of_scale(scale)},
                 {"workload_scale_permille", 1000},
@@ -1053,7 +1066,7 @@ bool archive_work_record(const Json& record, std::int64_t company_week,
         return false;
     }
     if (!archive_text(record.at("source")) || !one_of_text(record.at("source").get<std::string>(),
-        {"publisher", "studio", "manga", "light_novel", "game", "original"})) {
+        {"publisher", "studio", "manga", "light_novel", "game", "original", "market"})) {
         error("INV-22 archive.works[].source 非法: " + id);
         return false;
     }
@@ -1091,7 +1104,7 @@ bool archive_work_record(const Json& record, std::int64_t company_week,
         error("INV-22 archive.works[].结束状态非法: " + id);
         return false;
     }
-    if (!archive_quality(record.at("quality"), path + ".quality", error) || !archive_integer(record.at("quality_score"), 0, 100)
+    if (!archive_quality(record.at("quality"), path + ".quality", error) || !archive_integer(record.at("quality_score"), 0, 105)
         || !archive_text(record.at("rating")) || record.at("rating").get<std::string>() != archive_rating_of(record.at("quality_score").get<int>())) {
         error("INV-22 archive.works[].quality/rating 非法: " + id);
         return false;
@@ -1134,6 +1147,10 @@ bool archive_work_record(const Json& record, std::int64_t company_week,
     }
     if (finance.at("penalty").get<std::int64_t>() != record.at("penalty_paid").get<std::int64_t>()) {
         error("INV-22 archive.works[].penalty_paid 与 finance_summary.penalty 不一致: " + id);
+        return false;
+    }
+    if (finance.at("bd_revenue").get<std::int64_t>() != record.at("bd_revenue").get<std::int64_t>()) {
+        error("INV-22 archive.works[].finance_summary.bd_revenue 与根字段不一致: " + id);
         return false;
     }
     if (!finance.at("profit").is_number_integer() || finance.at("bd_revenue").get<std::int64_t>() > finance.at("commercial_share").get<std::int64_t>()) {
@@ -1400,6 +1417,7 @@ void validate_vendors(const GameState& state,
     }
 
     std::map<std::string, std::int64_t> delivered_by_item;
+    std::map<std::string, std::int64_t> reserved_by_item;
     for (const auto& contract : state.contracts) {
         if (!archive_exact_fields(contract, {"id", "supplier_id", "work_id", "episode_id", "item_id", "ability", "mode",
                                              "work_total", "work_done", "weekly_cap", "fee_total", "fee_paid",
@@ -1501,11 +1519,19 @@ void validate_vendors(const GameState& state,
         if (!item->outsourceable || common_item || item->is_gate) {
             error("INV-20 OutsourceContract 只能承接可外包的 episode 非门槛工作项: " + id + "/" + item_id);
         }
+        if (work_done > item->work_done) {
+            error("INV-20 外包 work_done 不能超过工作项已完成量: " + id);
+        }
         auto& delivered = delivered_by_item[item_id];
         if (!archive_add(delivered, work_done) || delivered > item->work_total) {
             error("INV-20 同一工作项累计外包交付超过 work_total 或汇总溢出: " + item_id);
         }
-        if (contract.at("status").get<std::string>() == "active") {
+        const auto& status = contract.at("status").get<std::string>();
+        auto& reserved = reserved_by_item[item_id];
+        if (!archive_add(reserved, status == "active" ? work_total : work_done) || reserved > item->work_total) {
+            error("INV-20 同一工作项外包预留量超过 work_total 或汇总溢出: " + item_id);
+        }
+        if (status == "active") {
             auto& used = active_capacity[supplier_id];
             if (!archive_add(used, weekly_cap)) {
                 error("INV-19 供应商 active weekly_cap 汇总溢出: " + supplier_id);
@@ -1814,6 +1840,28 @@ std::vector<std::string> validate(const GameState& state) {
 
     // 招聘池（§14.13.1）：候选不是员工——不进名册约束（INV-09/10/11 不适用），
     // 但 id 仍走全局唯一集合，且不得与名册员工重叠；包装字段语义在这里拦住。
+    auto validate_candidate_staff = [&error](const Staff& member) {
+        if (!is_profession(member.role)) {
+            error("INV-01 候选职业必须是八个招聘职业之一: " + member.id);
+        }
+        for (int i = 0; i < kAbilityCount; ++i) {
+            const int ability = member.abilities[static_cast<std::size_t>(i)];
+            const int potential = member.potential[static_cast<std::size_t>(i)];
+            if (ability < 0 || ability > 100) error("INV-01 候选能力越界: " + member.id);
+            if (potential < 0 || potential > 100) error("INV-01 候选潜力越界: " + member.id);
+        }
+        if (member.signing_fee < 0) error("INV-01 候选 signing_fee 不能为负: " + member.id);
+        if (member.weekly_salary <= 0) error("INV-01 候选 weekly_salary 必须为正: " + member.id);
+        if (member.employment != "core" && member.employment != "temporary") {
+            error("INV-01 候选 employment 非法: " + member.id);
+        }
+        if (!member.temporary_contract.is_null()) {
+            error("INV-01 池中候选不得带项目合同: " + member.id);
+        }
+        if (member.assignment_work_id) {
+            error("INV-01 池中候选不得有项目归属: " + member.id);
+        }
+    };
     for (const auto& candidate : state.recruitment.pool) {
         claim_id(candidate.staff.id, "candidate");
         if (!one_of_text(candidate.origin, {"regular", "scout", "temporary"})) {
@@ -1825,17 +1873,7 @@ std::vector<std::string> validate(const GameState& state) {
         if (candidate.origin == "scout" && !candidate.expires_week) {
             error("INV-01 scout 候选缺少 expires_week: " + candidate.staff.id);
         }
-        for (int i = 0; i < kAbilityCount; ++i) {
-            const int ability = candidate.staff.abilities[static_cast<std::size_t>(i)];
-            const int potential = candidate.staff.potential[static_cast<std::size_t>(i)];
-            if (ability < 0 || ability > 100) error("INV-01 候选能力越界: " + candidate.staff.id);
-            if (potential < 0 || potential > 100) error("INV-01 候选潜力越界: " + candidate.staff.id);
-        }
-        if (candidate.staff.signing_fee < 0) error("INV-01 候选 signing_fee 不能为负: " + candidate.staff.id);
-        if (candidate.staff.weekly_salary <= 0) error("INV-01 候选 weekly_salary 必须为正: " + candidate.staff.id);
-        if (candidate.staff.assignment_work_id) {
-            error("INV-01 池中候选不得有项目归属: " + candidate.staff.id);
-        }
+        validate_candidate_staff(candidate.staff);
     }
     // 自由人才池：只有常规候选会回池，且必须带冷却结束周（entry.expires_week 在这里换语义）。
     if (state.recruitment.free_pool.size() > 3 * kFreePoolCap) {
@@ -1849,9 +1887,10 @@ std::vector<std::string> validate(const GameState& state) {
         if (!candidate.expires_week || *candidate.expires_week < 0) {
             error("INV-01 自由池候选必须带冷却结束周: " + candidate.staff.id);
         }
-        if (candidate.staff.employment != "core" || candidate.staff.assignment_work_id) {
-            error("INV-01 自由池候选必须是无归属的正式候选: " + candidate.staff.id);
+        if (candidate.staff.employment != "core") {
+            error("INV-01 自由池候选必须是正式候选: " + candidate.staff.id);
         }
+        validate_candidate_staff(candidate.staff);
     }
     if (state.recruitment.pity.since_sr < 0 || state.recruitment.pity.since_ssr < 0) {
         error("INV-01 recruitment.pity 计数不能为负");
@@ -1867,6 +1906,15 @@ std::vector<std::string> validate(const GameState& state) {
         if (!work_ids.insert(work.id).second) error("INV-02 work.id 重复: " + work.id);
         if (!one_of_text(work.status, {"planning", "producing", "delivering", "settled"})) {
             error("INV-01 project.status 非法: " + work.id);
+        }
+        std::set<std::string> snapshot_ids;
+        for (const auto& snapshot : work.contributor_snapshots) {
+            if (snapshot.id.empty() || snapshot.name.empty() || snapshot.role.empty()) {
+                error("INV-12 contributor_snapshots 字段不能为空: " + work.id);
+            }
+            if (!snapshot_ids.insert(snapshot.id).second) {
+                error("INV-12 contributor_snapshots id 重复: " + work.id + "/" + snapshot.id);
+            }
         }
         if (work.episodes.empty()) error("INV-06 项目没有单集: " + work.id);
         if (!work.common.id.empty()) claim_id(work.common.id, "common");
@@ -2174,11 +2222,36 @@ std::vector<std::string> validate(const GameState& state) {
         if (event.triggered_week < 0 || event.triggered_week > state.company.week) {
             error("INV-23 triggered_week 越界: " + event.event_id);
         }
-        if (event.expires_week && *event.expires_week < event.triggered_week) {
-            error("INV-23 expires_week 早于触发周: " + event.event_id);
+        // #121：升级后的期限以升级周为基准（固定 2 周窗口），原触发周保持不变。
+        const int deadline_base = (event.escalated && event.escalation.has_value())
+                                      ? event.escalation->triggered_week : event.triggered_week;
+        if (event.expires_week && *event.expires_week < deadline_base) {
+            error("INV-23 expires_week 早于期限基准周: " + event.event_id);
         }
-        if (event.expires_week && *event.expires_week > event.triggered_week + 7) {
+        if (event.expires_week && *event.expires_week > deadline_base + 7) {
             error("INV-29 expires_week 超出八周处理上限: " + event.event_id);
+        }
+        if (event.escalated && !event.escalation.has_value()) {
+            error("INV-29 已升级事件缺少升级快照: " + event.event_id);
+        }
+        if (event.escalation.has_value()) {
+            const auto& esc = *event.escalation;
+            if (esc.expires_weeks != 2) error("INV-29 升级窗口必须固定为 2 周: " + event.event_id);
+            if (esc.options.empty()) error("INV-29 升级快照缺少替换选项: " + event.event_id);
+            if (std::none_of(esc.options.begin(), esc.options.end(),
+                             [](const EventOptionView& option) { return option.kind == "abandon"; })) {
+                error("INV-29 升级选项缺少 abandon 分支: " + event.event_id);
+            }
+            const bool hard_branch = std::any_of(esc.options.begin(), esc.options.end(),
+                [&esc](const EventOptionView& option) {
+                    return option.id == esc.timeout_option_id &&
+                           (option.kind == "abandon" || option.kind == "decline");
+                });
+            if (!hard_branch) error("INV-29 二次硬罚分支引用无效: " + event.event_id);
+            if (event.escalated && event.expires_week &&
+                *event.expires_week != esc.triggered_week + 1) {
+                error("INV-29 升级期限不是固定 2 周窗口: " + event.event_id);
+            }
         }
         if (event.expires_week &&
             std::none_of(event.options.begin(), event.options.end(),
@@ -2529,6 +2602,91 @@ std::string next_id(const GameState& state, const char* prefix, int existing) {
     }
 }
 
+bool checked_multiply(std::int64_t a, std::int64_t b, std::int64_t& result) {
+    if (a < 0 || b < 0 || (a != 0 && b > std::numeric_limits<std::int64_t>::max() / a)) return false;
+    result = a * b;
+    return true;
+}
+
+bool checked_multiply_divide(std::int64_t a, std::int64_t b, std::int64_t divisor,
+                             std::int64_t& result) {
+    std::int64_t product = 0;
+    if (divisor <= 0 || !checked_multiply(a, b, product)) return false;
+    result = product / divisor;
+    return true;
+}
+
+int reputation_tier(std::int64_t reputation) {
+    if (reputation >= 300000) return 7;
+    if (reputation >= 60000) return 6;
+    if (reputation >= 10000) return 5;
+    if (reputation >= 2000) return 4;
+    if (reputation >= 600) return 3;
+    if (reputation >= 250) return 2;
+    if (reputation >= 100) return 1;
+    return 0;
+}
+
+std::vector<std::int64_t> largest_remainder(const std::vector<std::int64_t>& weights,
+                                            std::int64_t total) {
+    std::vector<std::int64_t> shares(weights.size(), 0);
+    std::int64_t weight_sum = 0;
+    for (const auto weight : weights) {
+        if (weight < 0 || !archive_add(weight_sum, weight) || total < 0) return {};
+    }
+    if (total == 0 || weight_sum == 0) return shares;
+    std::vector<std::pair<std::int64_t, std::size_t>> remainders;
+    std::int64_t assigned = 0;
+    for (std::size_t i = 0; i < weights.size(); ++i) {
+        std::int64_t numerator = 0;
+        if (!checked_multiply(weights[i], total, numerator)) return {};
+        const auto share = numerator / weight_sum;
+        shares[i] = share;
+        assigned += share;
+        remainders.emplace_back(numerator % weight_sum, i);
+    }
+    std::sort(remainders.begin(), remainders.end(), [](const auto& a, const auto& b) {
+        return a.first != b.first ? a.first > b.first : a.second < b.second;
+    });
+    for (std::int64_t i = 0; i < total - assigned; ++i) {
+        shares[remainders[static_cast<std::size_t>(i % remainders.size())].second] += 1;
+    }
+    return shares;
+}
+
+std::vector<std::int64_t> allocate_with_caps(const std::vector<std::int64_t>& weights,
+                                             const std::vector<std::int64_t>& caps,
+                                             std::int64_t room) {
+    std::vector<std::int64_t> result(weights.size(), 0);
+    std::vector<bool> open(weights.size(), true);
+    for (std::size_t round = 0; round <= weights.size(); ++round) {
+        std::vector<std::int64_t> active_weights;
+        std::vector<std::size_t> indices;
+        for (std::size_t i = 0; i < weights.size(); ++i) {
+            if (open[i] && caps[i] > result[i]) {
+                active_weights.push_back(weights[i]);
+                indices.push_back(i);
+            }
+        }
+        if (room <= 0 || active_weights.empty()) return result;
+        const auto allocation = largest_remainder(active_weights, room);
+        if (allocation.empty()) return {};
+        bool capped = false;
+        for (std::size_t i = 0; i < indices.size(); ++i) {
+            const auto index = indices[i];
+            const auto amount = std::min(allocation[i], caps[index] - result[index]);
+            result[index] += amount;
+            room -= amount;
+            if (result[index] == caps[index]) {
+                open[index] = false;
+                capped = true;
+            }
+        }
+        if (!capped) return result;
+    }
+    return {};
+}
+
 int heat_factor(const Json& market, const std::string& genre) {
     if (!market.is_object() || !market.contains("heat") || !market.at("heat").is_object()) return 1000;
     const auto& heat = market.at("heat");
@@ -2657,7 +2815,7 @@ void fail_active_outsourcing(GameState& state, const std::string& work_id) {
     }
 }
 
-void advance_outsourcing(GameState& state, int week, Json& log) {
+bool advance_outsourcing(GameState& state, int week, Json& log, std::string& error) {
     std::vector<Json*> contracts;
     for (auto& contract : state.contracts) {
         if (contract.is_object() && contract.value("status", std::string{}) == "active") {
@@ -2668,9 +2826,19 @@ void advance_outsourcing(GameState& state, int week, Json& log) {
         return a->at("id").get<std::string>() < b->at("id").get<std::string>();
     });
 
+    std::map<std::string, Json> outcomes;
     std::map<std::string, std::vector<Json*>> normal_by_item;
     for (Json* contract : contracts) {
         const std::string contract_id = contract->at("id").get<std::string>();
+        outcomes[contract_id] = Json{{"id", contract_id},
+                                     {"contract_id", contract_id},
+                                     {"item_id", contract->at("item_id")},
+                                     {"result", "normal"},
+                                     {"kind", "normal"},
+                                     {"points", 0},
+                                     {"weekly_cap", contract->at("weekly_cap")},
+                                     {"work_done", contract->at("work_done")},
+                                     {"status", contract->at("status")}};
         const Json* supplier = nullptr;
         for (const auto& candidate : state.suppliers) {
             if (candidate.is_object() && candidate.value("id", std::string{}) == contract->at("supplier_id").get<std::string>()) {
@@ -2678,14 +2846,20 @@ void advance_outsourcing(GameState& state, int week, Json& log) {
                 break;
             }
         }
-        if (supplier == nullptr) continue;
+        if (supplier == nullptr) {
+            error = "外包供应商不存在: " + contract_id;
+            return false;
+        }
         const int r = supplier->at("reliability").get<int>();
         const int roll = outsource_roll_permille(state.seed, week, contract_id);
         const int rework_threshold = 10000 - 20 * (100 - r);
         if (roll >= rework_threshold) {
             Project* owner = find_work(state, contract->at("work_id").get<std::string>());
             WorkItem* item = owner == nullptr ? nullptr : find_item(*owner, contract->at("item_id").get<std::string>());
-            if (item == nullptr) continue;
+            if (item == nullptr) {
+                error = "外包工作项不存在: " + contract_id;
+                return false;
+            }
             const auto penalty = std::max<std::int64_t>(1, contract->at("weekly_cap").get<std::int64_t>() / 4);
             // INV-12：contributors 是只追加的历史事实，工作项一旦有人参与过就不能被返工打成 0，
             // 否则「未开工项不得有参与者」会把合法状态判红、整个周结算返回 INTERNAL_ERROR。
@@ -2697,16 +2871,13 @@ void advance_outsourcing(GameState& state, int week, Json& log) {
                 contract->at("work_done") = contract->at("work_done").get<std::int64_t>() - loss;
                 item->work_done -= static_cast<int>(loss);
             }
-            log.push_back(Json{{"contract_id", contract_id},
-                               {"item_id", contract->at("item_id").get<std::string>()},
-                               {"kind", "rework"},
-                               {"points", -static_cast<std::int64_t>(loss)}});
+            outcomes[contract_id]["result"] = "rework";
+            outcomes[contract_id]["kind"] = "rework";
+            outcomes[contract_id]["points"] = -static_cast<std::int64_t>(loss);
         } else if (roll >= r * 100) {
             // 延误：本周 0 交付。只进周回执，不弹窗。
-            log.push_back(Json{{"contract_id", contract_id},
-                               {"item_id", contract->at("item_id").get<std::string>()},
-                               {"kind", "delay"},
-                               {"points", 0}});
+            outcomes[contract_id]["result"] = "delay";
+            outcomes[contract_id]["kind"] = "delay";
             continue;
         } else {
             normal_by_item[contract->at("item_id").get<std::string>()].push_back(contract);
@@ -2717,7 +2888,11 @@ void advance_outsourcing(GameState& state, int week, Json& log) {
         if (contenders.empty()) continue;
         Project* owner = find_work(state, contenders.front()->at("work_id").get<std::string>());
         WorkItem* item = owner == nullptr ? nullptr : find_item(*owner, item_id);
-        if (item == nullptr || item->remaining() <= 0) continue;
+        if (item == nullptr) {
+            error = "外包工作项不存在: " + item_id;
+            return false;
+        }
+        if (item->remaining() <= 0) continue;
         struct Share {
             Json* contract;
             std::int64_t weight;
@@ -2792,6 +2967,8 @@ void advance_outsourcing(GameState& state, int week, Json& log) {
             if (share.amount <= 0) continue;
             share.contract->at("work_done") = share.contract->at("work_done").get<std::int64_t>() + share.amount;
             item->work_done += static_cast<int>(share.amount);
+            const std::string contract_id = share.contract->at("id").get<std::string>();
+            outcomes[contract_id]["points"] = outcomes[contract_id]["points"].get<std::int64_t>() + share.amount;
             if (share.supplier_quality > 0) {
                 kernel::apply_outsourced_quality(*item, share.supplier_quality, static_cast<int>(share.amount),
                                                  state.seed, week, stage_key,
@@ -2804,18 +2981,16 @@ void advance_outsourcing(GameState& state, int week, Json& log) {
         const std::string contract_id = contract->at("id").get<std::string>();
         if (contract->at("work_done").get<std::int64_t>() >= contract->at("work_total").get<std::int64_t>()) {
             contract->at("status") = "delivered";
-            log.push_back(Json{{"contract_id", contract_id},
-                               {"item_id", contract->at("item_id").get<std::string>()},
-                               {"kind", "delivered"},
-                               {"points", contract->at("work_done").get<std::int64_t>()}});
+            outcomes[contract_id]["kind"] = "delivered";
         } else if (week + 1 >= contract->at("due_week").get<std::int64_t>()) {
             contract->at("status") = "failed";
-            log.push_back(Json{{"contract_id", contract_id},
-                               {"item_id", contract->at("item_id").get<std::string>()},
-                               {"kind", "failed"},
-                               {"points", 0}});
+            outcomes[contract_id]["kind"] = "failed";
         }
+        outcomes[contract_id]["work_done"] = contract->at("work_done");
+        outcomes[contract_id]["status"] = contract->at("status");
+        log.push_back(outcomes[contract_id]);
     }
+    return true;
 }
 
 SettlementOutcome settle_project(GameState& state, Project& work, const std::string& end_reason, bool forced,
@@ -2882,7 +3057,7 @@ SettlementOutcome settle_project(GameState& state, Project& work, const std::str
     const int q_final = kernel::final_quality_milli(work, supervisor) / 1000;
     const int raw_score = q_final;
     const int correction = forced ? std::min(kForcedScorePenaltyMax, (1000 - gcp) / 100) : 0;
-    const int score = clamp_int(raw_score - correction, 0, 100);
+    const int score = clamp_int(raw_score - correction, 0, 105);
     const std::string rating = rating_of(score);
 
     // instantiate_work 是内部夹具入口；没有企划快照时也生成完整的冻结履历载荷。
@@ -2997,13 +3172,26 @@ SettlementOutcome settle_project(GameState& state, Project& work, const std::str
 
     std::int64_t reward = 0;
     if (!contract && !aborted) {
-        const std::int64_t allocation_numerator = committee_pool * percent;
-        if (allocation_numerator % 100 != 0) {
-            outcome.code = "NOT_IMPLEMENTED";
-            outcome.message = "委员会净商业池分配的取整顺序与余数归属尚未冻结";
+        // 当前契约只记录玩家与其余成员合计两个份额；用公司/委员会 id 作为稳定字典序键。
+        std::vector<std::pair<std::string, std::int64_t>> participants{
+            {state.company.id, static_cast<std::int64_t>(percent) * 100},
+            {*work.committee_id, static_cast<std::int64_t>(100 - percent) * 100},
+        };
+        std::sort(participants.begin(), participants.end(), [](const auto& a, const auto& b) {
+            return a.first < b.first;
+        });
+        std::vector<std::int64_t> weights;
+        for (const auto& participant : participants) weights.push_back(participant.second);
+        const auto allocation = largest_remainder(weights, committee_pool);
+        if (allocation.empty() && committee_pool != 0) {
+            outcome.code = "INTERNAL_ERROR";
+            outcome.message = "委员会净商业池分配溢出";
             return outcome;
         }
-        company_share = allocation_numerator / 100;
+        for (std::size_t i = 0; i < participants.size(); ++i) {
+            if (participants[i].first == state.company.id) company_share = allocation[i];
+            else investor_share = allocation[i];
+        }
         investor_share = committee_pool - company_share;
     } else if (contract && !aborted && bd_revenue >= budget && !quality_miss) {
         // DEC-QUALITY-001：质量未达 Q_min 时取消承制成功奖励。
@@ -3027,7 +3215,9 @@ SettlementOutcome settle_project(GameState& state, Project& work, const std::str
     // #120：强制终局（破产 / 第 520 周）不能再让扣罚把现金推到负数，否则 INV-25 与
     // §14.7「直接破产终局」互相矛盾，公司会被永久卡在无法关闭的状态。可支付额 = 现有现金 + 本次收入；
     // 超出部分只在回执里记为 penalty_waived，不产生欠款、递延或负现金。
-    // [PLACEHOLDER] 破产终局扣罚封顶口径待 zm 在 #120 裁定；公式本身不变，只加可支付上限。
+    // #120 裁决 B1（2026-11-27）：上限只适用于 bankrupt / time_limit 强制终局清算；
+    // penalty_waived = 因终局可用现金不足而未能收取的部分，不是规则豁免，不改变名义扣罚金额。
+    // voluntary 主动关闭不封顶，现金不足仍原子拒绝；调用方用 forced_terminal 区分两种路径。
     std::int64_t penalty_waived = 0;
     if (forced_terminal && penalty > 0) {
         const std::int64_t payable = state.finance.balance + company_revenue;
@@ -3044,23 +3234,29 @@ SettlementOutcome settle_project(GameState& state, Project& work, const std::str
         return outcome;
     }
 
-    std::int64_t assigned_channel_share = 0;
-    Json* last_pool_channel = nullptr;
-    for (auto& line : channel_report) {
+    std::vector<std::int64_t> pool_weights;
+    std::vector<std::int64_t> pool_caps;
+    std::vector<std::size_t> pool_indices;
+    for (std::size_t i = 0; i < channel_report.size(); ++i) {
+        auto& line = channel_report[static_cast<std::size_t>(i)];
         const bool bd = line.value("window", std::string{}) == kWindowBd;
-        const std::int64_t channel_company_share = bd
-            ? line.value("net", static_cast<std::int64_t>(0))
-            : line.value("net", static_cast<std::int64_t>(0)) * percent / 100;
         line["revenue"] = line.value("gross", static_cast<std::int64_t>(0));
-        line["company_received"] = channel_company_share;
-        assigned_channel_share += channel_company_share;
-        if (!bd) last_pool_channel = &line;
+        if (bd) {
+            line["company_received"] = line.value("net", static_cast<std::int64_t>(0));
+        } else {
+            pool_weights.push_back(line.value("net", static_cast<std::int64_t>(0)));
+            pool_caps.push_back(line.value("net", static_cast<std::int64_t>(0)));
+            pool_indices.push_back(i);
+        }
     }
-    // 逐渠道公司所得只是已定总额的展示拆分；余数归最后一条，避免改动净池分配规则。
-    if (last_pool_channel != nullptr) {
-        (*last_pool_channel)["company_received"] =
-            last_pool_channel->value("company_received", static_cast<std::int64_t>(0)) +
-            bd_revenue + company_share - assigned_channel_share;
+    const auto channel_shares = allocate_with_caps(pool_weights, pool_caps, company_share);
+    if (channel_shares.empty() && !pool_weights.empty()) {
+        outcome.code = "INTERNAL_ERROR";
+        outcome.message = "委员会渠道展示拆分超出净额上限";
+        return outcome;
+    }
+    for (std::size_t i = 0; i < pool_indices.size(); ++i) {
+        channel_report[pool_indices[i]]["company_received"] = channel_shares[i];
     }
 
     if (bd_revenue > 0) {
@@ -3145,9 +3341,19 @@ SettlementOutcome settle_project(GameState& state, Project& work, const std::str
     walk_items(work, [&contributors](const WorkItem& item) {
         for (const auto& id : item.contributors) contributors.insert(id);
     });
+    std::map<std::string, ContributorSnapshot> contributor_snapshots;
+    for (const auto& snapshot : work.contributor_snapshots) contributor_snapshots[snapshot.id] = snapshot;
     for (const auto& id : contributors) {
         const Staff* member = find_staff(state, id);
-        if (member != nullptr) team.push_back(Json{{"id", member->id}, {"name", member->name}, {"role", member->role}});
+        if (member != nullptr) {
+            team.push_back(Json{{"id", member->id}, {"name", member->name}, {"role", member->role}});
+        } else {
+            const auto snapshot = contributor_snapshots.find(id);
+            if (snapshot != contributor_snapshots.end()) {
+                team.push_back(Json{{"id", snapshot->second.id}, {"name", snapshot->second.name},
+                                    {"role", snapshot->second.role}});
+            }
+        }
     }
     Json dims = Json::object();
     for (int i = 0; i < kDimensionCount; ++i) dims[kDimensions[static_cast<std::size_t>(i)]] = quality.dims[static_cast<std::size_t>(i)];
@@ -3333,6 +3539,15 @@ const EventOptionView* default_event_option(const PendingEvent& pending) {
     }
     for (const auto& option : pending.options) {
         if (option.kind == "decline") return &option;
+    }
+    return nullptr;
+}
+
+// #121：按选项 id 查找冻结快照中的分支；只认保守类型，避免误把玩家正向选项当超时惩罚。
+const EventOptionView* find_timeout_option(const PendingEvent& pending, const std::string& option_id) {
+    for (const auto& option : pending.options) {
+        if (option.id != option_id) continue;
+        return (option.kind == "abandon" || option.kind == "decline") ? &option : nullptr;
     }
     return nullptr;
 }
@@ -3606,6 +3821,11 @@ std::string assign_staff(const std::string& input) {
             return encode(error_body("INVALID_INPUT", "work_id 必须是字符串或 null"));
         }
 
+        if (member->employment == "temporary" && member->temporary_contract.is_object() &&
+            destination.value_or("") != member->temporary_contract.at("work_id").get<std::string>()) {
+            return encode(error_body("INVALID_PHASE", "临时员工只能分配到合同项目，不可跨项目调动或取消归属"));
+        }
+
         // 把在任监督从本项目调走：必须先当场补位，否则关键岗位锁定、本次调动作废。
         const std::string origin = member->assignment_work_id.value_or("");
         if (origin != destination.value_or("") &&
@@ -3776,7 +3996,7 @@ std::string hire_temporary(const std::string& input) {
         }
         const std::string work_id = request.at("work_id").get<std::string>();
         const std::string candidate_id = request.at("candidate_id").get<std::string>();
-        if (state.company.status != "running") return encode(error_body("INVALID_PHASE", "只有经营中的公司可以签约"));
+        if (state.company.status != "running") return encode(error_body("COMPANY_ENDED", "公司已结束"));
         Project* work = find_work(state, work_id);
         if (work == nullptr) return encode(error_body("NOT_FOUND", "项目不存在"));
         if (work->status != "producing") return encode(error_body("INVALID_PHASE", "项目必须处于 producing"));
@@ -3789,13 +4009,31 @@ std::string hire_temporary(const std::string& input) {
         if (candidate->staff.employment != "temporary" || !candidate->staff.temporary_contract.is_null()) {
             return encode(error_body("INVALID_INPUT", "hire_temporary 只接受无项目合同的临时候选"));
         }
-        const std::int64_t fee = candidate->staff.signing_fee;
-        if (state.finance.balance < fee) return encode(error_body("INSUFFICIENT_FUNDS", "现金不足：签约费不足"));
         if (temporary_staff_count(state) >= temporary_staff_capacity(state)) {
             return encode(error_body("CAPACITY_EXCEEDED", "公司弹性工位已满"));
         }
+        const int tier = reputation_tier(state.company.reputation);
+        const int min_ability = tier <= 1 ? 42 : (tier <= 4 ? 56 : 66);
+        const int max_ability = tier <= 1 ? 52 : (tier <= 4 ? 65 : 74);
+        const int primary_index = ability_index(profession_ability(candidate->staff.role));
+        const int primary = primary_index < 0 ? 0 : candidate->staff.abilities[static_cast<std::size_t>(primary_index)];
+        if (primary < min_ability || primary > max_ability) {
+            return encode(error_body("INVALID_INPUT", "临时候选能力不符合当前声望档位"));
+        }
+        std::int64_t standard_salary = 0;
+        std::int64_t weekly_salary = 0;
+        std::int64_t signing_fee = 0;
+        if (!checked_multiply(kSalaryBase + static_cast<std::int64_t>(primary) * kSalaryPerPrimary, 120, standard_salary) ||
+            !checked_multiply_divide(standard_salary, 1, 100, weekly_salary) ||
+            !checked_multiply(weekly_salary, 2, signing_fee)) {
+            return encode(error_body("INVALID_INPUT", "临时员工报酬计算溢出"));
+        }
+        if (state.finance.balance < signing_fee) return encode(error_body("INSUFFICIENT_FUNDS", "现金不足：签约费不足"));
 
         Staff member = candidate->staff;
+        member.weekly_salary = weekly_salary;
+        member.signing_fee = signing_fee;
+        member.experience.fill(0);
         member.assignment_work_id = work_id;
         member.temporary_contract = Json{{"work_id", work_id}, {"start_week", state.company.week},
                                          {"end_week", work->deadline_week}};
@@ -3804,16 +4042,17 @@ std::string hire_temporary(const std::string& input) {
                                   [&candidate_id](const PoolCandidate& entry) { return entry.staff.id == candidate_id; }),
                    pool.end());
         state.staff.push_back(std::move(member));
-        if (fee > 0) {
+        if (signing_fee > 0) {
             state.finance.entries.push_back(LedgerEntry{
                 "w" + std::to_string(state.company.week) + ".temporary." + candidate_id + ".signing",
-                state.company.week, work_id, "temporary", -fee, std::nullopt, "signing_fee"});
-            state.finance.balance -= fee;
+                state.company.week, work_id, "temporary", -signing_fee, std::nullopt, "signing_fee"});
+            state.finance.balance -= signing_fee;
         }
 
         const auto errors = validate(state);
-        if (!errors.empty()) return encode(error_body("INVALID_STATE", errors.front()));
-        return encode(Json{{"state", state}, {"staff_id", candidate_id}});
+        if (!errors.empty()) return encode(error_body("INTERNAL_ERROR", "签约后状态非法: " + errors.front()));
+        return encode(Json{{"state", state}, {"staff_id", candidate_id},
+                           {"signing_fee", signing_fee}, {"weekly_salary", weekly_salary}});
     } catch (const Json::exception&) {
         return encode(error_body("INVALID_INPUT", "JSON 或字段类型无效"));
     } catch (...) {
@@ -3830,14 +4069,16 @@ std::string sign_outsourcing(const std::string& input) {
         GameState state = decode_state(request);
         const auto input_errors = validate(state);
         if (!input_errors.empty()) return encode(error_body("INVALID_STATE", input_errors.front()));
-        if (state.company.status != "running") return encode(error_body("INVALID_PHASE", "只有经营中的公司可以签约"));
+        if (state.company.status != "running") return encode(error_body("COMPANY_ENDED", "公司已结束"));
         for (const char* key : {"work_id", "item_id", "supplier_id", "mode"}) {
-            if (!request.contains(key) || !request.at(key).is_string()) {
-                return encode(error_body("INVALID_INPUT", std::string(key) + " 必须是字符串"));
+            if (!request.contains(key) || !request.at(key).is_string() || request.at(key).get<std::string>().empty()) {
+                return encode(error_body("INVALID_INPUT", std::string(key) + " 必须是非空字符串"));
             }
         }
-        if (!request.contains("work_total") || !request.at("work_total").is_number_integer()) {
-            return encode(error_body("INVALID_INPUT", "work_total 必须是整数"));
+        if (!request.contains("work_total") || !request.at("work_total").is_number_integer() ||
+            request.at("work_total").get<std::int64_t>() <= 0 ||
+            request.at("work_total").get<std::int64_t>() > std::numeric_limits<int>::max()) {
+            return encode(error_body("INVALID_INPUT", "work_total 必须是正整型工作量"));
         }
         const std::string work_id = request.at("work_id").get<std::string>();
         const std::string item_id = request.at("item_id").get<std::string>();
@@ -3856,6 +4097,7 @@ std::string sign_outsourcing(const std::string& input) {
         if (!item->outsourceable || item->is_gate) {
             return encode(error_body("INVALID_INPUT", "只有可外包的 episode 非门槛工作项可以外包"));
         }
+        if (item->complete()) return encode(error_body("INVALID_PHASE", "工作项已完成"));
         if (work_total <= 0 || work_total > item->remaining()) {
             return encode(error_body("INVALID_INPUT", "work_total 必须在 1..剩余工作量之间"));
         }
@@ -3875,23 +4117,40 @@ std::string sign_outsourcing(const std::string& input) {
 
         const std::int64_t capacity = supplier->at("capacity_per_week").get<std::int64_t>();
         std::int64_t used = 0;
+        std::int64_t reserved_remaining = 0;
         for (const auto& contract : state.contracts) {
             if (!contract.is_object() || contract.value("status", std::string{}) != "active") continue;
-            if (contract.value("supplier_id", std::string{}) != supplier_id) continue;
-            used += contract.at("weekly_cap").get<std::int64_t>();
+            if (contract.value("work_id", std::string{}) == work_id && contract.value("item_id", std::string{}) == item_id) {
+                const auto remaining = contract.at("work_total").get<std::int64_t>() -
+                                       contract.at("work_done").get<std::int64_t>();
+                if (!archive_add(reserved_remaining, remaining)) {
+                    return encode(error_body("INVALID_INPUT", "工作项预留量溢出"));
+                }
+            }
+            if (contract.value("supplier_id", std::string{}) == supplier_id &&
+                !archive_add(used, contract.at("weekly_cap").get<std::int64_t>())) {
+                return encode(error_body("INVALID_INPUT", "供应商产能占用溢出"));
+            }
         }
+        const std::int64_t item_room = item->work_total - item->work_done - reserved_remaining;
+        if (work_total > item_room) return encode(error_body("CAPACITY_EXCEEDED", "工作项剩余可外包工作量不足"));
         const std::int64_t available = capacity - used;
         if (available <= 0) return encode(error_body("CAPACITY_EXCEEDED", "供应商本周产能已排满"));
 
-        const std::int64_t base_cap =
-            std::max<std::int64_t>(1, capacity * supplier->at("speed").get<std::int64_t>() / 100);
         const int speed_mult = mode == "emergency" ? kOutsourceModeEmergencySpeed : kOutsourceModeNormalSpeed;
         const int price_mult = mode == "emergency" ? kOutsourceModeEmergencyPrice : kOutsourceModeNormalPrice;
-        const std::int64_t weekly_cap = std::min({available, work_total, std::max<std::int64_t>(1, base_cap * speed_mult / 100)});
+        std::int64_t base_cap = 0;
+        std::int64_t mode_cap = 0;
+        std::int64_t fee_total = 0;
+        if (!checked_multiply_divide(capacity, supplier->at("speed").get<std::int64_t>(), 100, base_cap) ||
+            !checked_multiply_divide(std::max<std::int64_t>(1, base_cap), speed_mult, 100, mode_cap) ||
+            !checked_multiply_divide(work_total, supplier->at("price_per_unit").get<std::int64_t>(), 1, fee_total) ||
+            !checked_multiply_divide(fee_total, price_mult, 100, fee_total)) {
+            return encode(error_body("INVALID_INPUT", "外包报价或产能计算溢出"));
+        }
+        const std::int64_t weekly_cap = std::min({available, work_total, std::max<std::int64_t>(1, mode_cap)});
         if (weekly_cap <= 0) return encode(error_body("CAPACITY_EXCEEDED", "供应商本周产能不足一份合同"));
 
-        const std::int64_t fee_total =
-            work_total * supplier->at("price_per_unit").get<std::int64_t>() * price_mult / 100;
         if (state.finance.balance < fee_total) return encode(error_body("INSUFFICIENT_FUNDS", "现金不足：外包签约费不够"));
 
         // due_week：最少 N 周完成 + 模式相关缓冲，再被项目截止周与第 520 周封顶。
@@ -3980,6 +4239,19 @@ std::string dismiss_staff(const std::string& input) {
             if (!replace_supervisor_post(state, work.id, staff_id)) {
                 return encode(error_body("INVALID_PHASE", "监督关键岗位锁定：同项目与公司空闲名册中无合格替补"));
             }
+        }
+        const ContributorSnapshot departing{member->id, member->name, member->role};
+        for (auto& work : state.works) {
+            bool contributed = false;
+            walk_items(work, [&](const WorkItem& item) {
+                if (std::find(item.contributors.begin(), item.contributors.end(), staff_id) != item.contributors.end()) {
+                    contributed = true;
+                }
+            });
+            if (!contributed) continue;
+            const auto known = std::find_if(work.contributor_snapshots.begin(), work.contributor_snapshots.end(),
+                                            [&staff_id](const ContributorSnapshot& entry) { return entry.id == staff_id; });
+            if (known == work.contributor_snapshots.end()) work.contributor_snapshots.push_back(departing);
         }
         auto& roster = state.staff;
         roster.erase(std::remove_if(roster.begin(), roster.end(),
@@ -4129,8 +4401,11 @@ std::string advance_week(const std::string& input) {
             if (work->status != "producing") continue;
             walk_items(*work, [&](const WorkItem& item) { week_start_progress[work->id][item.id] = item.work_done; });
         }
-        Json outsource_log = Json::array();
-        advance_outsourcing(state, week, outsource_log);
+        Json outsource_report = Json::array();
+        std::string outsource_error;
+        if (!advance_outsourcing(state, week, outsource_report, outsource_error)) {
+            return fail_stage(4, "INTERNAL_ERROR", outsource_error);
+        }
         std::map<std::string, std::map<std::string, int>> outsourced_delta;
         for (Project* work : ordered) {
             if (work->status != "producing") continue;
@@ -4282,8 +4557,30 @@ std::string advance_week(const std::string& input) {
         });
         Json expired = Json::array();
         for (const auto& pending : due_events) {
-            const EventOptionView* option = default_event_option(pending);
-            if (option == nullptr) return fail_stage(7, "INVALID_STATE", "限期事件缺少 abandon 默认分支");
+            // #121 / DEC-EVENT-003：升级事件二次超时 → 执行预设硬罚，不乘倍，移除 pending。
+            if (pending.escalated) {
+                if (!pending.escalation.has_value()) {
+                    return fail_stage(7, "INVALID_STATE", "已升级事件缺少升级快照");
+                }
+                const EventOptionView* hard = find_timeout_option(pending, pending.escalation->timeout_option_id);
+                if (hard == nullptr) return fail_stage(7, "INVALID_STATE", "二次硬罚分支引用无效");
+                if (!apply_event_option(state, pending, *hard, week, true)) {
+                    return fail_stage(7, "INVALID_STATE", "到期事件归属项目不存在");
+                }
+                auto& events = state.events.pending;
+                const auto hit = std::find_if(events.begin(), events.end(), [&pending](const PendingEvent& item) {
+                    return item.work_id == pending.work_id && item.event_id == pending.event_id;
+                });
+                if (hit == events.end()) return fail_stage(7, "INVALID_STATE", "到期事件重复处理");
+                events.erase(hit);
+                expired.push_back(Json{{"work_id", pending.work_id}, {"event_id", pending.event_id},
+                                       {"option_id", hard->id}, {"automatic", true}});
+                continue;
+            }
+            const EventOptionView* option = pending.timeout_option_id.empty()
+                                                ? default_event_option(pending)
+                                                : find_timeout_option(pending, pending.timeout_option_id);
+            if (option == nullptr) return fail_stage(7, "INVALID_STATE", "限期事件缺少可用的保守超时分支");
             if (!apply_event_option(state, pending, *option, week, true)) {
                 return fail_stage(7, "INVALID_STATE", "到期事件归属项目不存在");
             }
@@ -4292,7 +4589,15 @@ std::string advance_week(const std::string& input) {
                 return item.work_id == pending.work_id && item.event_id == pending.event_id;
             });
             if (hit == events.end()) return fail_stage(7, "INVALID_STATE", "到期事件重复处理");
-            events.erase(hit);
+            if (pending.escalation.has_value()) {
+                // 首次超时：轻罚已入账，原地替换内容快照并设置固定 2 周新期限；身份与 viewed 不变。
+                hit->options = pending.escalation->options;
+                hit->expires_week = week + 1;
+                hit->escalation->triggered_week = week;
+                hit->escalated = true;
+            } else {
+                events.erase(hit);
+            }
             expired.push_back(Json{{"work_id", pending.work_id}, {"event_id", pending.event_id},
                                    {"option_id", option->id}, {"automatic", true}});
         }
@@ -4341,10 +4646,10 @@ std::string advance_week(const std::string& input) {
 
         Json report = Json{{"week", week},
                            {"works", works_report},
+                           {"outsourcing", outsource_report},
                            {"staff", staff_report},
                            {"settlements", settlements},
                            {"events", events_report},
-                           {"outsourcing", outsource_log},
                            {"funds", Json{{"delta", state.finance.balance - snapshot.finance.balance},
                                           {"balance", state.finance.balance},
                                           {"costs", Json{{"salary", salary_total},
@@ -5015,10 +5320,12 @@ std::string request_extension(const std::string& input) {
 std::string initialize_game(const std::string& input) {
     try {
         const Json request = Json::parse(input);
-        const bool valid_seed = request.contains("seed") &&
-            (request.at("seed").is_number_unsigned() ||
-             (request.at("seed").is_number_integer() && request.at("seed").get<std::int64_t>() >= 0));
-        if (!valid_seed) return encode(error_body("INVALID_INPUT", "seed 必须是非负整数"));
+        const Json& seed = request.at("seed");
+        const bool valid_seed = seed.is_number_unsigned()
+            ? seed.get<std::uint64_t>() <= std::numeric_limits<std::uint32_t>::max()
+            : (seed.is_number_integer() && seed.get<std::int64_t>() >= 0 &&
+               seed.get<std::int64_t>() <= std::numeric_limits<std::uint32_t>::max());
+        if (!valid_seed) return encode(error_body("INVALID_INPUT", "seed 必须是 0–4294967295 的整数"));
         return initialize(input);
     } catch (const Json::exception&) {
         return encode(error_body("INVALID_INPUT", "JSON 或字段类型无效"));
@@ -5032,45 +5339,6 @@ std::string set_work_plan(const std::string& input) { return set_plan(input); }
 namespace {
 
 // 事件效果的应用层：Event 只给出意图，Project/Staff/Finance 的写入在这里完成。
-void adjust_quality(Project& work, const std::string& stage_key, int delta) {
-    auto adjust_item = [delta](WorkItem& item) {
-        for (auto& value : item.quality.dims) value = std::clamp(value + delta, 0, 100);
-    };
-    if (stage_key.empty()) {
-        for (auto& item : work.common.items) adjust_item(item);
-    }
-    for (auto& episode : work.episodes) {
-        for (auto& stage : episode.stages) {
-            if (!stage_key.empty() && stage.key != stage_key) continue;
-            for (auto& item : stage.items) adjust_item(item);
-        }
-    }
-}
-
-int apply_points(Project& work, const std::string& stage_key, int points) {
-    if (points <= 0) return 0;
-    std::vector<WorkItem*> items;
-    for (auto& episode : work.episodes) {
-        for (auto& stage : episode.stages) {
-            if (!stage_key.empty() && stage.key != stage_key) continue;
-            for (auto& item : stage.items) {
-                if (item.is_gate || item.work_done >= item.work_total) continue;
-                items.push_back(&item);
-            }
-        }
-    }
-    std::sort(items.begin(), items.end(), [](const WorkItem* a, const WorkItem* b) { return a->id < b->id; });
-    int left = points;
-    int applied = 0;
-    for (WorkItem* item : items) {
-        if (left <= 0) break;
-        const int take = std::min(left, item->work_total - item->work_done);
-        item->work_done += take;
-        left -= take;
-        applied += take;
-    }
-    return applied;
-}
 
 void apply_event_effects(GameState& state, Project& work, const std::vector<EffectView>& effects, int week,
                          const std::string& event_id) {
@@ -5086,19 +5354,19 @@ void apply_event_effects(GameState& state, Project& work, const std::vector<Effe
     for (std::size_t index = 0; index < effects.size(); ++index) {
         const auto& effect = effects[index];
         if (effect.target == "quality") {
-            adjust_quality(work, effect.scope == "stage" ? effect.stage : std::string{}, effect.value);
+            kernel::adjust_quality(work, effect.scope == "stage" ? effect.stage : std::string{}, effect.value);
             continue;
         }
         if (effect.target == "work_done") {
-            apply_points(work, effect.scope == "stage" ? effect.stage : std::string{}, effect.value);
+            kernel::add_work_points(work, effect.scope == "stage" ? effect.stage : std::string{}, effect.value);
             continue;
         }
         if (effect.target == "fatigue") {
-            for (Staff* member : targets) member->fatigue = std::clamp(member->fatigue + effect.value, 0, 100);
+            for (Staff* member : targets) kernel::adjust_staff_condition(*member, effect.value, 0);
             continue;
         }
         if (effect.target == "morale") {
-            for (Staff* member : targets) member->morale = std::clamp(member->morale + effect.value, 0, 100);
+            for (Staff* member : targets) kernel::adjust_staff_condition(*member, 0, effect.value);
             continue;
         }
         if (effect.target == "funds" && effect.value < 0) {

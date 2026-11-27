@@ -2,6 +2,7 @@
 import { readFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
+import { isDeepStrictEqual } from 'node:util'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const shape = JSON.parse(readFileSync(join(root, 'docs', 'v4-contract-shape.json'), 'utf8'))
@@ -42,22 +43,49 @@ const assigned = unwrap('assign_staff', {
   staff_id: created.state.staff.find((person) => person.role === 'director').id,
   work_id: 'work_audit'
 })
-const vendorState = structuredClone(assigned.state)
-vendorState.suppliers = [{
+const vendorBase = unwrap('assign_staff', {
+  state: assigned.state,
+  staff_id: assigned.state.staff.find((person) => person.id === 'staff_anim').id,
+  work_id: 'work_audit'
+}).state
+vendorBase.suppliers = [{
   id: 'supplier_audit', name: '审计协力商', specialties: ['animation'], capacity_per_week: 100,
   quality: 70, speed: 60, price_per_unit: 40, reliability: 100, unlocked_week: 0
 }]
-vendorState.contracts = [{
-  id: 'contract_audit', supplier_id: 'supplier_audit', work_id: 'work_audit', episode_id: 'ep01',
-  item_id: 'work_audit.ep01.inbetween', ability: 'animation', mode: 'normal', work_total: 60,
-  work_done: 0, weekly_cap: 60, fee_total: 2400, fee_paid: 0, signed_week: 0, due_week: 26, status: 'active'
-}]
+vendorBase.works[0].episodes[0].stages
+  .flatMap((stage) => stage.items).find((item) => item.key === 'storyboard').work_done = 100
+const outsourcingReceipt = unwrap('sign_outsourcing', {
+  state: vendorBase, work_id: 'work_audit', item_id: 'work_audit.ep01.inbetween',
+  supplier_id: 'supplier_audit', work_total: 60, mode: 'normal'
+})
+const vendorState = outsourcingReceipt.state
 const vendorValidated = call('hash_state', { state: vendorState })
 if (vendorValidated.error) fail(`Vendor 合法夹具未通过 INV-19/20：${vendorValidated.error.message}`)
-const storyboard = vendorState.works[0].episodes[0].stages
-  .flatMap((stage) => stage.items).find((item) => item.key === 'storyboard')
-storyboard.work_done = storyboard.work_total
 const vendorAdvanced = unwrap('advance_week', { state: vendorState })
+const contributorDismissal = unwrap('dismiss_staff', {
+  state: vendorAdvanced.state, staff_id: 'staff_anim'
+})
+let contributorState = completeGates(contributorDismissal.state, 'work_audit')
+for (const pending of [...contributorState.events.pending]) {
+  if (!pending.viewed) {
+    contributorState = unwrap('view_event', {
+      state: contributorState, work_id: pending.work_id, event_id: pending.event_id
+    }).state
+  }
+  const current = contributorState.events.pending.find((event) =>
+    event.work_id === pending.work_id && event.event_id === pending.event_id)
+  const option = [...current.options].sort((a, b) => a.cost - b.cost || a.id.localeCompare(b.id))[0]
+  contributorState = unwrap('resolve_event', {
+    state: contributorState, work_id: pending.work_id, event_id: pending.event_id, option_id: option.id
+  }).state
+}
+const contributorDelivery = unwrap('deliver_work', {
+  state: contributorState, work_id: 'work_audit'
+})
+if (!contributorDelivery.state.archive.works[0].team.some((member) =>
+  member.id === 'staff_anim' && member.name === '许动画')) {
+  fail('Archive 团队快照未保留已解雇贡献者的身份')
+}
 if (vendorAdvanced.state.contracts[0].status !== 'delivered' || vendorAdvanced.state.contracts[0].work_done !== 60) {
   fail('Vendor 周交付未按 reliability=100 正常交付 60 点')
 }
@@ -440,6 +468,11 @@ collect(marketWeekReceipt.state, 'state', observed)
 
 collect(state, 'state', observed)
 collect(vendorState, 'state', observed)
+collect(vendorAdvanced.state, 'state', observed)
+collect(vendorAdvanced.report, 'report', observed)
+collect(contributorDismissal.state, 'state', observed)
+collect(temporaryReceipt.state, 'state', observed)
+collect(temporaryReceipt.report, 'report', observed)
 collect(pendingState, 'state', observed)
 collect(drawnReport, 'report', observed)
 const dynamic = new Set(shape.dynamic_key_maps)
@@ -471,54 +504,22 @@ for (const [path, actual] of observed) {
 }
 
 // ---- 3. 解析必填（decode_state 的 require 清单） ----
-const requiredProbes = {
-  state: () => ({}),
-  'state.company': (s) => delete s.company,
-  'state.staff': (s) => delete s.staff,
-  'state.suppliers': (s) => delete s.suppliers,
-  'state.contracts': (s) => delete s.contracts,
-  'state.partners': (s) => delete s.partners,
-  'state.committees': (s) => delete s.committees,
-  'state.works': (s) => delete s.works,
-  'state.works[].supervisor_staff_id': (s) => delete s.works[0].supervisor_staff_id,
-  'state.finance': (s) => delete s.finance,
-  'state.finance.loans': (s) => delete s.finance.loans,
-  'state.finance.solvency': (s) => delete s.finance.solvency,
-  'state.finance.solvency.state': (s) => delete s.finance.solvency.state,
-  'state.finance.solvency.since_week': (s) => delete s.finance.solvency.since_week,
-  'state.finance.solvency.deadline_week': (s) => delete s.finance.solvency.deadline_week,
-  'state.finance.solvency.gap': (s) => delete s.finance.solvency.gap,
-  'state.staff[].signing_fee': (s) => delete s.staff[0].signing_fee,
-  'state.staff[].weekly_salary': (s) => delete s.staff[0].weekly_salary,
-  'state.staff[].fatigue': (s) => delete s.staff[0].fatigue,
-  'state.staff[].morale': (s) => delete s.staff[0].morale,
-  'state.staff[].departure_warning': (s) => delete s.staff[0].departure_warning,
-  'state.staff[].assignment_work_id': (s) => delete s.staff[0].assignment_work_id,
-  'state.archive': (s) => delete s.archive,
-  'state.archive.works': (s) => delete s.archive.works,
-  'state.archive.series': (s) => delete s.archive.series,
-  'state.archive.company_result': (s) => delete s.archive.company_result,
-  'state.events': (s) => delete s.events,
-  'state.events.pending': (s) => delete s.events.pending,
-  'state.events.pending[].viewed': (s) => delete s.events.pending[0].viewed,
-  'state.recruitment': (s) => delete s.recruitment,
-  'state.recruitment.pool': (s) => delete s.recruitment.pool,
-  'state.recruitment.pity': (s) => delete s.recruitment.pity,
-  'state.recruitment.last_scout_week': (s) => delete s.recruitment.last_scout_week,
-  'state.recruitment.pity.since_sr': (s) => delete s.recruitment.pity.since_sr,
-  'state.recruitment.pity.since_ssr': (s) => delete s.recruitment.pity.since_ssr,
-  'state.recruitment.pool[].staff': (s) => delete s.recruitment.pool[0].staff,
-  'state.recruitment.pool[].expires_week': (s) => delete s.recruitment.pool[0].expires_week,
-  'state.recruitment.pool[].origin': (s) => delete s.recruitment.pool[0].origin,
-  'state.recruitment.pool[].staff.signing_fee': (s) => delete s.recruitment.pool[0].staff.signing_fee,
-  'state.recruitment.pool[].staff.weekly_salary': (s) => delete s.recruitment.pool[0].staff.weekly_salary
+const probeBases = [
+  contributorDismissal.state, deliveryReceipt.state, temporaryReceipt.state,
+  vendorState, startReceipt.state, pendingState, state
+].filter(Boolean)
+function parentAtPath(root, path) {
+  const segments = path.split('.').slice(1)
+  let node = root
+  for (let index = 0; index < segments.length - 1; index++) {
+    const key = segments[index].replace(/\[\]$/, '')
+    node = node?.[key]
+    if (node == null) return null
+    if (segments[index].endsWith('[]')) node = Array.isArray(node) ? node[0] : null
+  }
+  return node
 }
 for (const path of shape.required_on_parse) {
-  const mutate = requiredProbes[path]
-  if (!mutate) {
-    fail(`必填清单含未编写的探针：${path}`)
-    continue
-  }
   if (path === 'state') {
     const result = call('hash_state', {})
     if (!result.error || result.error.code !== 'INVALID_INPUT') {
@@ -526,15 +527,19 @@ for (const path of shape.required_on_parse) {
     }
     continue
   }
-  const base = structuredClone(path.startsWith('state.archive') ? deliveryReceipt.state
-    : path === 'state.suppliers' || path === 'state.contracts' ? vendorState
-      : path === 'state.partners' || path === 'state.committees' ? startReceipt.state
-        : path.includes('pending') ? pendingState : state)
-  if (path.includes('pending[]') && !base.events.pending.length) {
-    fail('探针需要含 pending 事件的样例状态，但本次运行没有')
+  const source = probeBases.find((candidate) => parentAtPath(candidate, path) != null)
+  if (!source) {
+    fail(`必填探针缺少可用样例：${path}`)
     continue
   }
-  mutate(base)
+  const base = structuredClone(source)
+  const parent = parentAtPath(base, path)
+  const key = path.split('.').at(-1).replace(/\[\]$/, '')
+  if (!Object.hasOwn(parent, key)) {
+    fail(`必填探针样例本身缺少字段：${path}`)
+    continue
+  }
+  delete parent[key]
   const result = call('hash_state', { state: base })
   if (!result.error || result.error.code !== 'INVALID_INPUT') {
     fail(`缺少必填字段 ${path} 未被拒绝（实际：${result.error ? result.error.code : '成功返回'}）`)
@@ -565,6 +570,7 @@ const receipts = {
   scout: Object.keys(scoutReceipt).filter((key) => key !== 'error'),
   hire_core: Object.keys(hireReceipt).filter((key) => key !== 'error'),
   hire_temporary: Object.keys(temporaryReceipt).filter((key) => key !== 'error'),
+  sign_outsourcing: Object.keys(outsourcingReceipt).filter((key) => key !== 'error'),
   dismiss_staff: Object.keys(dismissReceipt).filter((key) => key !== 'error'),
   lock_offer: Object.keys(lockReceipt).filter((key) => key !== 'error'),
   hash_state: Object.keys(unwrap('hash_state', { state })).filter((key) => key !== 'error')
@@ -585,7 +591,7 @@ for (const [command, expected] of Object.entries(shape.receipt_keys)) {
 // ---- 5. initialize_game 的空聚合（§3.10 缺口登记） ----
 for (const [path, expected] of Object.entries(shape.empty_at_initialize)) {
   const actual = path.split('.').slice(1).reduce((node, key) => (node == null ? node : node[key]), init.state)
-  const same = JSON.stringify(actual) === JSON.stringify(expected)
+  const same = isDeepStrictEqual(actual, expected)
   if (!same) {
     fail(`初始化聚合已变化 ${path}: 期望 ${JSON.stringify(expected)} 实际 ${JSON.stringify(actual)?.slice(0, 120)}`)
   }
@@ -681,6 +687,9 @@ expectInvalidState('reserved solvency.state=crisis', (probe) => { probe.finance.
 expectInvalidState('reserved solvency.since_week 非空', (probe) => { probe.finance.solvency.since_week = 1 }, 'INV-18')
 expectInvalidState('reserved solvency.deadline_week 非空', (probe) => { probe.finance.solvency.deadline_week = 2 }, 'INV-18')
 expectInvalidState('reserved solvency.gap 非零', (probe) => { probe.finance.solvency.gap = 1 }, 'INV-18')
+expectInvalidState('核心员工携带临时合同', (probe) => {
+  probe.staff[0].temporary_contract = { work_id: 'work_missing', start_week: 0, end_week: 1 }
+}, 'INV-10')
 const archiveProbes = [
   ['WorkRecord 根字段缺失', (archive) => { delete archive.works[0].team }],
   ['WorkRecord 未知字段', (archive) => { archive.works[0].previous_work_id = null }],
@@ -718,16 +727,21 @@ for (const path of ['state.suppliers[]', 'state.contracts[]']) {
     fail(`${path} 未同步登记到 paths 与 contract_fields`)
   }
 }
-if (!shape.vendor_contract.status_validation_implemented || shape.vendor_contract.sign_outsourcing_implemented ||
-    !shape.vendor_contract.weekly_delivery_implemented || shape.vendor_contract.fee_settlement_implemented ||
+if (!shape.vendor_contract.status_validation_implemented || !shape.vendor_contract.sign_outsourcing_implemented ||
+    !shape.vendor_contract.weekly_delivery_implemented || !shape.vendor_contract.fee_settlement_implemented ||
     !shape.vendor_contract.reliability_failure_implemented) {
-  fail('Vendor 必须登记已实现的状态校验、周交付与可靠性失败；签约与费用结算仍未实现')
+  fail('Vendor 必须登记已实现的状态校验、签约、周交付、费用结算与可靠性失败')
 }
 if (vendorValidated.error || vendorAdvanced.state.contracts[0].work_done !== 60) {
   fail('Vendor 形状声明与实际周交付不一致')
 }
 const vendorProbes = [
-  ['供应商 active 产能超卖', (probe) => { probe.contracts.push({ ...probe.contracts[0], id: 'contract_overflow', weekly_cap: 41 }) }, 'INV-19'],
+  ['同一工作项外包预留超限', (probe) => {
+    probe.contracts.push({
+      ...probe.contracts[0], id: 'contract_overflow', episode_id: 'ep01', item_id: 'work_audit.ep01.inbetween',
+      work_total: 41, work_done: 0, weekly_cap: 41
+    })
+  }, 'INV-20'],
   ['合同工作项错引', (probe) => { probe.contracts[0].item_id = 'work_audit.missing' }, 'INV-20'],
   ['合同单集项 episode 错引', (probe) => { probe.contracts[0].episode_id = null }, 'INV-20'],
   ['同项累计交付超限', (probe) => {
@@ -935,7 +949,8 @@ if (failures.length) {
   process.exit(1)
 }
 console.log(
-  `v4 契约形状审计通过：${Object.keys(shape.paths).length} 条形状、${Object.keys(shape.receipt_keys).length} 条回执、` +
+  `v4 契约形状审计通过：${Object.keys(shape.paths).length} 条形状、` +
+    `${Object.keys(shape.receipt_keys).length} 条可观测成功回执、` +
     `${shape.commands.documented_total} 条命令（view_event=22 / lock_offer=23）、` +
     `${shape.reserved_fields.length} 个 reserved 字段、` +
     `${shape.invariants.asserted_in_validate.length}/${shape.invariants.declared_total} 条不变式有断言、` +

@@ -111,9 +111,12 @@ export function finalQualityMilli(work, supervisor) {
 
   const common = layer((item) => work.common.items.includes(item))
   const episodes = layer((item) => !work.common.items.includes(item))
-  const weightSum = common.weight + episodes.weight
+  const episodeLayerWeight = work.episodes.length > 0
+    ? Math.floor(episodes.weight / work.episodes.length)
+    : 0
+  const weightSum = common.weight + episodeLayerWeight
   if (weightSum <= 0) return 0
-  const base = floorDiv(common.average * common.weight + episodes.average * episodes.weight, weightSum)
+  const base = floorDiv(common.average * common.weight + episodes.average * episodeLayerWeight, weightSum)
 
   let bonusNum = 0
   let bonusWeight = 0

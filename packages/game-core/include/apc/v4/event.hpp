@@ -8,6 +8,7 @@
 // - 目录来自 content/events/*.json，经构建脚本打包成内嵌 JSON 后由本模块解析，
 //   运行时代码里没有卡片字面量。
 
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -31,6 +32,15 @@ struct OptionSpec {
     std::vector<EffectSpec> effects;
 };
 
+// #121 / DEC-EVENT-003：一次升级的内容载荷。expires_weeks 冻结为 2，
+// timeout_option_id 指向 escalation options[] 中的强制处理/硬罚分支。
+struct EscalationSpec {
+    std::string description;
+    int expires_weeks = 0;
+    std::vector<OptionSpec> options;
+    std::string timeout_option_id;
+};
+
 struct EventSpec {
     std::string id;
     std::string name;
@@ -50,6 +60,9 @@ struct EventSpec {
     std::string description;
     std::string foreshadow;
     std::vector<OptionSpec> options;
+    std::string timeout_option_id;               // 首次超时轻罚分支
+    std::optional<EscalationSpec> escalation;   // 至多一层
+    std::string escalation_note;
 };
 
 // 内容校验问题：source（文件/内嵌源）、card_id、field 三段都能定位。

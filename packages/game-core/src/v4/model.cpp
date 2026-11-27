@@ -196,24 +196,24 @@ void to_json(Json& j, const WorkItem& value) {
 }
 
 void from_json(const Json& j, WorkItem& value) {
-    value.id = j.value("id", std::string{});
-    value.key = j.value("key", std::string{});
-    value.ability = j.value("ability", std::string{});
-    value.work_total = j.value("work_total", 0);
-    value.work_done = j.value("work_done", 0);
-    value.deliver_at = j.value("deliver_at", 1000);
-    value.deps = strings_from_json(j.value("deps", Json::array()));
-    value.is_gate = j.value("is_gate", false);
-    value.outsourceable = j.value("outsourceable", false);
-    value.quality_weight_permille = j.value("quality_weight_permille", 0);
-    value.core_aesthetic = j.value("core_aesthetic", false);
-    value.in_house_points = j.value("in_house_points", 0);
-    value.in_house_ability_centi_sum = j.value("in_house_ability_centi_sum", static_cast<std::int64_t>(0));
-    value.external_points = j.value("external_points", 0);
-    value.external_quality_milli_sum = j.value("external_quality_milli_sum", static_cast<std::int64_t>(0));
-    value.external_min_quality = j.value("external_min_quality", 0);
-    value.quality.dims = dims_from_json(j.value("quality", Json::object()));
-    value.contributors = strings_from_json(j.value("contributors", Json::array()));
+    value.id = j.at("id").get<std::string>();
+    value.key = j.at("key").get<std::string>();
+    value.ability = j.at("ability").get<std::string>();
+    value.work_total = j.at("work_total").get<int>();
+    value.work_done = j.at("work_done").get<int>();
+    value.deliver_at = j.at("deliver_at").get<int>();
+    value.deps = strings_from_json(j.at("deps"));
+    value.is_gate = j.at("is_gate").get<bool>();
+    value.outsourceable = j.at("outsourceable").get<bool>();
+    value.quality_weight_permille = j.at("quality_weight_permille").get<int>();
+    value.core_aesthetic = j.at("core_aesthetic").get<bool>();
+    value.in_house_points = j.at("in_house_points").get<int>();
+    value.in_house_ability_centi_sum = j.at("in_house_ability_centi_sum").get<std::int64_t>();
+    value.external_points = j.at("external_points").get<int>();
+    value.external_quality_milli_sum = j.at("external_quality_milli_sum").get<std::int64_t>();
+    value.external_min_quality = j.at("external_min_quality").get<int>();
+    value.quality.dims = dims_from_json(j.at("quality"));
+    value.contributors = strings_from_json(j.at("contributors"));
 }
 
 // ---------------- Project ----------------
@@ -234,6 +234,10 @@ void to_json(Json& j, const Project& value) {
 
     Json target = nullptr;
     if (value.plan.target) target = Json{{"kind", value.plan.target->kind}, {"id", value.plan.target->id}};
+    Json contributor_snapshots = Json::array();
+    for (const auto& snapshot : value.contributor_snapshots) {
+        contributor_snapshots.push_back(Json{{"id", snapshot.id}, {"name", snapshot.name}, {"role", snapshot.role}});
+    }
 
     j = Json{{"id", value.id},
              {"offer", value.offer},
@@ -245,6 +249,7 @@ void to_json(Json& j, const Project& value) {
              {"extension", value.extension},
              {"status", value.status},
              {"supervisor_staff_id", value.supervisor_staff_id ? Json(*value.supervisor_staff_id) : Json(nullptr)},
+             {"contributor_snapshots", contributor_snapshots},
              {"ip_id", value.ip_id ? Json(*value.ip_id) : Json(nullptr)},
              {"committee_id", value.committee_id ? Json(*value.committee_id) : Json(nullptr)},
              {"tv_service", value.tv_service},
@@ -272,6 +277,12 @@ void from_json(const Json& j, Project& value) {
         value.supervisor_staff_id = j.at("supervisor_staff_id").get<std::string>();
     } else {
         value.supervisor_staff_id.reset();
+    }
+    value.contributor_snapshots.clear();
+    for (const auto& snapshot : j.at("contributor_snapshots")) {
+        value.contributor_snapshots.push_back(ContributorSnapshot{
+            snapshot.at("id").get<std::string>(), snapshot.at("name").get<std::string>(),
+            snapshot.at("role").get<std::string>()});
     }
     if (j.contains("ip_id") && j.at("ip_id").is_string()) value.ip_id = j.at("ip_id").get<std::string>();
     else value.ip_id.reset();
@@ -362,24 +373,38 @@ void from_json(const Json& j, Finance& value) {
 }
 
 // ---------------- EventState ----------------
+// #121：pending 选项与升级快照选项共用同一序列化，保证 JSON 往返与哈希稳定。
+static Json options_to_json(const std::vector<EventOptionView>& options) {
+    Json out = Json::array();
+    for (const auto& option : options) {
+        Json effects = Json::array();
+        for (const auto& effect : option.effects) {
+            effects.push_back(Json{{"scope", effect.scope},
+                                   {"target", effect.target},
+                                   {"stage", effect.stage},
+                                   {"value", effect.value}});
+        }
+        out.push_back(Json{{"id", option.id},
+                           {"label", option.label},
+                           {"kind", option.kind},
+                           {"risk_hint", option.risk_hint},
+                           {"cost", option.cost},
+                           {"effects", effects}});
+    }
+    return out;
+}
+
 void to_json(Json& j, const EventState& value) {
     Json pending = Json::array();
     for (const auto& event : value.pending) {
-        Json options = Json::array();
-        for (const auto& option : event.options) {
-            Json effects = Json::array();
-            for (const auto& effect : option.effects) {
-                effects.push_back(Json{{"scope", effect.scope},
-                                       {"target", effect.target},
-                                       {"stage", effect.stage},
-                                       {"value", effect.value}});
-            }
-            options.push_back(Json{{"id", option.id},
-                                   {"label", option.label},
-                                   {"kind", option.kind},
-                                   {"risk_hint", option.risk_hint},
-                                   {"cost", option.cost},
-                                   {"effects", effects}});
+        Json options = options_to_json(event.options);
+        Json escalation = Json(nullptr);
+        if (event.escalation.has_value()) {
+            escalation = Json{{"description", event.escalation->description},
+                              {"expires_weeks", event.escalation->expires_weeks},
+                              {"triggered_week", event.escalation->triggered_week},
+                              {"options", options_to_json(event.escalation->options)},
+                              {"timeout_option_id", event.escalation->timeout_option_id}};
         }
         pending.push_back(Json{{"event_id", event.event_id},
                                {"name", event.name},
@@ -389,7 +414,10 @@ void to_json(Json& j, const EventState& value) {
                                {"cooldown_weeks", event.cooldown_weeks},
                                {"once_per_project", event.once_per_project},
                                {"viewed", event.viewed},
-                               {"options", options}});
+                               {"options", options},
+                               {"timeout_option_id", event.timeout_option_id},
+                               {"escalated", event.escalated},
+                               {"escalation", escalation}});
     }
     Json per_work = Json::object();
     for (const auto& [work_id, entry] : value.per_work) {
@@ -400,6 +428,32 @@ void to_json(Json& j, const EventState& value) {
     j = Json{{"pending", pending},
              {"last_event_week", value.last_event_week ? Json(*value.last_event_week) : Json(nullptr)},
              {"per_work", per_work}};
+}
+
+static std::vector<EventOptionView> options_from_json(const Json& raw) {
+    std::vector<EventOptionView> out;
+    if (!raw.contains("options") || !raw.at("options").is_array()) return out;
+    for (const auto& option : raw.at("options")) {
+        if (!option.is_object()) continue;
+        EventOptionView view;
+        view.id = option.value("id", std::string{});
+        view.label = option.value("label", std::string{});
+        view.kind = option.value("kind", std::string{});
+        view.risk_hint = option.value("risk_hint", std::string{});
+        view.cost = option.value("cost", 0);
+        if (option.contains("effects") && option.at("effects").is_array()) {
+            for (const auto& effect : option.at("effects")) {
+                if (!effect.is_object()) continue;
+                view.effects.push_back(EffectView{
+                    effect.value("scope", std::string{}),
+                    effect.value("target", std::string{}),
+                    effect.value("stage", std::string{}),
+                    effect.value("value", 0)});
+            }
+        }
+        out.push_back(std::move(view));
+    }
+    return out;
 }
 
 void from_json(const Json& j, EventState& value) {
@@ -418,27 +472,19 @@ void from_json(const Json& j, EventState& value) {
             if (raw.contains("expires_week") && raw.at("expires_week").is_number_integer()) {
                 event.expires_week = raw.at("expires_week").get<int>();
             }
-            if (raw.contains("options") && raw.at("options").is_array()) {
-                for (const auto& option : raw.at("options")) {
-                    if (!option.is_object()) continue;
-                    EventOptionView view;
-                    view.id = option.value("id", std::string{});
-                    view.label = option.value("label", std::string{});
-                    view.kind = option.value("kind", std::string{});
-                    view.risk_hint = option.value("risk_hint", std::string{});
-                    view.cost = option.value("cost", 0);
-                    if (option.contains("effects") && option.at("effects").is_array()) {
-                        for (const auto& effect : option.at("effects")) {
-                            if (!effect.is_object()) continue;
-                            view.effects.push_back(EffectView{
-                                effect.value("scope", std::string{}),
-                                effect.value("target", std::string{}),
-                                effect.value("stage", std::string{}),
-                                effect.value("value", 0)});
-                        }
-                    }
-                    event.options.push_back(std::move(view));
-                }
+            event.options = options_from_json(raw);
+            event.timeout_option_id = raw.value("timeout_option_id", std::string{});
+            event.escalated = raw.value("escalated", false);
+            // 旧存档缺 escalation：按“未升级”处理，不修改其他字段、不推进周数。
+            if (raw.contains("escalation") && raw.at("escalation").is_object()) {
+                const auto& esc = raw.at("escalation");
+                EscalationView view;
+                view.description = esc.value("description", std::string{});
+                view.expires_weeks = esc.value("expires_weeks", 0);
+                view.triggered_week = esc.value("triggered_week", 0);
+                view.options = options_from_json(esc);
+                view.timeout_option_id = esc.value("timeout_option_id", std::string{});
+                event.escalation = std::move(view);
             }
             value.pending.push_back(std::move(event));
         }

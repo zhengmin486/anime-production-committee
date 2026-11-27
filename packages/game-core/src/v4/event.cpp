@@ -58,6 +58,140 @@ bool bool_field(const Json& object, const char* key, bool fallback = false) {
 
 bool known_stage(const std::string& key) { return key.empty() || stage_index(key) >= 0; }
 
+std::vector<OptionSpec> parse_options(const Json& raw, const char* key, const std::string& id,
+                                      const std::string& prefix, Checker& checker,
+                                      const std::vector<std::string>& stages) {
+    std::vector<OptionSpec> options;
+    if (!raw.contains(key) || !raw.at(key).is_array() || raw.at(key).empty()) {
+        checker.fail(id, prefix, prefix + " 必须是非空数组");
+        return options;
+    }
+    int index = 0;
+    for (const auto& raw_option : raw.at(key)) {
+        const std::string where = prefix + "[" + std::to_string(index++) + "]";
+        if (!raw_option.is_object()) {
+            checker.fail(id, where, "选项必须是对象");
+            continue;
+        }
+        OptionSpec option;
+        option.id = text_field(raw_option, "id");
+        option.label = text_field(raw_option, "label");
+        option.kind = text_field(raw_option, "kind");
+        option.risk_hint = text_field(raw_option, "risk_hint");
+        option.cost = int_field(raw_option, "cost", 0);
+        if (option.id.empty()) checker.fail(id, where + ".id", "缺少选项 id");
+        if (option.label.empty()) checker.fail(id, where + ".label", "缺少选项文案");
+        if (!one_of(option.kind, {"accept", "abandon", "overtime", "decline", "outsource", "extension"})) {
+            checker.fail(id, where + ".kind", "未知选项类型");
+        }
+        if (option.cost < 0 || option.cost > 2000000) {
+            checker.fail(id, where + ".cost", "cost 必须在 0..2,000,000");
+        }
+        if (raw_option.contains("effects")) {
+            if (!raw_option.at("effects").is_array()) {
+                checker.fail(id, where + ".effects", "effects 必须是数组");
+            } else {
+                int effect_index = 0;
+                for (const auto& raw_effect : raw_option.at("effects")) {
+                    const std::string ep = where + ".effects[" + std::to_string(effect_index++) + "]";
+                    if (!raw_effect.is_object()) {
+                        checker.fail(id, ep, "效果必须是对象");
+                        continue;
+                    }
+                    EffectSpec effect;
+                    effect.scope = text_field(raw_effect, "scope");
+                    effect.target = text_field(raw_effect, "target");
+                    effect.stage = text_field(raw_effect, "stage");
+                    effect.value = int_field(raw_effect, "value", 0);
+                    if (!one_of(effect.scope, {"instant", "stage", "project"})) {
+                        checker.fail(id, ep + ".scope", "scope 只能是 instant/stage/project");
+                    }
+                    if (!one_of(effect.target, {"quality", "work_done", "fatigue", "morale", "funds"})) {
+                        checker.fail(id, ep + ".target", "未知效果类型");
+                        continue;
+                    }
+                    if (effect.value == 0) checker.fail(id, ep + ".value", "value 不能为 0");
+                    if (!known_stage(effect.stage)) checker.fail(id, ep + ".stage", "未知阶段");
+                    if (!effect.stage.empty() && effect.scope != "stage") {
+                        checker.fail(id, ep + ".stage", "只有 scope=stage 才能写 stage");
+                    }
+                    if (!effect.stage.empty() && !stages.empty() &&
+                        std::find(stages.begin(), stages.end(), effect.stage) == stages.end()) {
+                        checker.fail(id, ep + ".stage", "效果阶段不在卡片适用阶段内");
+                    }
+                    if ((effect.target == "fatigue" || effect.target == "morale" || effect.target == "funds") &&
+                        effect.scope != "instant") {
+                        checker.fail(id, ep + ".scope", effect.target + " 只能即时结算");
+                    }
+                    if (effect.target == "funds" && effect.value > 0) {
+                        checker.fail(id, ep + ".value", "事件收入分类未定：funds 只能为负");
+                    }
+                    if (effect.target == "funds" && effect.value < -2000000) {
+                        checker.fail(id, ep + ".value", "单次扣款不能超过 2,000,000");
+                    }
+                    option.effects.push_back(effect);
+                }
+            }
+        }
+        options.push_back(std::move(option));
+    }
+    return options;
+}
+
+bool conservative_option(const std::vector<OptionSpec>& options, const std::string& id) {
+    for (const auto& option : options) {
+        if (option.id != id) continue;
+        return option.kind == "abandon" || option.kind == "decline";
+    }
+    return false;
+}
+
+void parse_escalation(const Json& raw, const std::string& id, Checker& checker,
+                      const std::vector<std::string>& stages, EventSpec& spec) {
+    if (raw.contains("timeout_option_id") && !raw.at("timeout_option_id").is_null() &&
+        !raw.at("timeout_option_id").is_string()) {
+        checker.fail(id, "timeout_option_id", "timeout_option_id 必须是字符串");
+    }
+    if (raw.contains("escalation_note") && !raw.at("escalation_note").is_null() &&
+        !raw.at("escalation_note").is_string()) {
+        checker.fail(id, "escalation_note", "escalation_note 必须是字符串");
+    } else {
+        spec.escalation_note = text_field(raw, "escalation_note");
+    }
+    if (!raw.contains("escalation") || raw.at("escalation").is_null()) return;
+    const auto& node = raw.at("escalation");
+    if (!node.is_object()) {
+        checker.fail(id, "escalation", "escalation 必须是对象或 null");
+        return;
+    }
+    if (spec.expires_weeks <= 0) checker.fail(id, "escalation", "只有限时事件（expires_weeks>0）可配置升级");
+    if (spec.tier != "major") checker.fail(id, "escalation", "escalation 只允许 major 事件");
+    if (node.contains("escalation") && !node.at("escalation").is_null()) {
+        checker.fail(id, "escalation.escalation", "升级最多一层，禁止嵌套升级");
+    }
+    EscalationSpec parsed;
+    parsed.description = text_field(node, "description");
+    if (parsed.description.empty()) checker.fail(id, "escalation.description", "缺少升级描述");
+    parsed.expires_weeks = int_field(node, "expires_weeks", 0);
+    if (parsed.expires_weeks != 2) checker.fail(id, "escalation.expires_weeks", "升级后处理期限固定为 2 周");
+    parsed.options = parse_options(node, "options", id, "escalation.options", checker, stages);
+    if (std::none_of(parsed.options.begin(), parsed.options.end(),
+                     [](const OptionSpec& option) { return option.kind == "abandon"; })) {
+        checker.fail(id, "escalation.options", "升级选项必须含 abandon 默认分支");
+    }
+    parsed.timeout_option_id = text_field(node, "timeout_option_id");
+    if (!conservative_option(parsed.options, parsed.timeout_option_id)) {
+        checker.fail(id, "escalation.timeout_option_id",
+                     "二次硬罚分支必须指向 escalation.options 中 kind=abandon/decline 的一项");
+    }
+    spec.escalation = std::move(parsed);
+    spec.timeout_option_id = text_field(raw, "timeout_option_id");
+    if (!conservative_option(spec.options, spec.timeout_option_id)) {
+        checker.fail(id, "timeout_option_id",
+                     "配置升级时 timeout_option_id 必须指向本卡 options 中 kind=abandon/decline 的一项");
+    }
+}
+
 bool parse_card(const Json& raw, Checker& checker, std::set<std::string>& ids, EventSpec& out) {
     if (!raw.is_object()) {
         checker.fail("", "", "卡片必须是对象");
@@ -114,14 +248,6 @@ bool parse_card(const Json& raw, Checker& checker, std::set<std::string>& ids, E
     const int expires = int_field(raw, "expires_weeks", 0);
     if (expires < 0 || expires > 8) checker.fail(id, "expires_weeks", "expires_weeks 必须在 0..8");
 
-    // #121：§14.11 的一次升级字段尚未在 #13/#53 冻结。允许 null 占位（既有示例目录的写法），
-    // 但任何非空升级配置必须拒绝加载——否则运行时会静默忽略，内容侧误以为升级已生效。
-    for (const char* key : {"escalation", "timeout_option_id", "escalation_note"}) {
-        if (!raw.contains(key)) continue;
-        const auto& value = raw.at(key);
-        if (value.is_null()) continue;
-        checker.fail(id, key, std::string("§14.11 一次升级字段尚未冻结（#13/#53），当前拒绝加载非空 ") + key);
-    }
 
     // trigger
     std::string metric, op;
@@ -144,83 +270,7 @@ bool parse_card(const Json& raw, Checker& checker, std::set<std::string>& ids, E
     }
     if (text_field(raw, "description").empty()) checker.fail(id, "description", "缺少 description");
 
-    // options
-    std::vector<OptionSpec> options;
-    std::set<std::string> option_ids;
-    if (!raw.contains("options") || !raw.at("options").is_array() || raw.at("options").empty()) {
-        checker.fail(id, "options", "options 必须是非空数组");
-    } else {
-        int index = 0;
-        for (const auto& raw_option : raw.at("options")) {
-            const std::string where = "options[" + std::to_string(index++) + "]";
-            if (!raw_option.is_object()) {
-                checker.fail(id, where, "选项必须是对象");
-                continue;
-            }
-            OptionSpec option;
-            option.id = text_field(raw_option, "id");
-            option.label = text_field(raw_option, "label");
-            option.kind = text_field(raw_option, "kind");
-            option.risk_hint = text_field(raw_option, "risk_hint");
-            option.cost = int_field(raw_option, "cost", 0);
-            if (option.id.empty()) checker.fail(id, where + ".id", "缺少选项 id");
-            else if (!option_ids.insert(option.id).second) checker.fail(id, where + ".id", "重复的选项 id");
-            if (option.label.empty()) checker.fail(id, where + ".label", "缺少选项文案");
-            if (!one_of(option.kind, {"accept", "abandon", "overtime", "decline", "outsource", "extension"})) {
-                checker.fail(id, where + ".kind", "未知选项类型");
-            }
-            if (option.cost < 0 || option.cost > 2000000) {
-                checker.fail(id, where + ".cost", "cost 必须在 0..2,000,000");
-            }
-            if (raw_option.contains("effects")) {
-                if (!raw_option.at("effects").is_array()) {
-                    checker.fail(id, where + ".effects", "effects 必须是数组");
-                } else {
-                    int effect_index = 0;
-                    for (const auto& raw_effect : raw_option.at("effects")) {
-                        const std::string ep = where + ".effects[" + std::to_string(effect_index++) + "]";
-                        if (!raw_effect.is_object()) {
-                            checker.fail(id, ep, "效果必须是对象");
-                            continue;
-                        }
-                        EffectSpec effect;
-                        effect.scope = text_field(raw_effect, "scope");
-                        effect.target = text_field(raw_effect, "target");
-                        effect.stage = text_field(raw_effect, "stage");
-                        effect.value = int_field(raw_effect, "value", 0);
-                        if (!one_of(effect.scope, {"instant", "stage", "project"})) {
-                            checker.fail(id, ep + ".scope", "scope 只能是 instant/stage/project");
-                        }
-                        if (!one_of(effect.target, {"quality", "work_done", "fatigue", "morale", "funds"})) {
-                            checker.fail(id, ep + ".target", "未知效果类型");
-                            continue;
-                        }
-                        if (effect.value == 0) checker.fail(id, ep + ".value", "value 不能为 0");
-                        if (!known_stage(effect.stage)) checker.fail(id, ep + ".stage", "未知阶段");
-                        if (!effect.stage.empty() && effect.scope != "stage") {
-                            checker.fail(id, ep + ".stage", "只有 scope=stage 才能写 stage");
-                        }
-                        if (!effect.stage.empty() && !stages.empty() &&
-                            std::find(stages.begin(), stages.end(), effect.stage) == stages.end()) {
-                            checker.fail(id, ep + ".stage", "效果阶段不在卡片适用阶段内");
-                        }
-                        if ((effect.target == "fatigue" || effect.target == "morale" || effect.target == "funds") &&
-                            effect.scope != "instant") {
-                            checker.fail(id, ep + ".scope", effect.target + " 只能即时结算");
-                        }
-                        if (effect.target == "funds" && effect.value > 0) {
-                            checker.fail(id, ep + ".value", "事件收入分类未定：funds 只能为负");
-                        }
-                        if (effect.target == "funds" && effect.value < -2000000) {
-                            checker.fail(id, ep + ".value", "单次扣款不能超过 2,000,000");
-                        }
-                        option.effects.push_back(effect);
-                    }
-                }
-            }
-            options.push_back(std::move(option));
-        }
-    }
+    std::vector<OptionSpec> options = parse_options(raw, "options", id, "options", checker, stages);
 
     const bool has_abandon = std::any_of(options.begin(), options.end(),
                                          [](const OptionSpec& option) { return option.kind == "abandon"; });
@@ -256,6 +306,7 @@ bool parse_card(const Json& raw, Checker& checker, std::set<std::string>& ids, E
                     text_field(raw, "description"),
                     text_field(raw, "foreshadow"),
                     options};
+    parse_escalation(raw, id, checker, stages, out);
     return !id.empty();
 }
 
@@ -430,6 +481,7 @@ PendingEvent build_instance(const EventSpec& spec, const std::string& work_id, i
     event.triggered_week = week;
     event.cooldown_weeks = spec.cooldown_weeks;
     event.once_per_project = spec.once_per_project;
+    event.timeout_option_id = spec.timeout_option_id;
     if (spec.expires_weeks > 0) event.expires_week = week + spec.expires_weeks - 1;
     for (const auto& option : spec.options) {
         EventOptionView view;
@@ -443,6 +495,25 @@ PendingEvent build_instance(const EventSpec& spec, const std::string& work_id, i
             view.effects.push_back(EffectView{effect.scope, effect.target, effect.stage, effect.value});
         }
         event.options.push_back(std::move(view));
+    }
+    if (spec.escalation.has_value()) {
+        EscalationView snapshot;
+        snapshot.description = spec.escalation->description;
+        snapshot.expires_weeks = spec.escalation->expires_weeks;
+        snapshot.timeout_option_id = spec.escalation->timeout_option_id;
+        for (const auto& option : spec.escalation->options) {
+            EventOptionView view;
+            view.id = option.id;
+            view.label = option.label;
+            view.kind = option.kind;
+            view.risk_hint = option.risk_hint;
+            view.cost = option.cost;
+            for (const auto& effect : option.effects) {
+                view.effects.push_back(EffectView{effect.scope, effect.target, effect.stage, effect.value});
+            }
+            snapshot.options.push_back(std::move(view));
+        }
+        event.escalation = std::move(snapshot);
     }
     return event;
 }

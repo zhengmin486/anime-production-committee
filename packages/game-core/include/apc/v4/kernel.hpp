@@ -66,6 +66,8 @@ std::vector<ItemCandidate> order_candidates(const Project& work);
 std::vector<ItemAssignment> allocate(const Project& work, const std::vector<const Staff*>& staff, int team_permille = 1000);
 
 // ---- 产出与质量 ----
+inline constexpr int kQualityMax = 105;
+
 struct ProductionResult {
     int points = 0;                                  // 实际写入工作项的点数
     int quality_gain = 0;                            // 本次质量变化（六维之和，可为负）
@@ -98,6 +100,10 @@ ProductionResult apply_production(WorkItem& item, const Staff& staff, int points
 int apply_outsourced_quality(WorkItem& item, int supplier_quality, int points, std::uint32_t seed, int week,
                              const std::string& stage_key, const std::string& contract_id,
                              const std::array<int, kDimensionCount>& caps);
+
+void adjust_quality(Project& work, const std::string& stage_key, int delta);
+int add_work_points(Project& work, const std::string& stage_key, int points);
+void adjust_staff_condition(Staff& staff, int fatigue_delta, int morale_delta);
 
 // ---- 磨合 ----
 bool is_supervisor(const std::string& role);

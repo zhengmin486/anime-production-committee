@@ -185,16 +185,6 @@
       "field": "facilities",
       "path": "state.company",
       "ref": "§3.1 / §14.7 阶段2 / §14.9"
-    },
-    {
-      "field": "episode_id",
-      "path": "state.events.pending[]",
-      "ref": "§3.8 / D-09"
-    },
-    {
-      "field": "escalation",
-      "path": "state.events.pending[]",
-      "ref": "§3.8 / D-09"
     }
   ],
   "future_contract": {
@@ -490,6 +480,86 @@
         "type": "publisher"
       }
     ],
+    "state.suppliers": [
+      {
+        "capacity_per_week": 600,
+        "id": "supplier_genga",
+        "name": "东云作画",
+        "price_per_unit": 4200,
+        "quality": 72,
+        "reliability": 90,
+        "speed": 30,
+        "specialties": [
+          "drawing"
+        ],
+        "unlocked_week": 0
+      },
+      {
+        "capacity_per_week": 500,
+        "id": "supplier_genga_sub",
+        "name": "三河作画",
+        "price_per_unit": 3600,
+        "quality": 62,
+        "reliability": 80,
+        "speed": 25,
+        "specialties": [
+          "drawing"
+        ],
+        "unlocked_week": 0
+      },
+      {
+        "capacity_per_week": 700,
+        "id": "supplier_douga",
+        "name": "白鲸中割",
+        "price_per_unit": 3200,
+        "quality": 58,
+        "reliability": 75,
+        "speed": 35,
+        "specialties": [
+          "animation"
+        ],
+        "unlocked_week": 0
+      },
+      {
+        "capacity_per_week": 300,
+        "id": "supplier_sound",
+        "name": "音匠 Studio",
+        "price_per_unit": 4600,
+        "quality": 75,
+        "reliability": 92,
+        "speed": 40,
+        "specialties": [
+          "postproduction"
+        ],
+        "unlocked_week": 0
+      },
+      {
+        "capacity_per_week": 200,
+        "id": "supplier_edit",
+        "name": "剪辑工房",
+        "price_per_unit": 3800,
+        "quality": 68,
+        "reliability": 85,
+        "speed": 50,
+        "specialties": [
+          "direction"
+        ],
+        "unlocked_week": 8
+      },
+      {
+        "capacity_per_week": 450,
+        "id": "supplier_douga_hi",
+        "name": "御影动画",
+        "price_per_unit": 4000,
+        "quality": 70,
+        "reliability": 88,
+        "speed": 30,
+        "specialties": [
+          "animation"
+        ],
+        "unlocked_week": 16
+      }
+    ],
     "state.works": []
   },
   "error_codes": {
@@ -524,8 +594,7 @@
       "INVALID_PHASE",
       "INVALID_STATE",
       "MODE_NOT_ALLOWED",
-      "NOT_FOUND",
-      "NOT_IMPLEMENTED"
+      "NOT_FOUND"
     ]
   },
   "invariants": {
@@ -597,6 +666,27 @@
     ]
   },
   "optional_paths": {
+    "state.events.pending[].escalation": [
+      "description",
+      "expires_weeks",
+      "options",
+      "timeout_option_id",
+      "triggered_week"
+    ],
+    "state.events.pending[].escalation.options[]": [
+      "cost",
+      "effects",
+      "id",
+      "kind",
+      "label",
+      "risk_hint"
+    ],
+    "state.events.pending[].escalation.options[].effects[]": [
+      "scope",
+      "stage",
+      "target",
+      "value"
+    ],
     "state.staff[].temporary_contract": [
       "end_week",
       "start_week",
@@ -952,9 +1042,14 @@
     ],
     "report.outsourcing[]": [
       "contract_id",
+      "id",
       "item_id",
       "kind",
-      "points"
+      "points",
+      "result",
+      "status",
+      "weekly_cap",
+      "work_done"
     ],
     "report.staff[]": [
       "fatigue",
@@ -1023,11 +1118,14 @@
     ],
     "state.events.pending[]": [
       "cooldown_weeks",
+      "escalated",
+      "escalation",
       "event_id",
       "expires_week",
       "name",
       "once_per_project",
       "options",
+      "timeout_option_id",
       "triggered_week",
       "viewed",
       "work_id"
@@ -1127,7 +1225,6 @@
       "name",
       "offer_source_type",
       "origin",
-      "previous_work_id",
       "required_works",
       "scale",
       "source",
@@ -1239,6 +1336,11 @@
       "planning",
       "postproduction"
     ],
+    "state.staff[].temporary_contract": [
+      "end_week",
+      "start_week",
+      "work_id"
+    ],
     "state.suppliers[]": [
       "capacity_per_week",
       "id",
@@ -1254,6 +1356,7 @@
       "channels",
       "committee_id",
       "common",
+      "contributor_snapshots",
       "deadline_week",
       "delivery",
       "episodes",
@@ -1272,6 +1375,11 @@
     "state.works[].common": [
       "id",
       "items"
+    ],
+    "state.works[].contributor_snapshots[]": [
+      "id",
+      "name",
+      "role"
     ],
     "state.works[].common.items[]": [
       "ability",
@@ -1537,6 +1645,13 @@
     "set_work_plan": [
       "state"
     ],
+    "sign_outsourcing": [
+      "contract_id",
+      "due_week",
+      "fee_total",
+      "state",
+      "weekly_cap"
+    ],
     "start_work": [
       "committee_id",
       "state",
@@ -1556,15 +1671,12 @@
       "state"
     ],
     "hire_temporary": [
+      "signing_fee",
       "staff_id",
-      "state"
+      "state",
+      "weekly_salary"
     ],
     "dismiss_staff": [
-      "state"
-    ],
-    "lock_offer": [
-      "deposit_paid",
-      "offer_id",
       "state"
     ]
   },
@@ -1574,6 +1686,11 @@
     "state.archive.works",
     "state.archive.series",
     "state.archive.company_result",
+    "state.archive.works[].outsourcing_summary",
+    "state.archive.works[].outsourcing_summary.contracts",
+    "state.archive.works[].outsourcing_summary.failed",
+    "state.archive.works[].outsourcing_summary.points",
+    "state.archive.works[].outsourcing_summary.spend",
     "state.company",
     "state.staff",
     "state.suppliers",
@@ -1582,6 +1699,48 @@
     "state.committees",
     "state.works",
     "state.works[].supervisor_staff_id",
+    "state.works[].contributor_snapshots",
+    "state.works[].contributor_snapshots[].id",
+    "state.works[].contributor_snapshots[].name",
+    "state.works[].contributor_snapshots[].role",
+    "state.works[].common.items[]",
+    "state.works[].common.items[].id",
+    "state.works[].common.items[].key",
+    "state.works[].common.items[].ability",
+    "state.works[].common.items[].work_total",
+    "state.works[].common.items[].work_done",
+    "state.works[].common.items[].deliver_at",
+    "state.works[].common.items[].deps",
+    "state.works[].common.items[].is_gate",
+    "state.works[].common.items[].outsourceable",
+    "state.works[].common.items[].quality_weight_permille",
+    "state.works[].common.items[].core_aesthetic",
+    "state.works[].common.items[].in_house_points",
+    "state.works[].common.items[].in_house_ability_centi_sum",
+    "state.works[].common.items[].external_points",
+    "state.works[].common.items[].external_quality_milli_sum",
+    "state.works[].common.items[].external_min_quality",
+    "state.works[].common.items[].quality",
+    "state.works[].common.items[].contributors",
+    "state.works[].episodes[].stages[].items[]",
+    "state.works[].episodes[].stages[].items[].id",
+    "state.works[].episodes[].stages[].items[].key",
+    "state.works[].episodes[].stages[].items[].ability",
+    "state.works[].episodes[].stages[].items[].work_total",
+    "state.works[].episodes[].stages[].items[].work_done",
+    "state.works[].episodes[].stages[].items[].deliver_at",
+    "state.works[].episodes[].stages[].items[].deps",
+    "state.works[].episodes[].stages[].items[].is_gate",
+    "state.works[].episodes[].stages[].items[].outsourceable",
+    "state.works[].episodes[].stages[].items[].quality_weight_permille",
+    "state.works[].episodes[].stages[].items[].core_aesthetic",
+    "state.works[].episodes[].stages[].items[].in_house_points",
+    "state.works[].episodes[].stages[].items[].in_house_ability_centi_sum",
+    "state.works[].episodes[].stages[].items[].external_points",
+    "state.works[].episodes[].stages[].items[].external_quality_milli_sum",
+    "state.works[].episodes[].stages[].items[].external_min_quality",
+    "state.works[].episodes[].stages[].items[].quality",
+    "state.works[].episodes[].stages[].items[].contributors",
     "state.finance",
     "state.finance.loans",
     "state.finance.solvency",
@@ -1600,6 +1759,7 @@
     "state.events.pending[].viewed",
     "state.recruitment",
     "state.recruitment.pool",
+    "state.recruitment.free_pool",
     "state.recruitment.pity",
     "state.recruitment.last_scout_week",
     "state.recruitment.pity.since_sr",
@@ -1608,8 +1768,71 @@
     "state.recruitment.pool[].expires_week",
     "state.recruitment.pool[].origin",
     "state.recruitment.pool[].staff.signing_fee",
-    "state.recruitment.pool[].staff.weekly_salary"
+    "state.recruitment.pool[].staff.weekly_salary",
+    "state.recruitment.free_pool[].staff",
+    "state.recruitment.free_pool[].expires_week",
+    "state.recruitment.free_pool[].origin",
+    "state.recruitment.free_pool[].staff.signing_fee",
+    "state.recruitment.free_pool[].staff.weekly_salary"
   ],
+  "numeric_ranges": {
+    "quality_dimensions": {
+      "paths": [
+        "state.works[].common.items[].quality",
+        "state.works[].episodes[].stages[].items[].quality",
+        "state.archive.works[].quality.dims",
+        "state.archive.works[].episodes[].quality.dims"
+      ],
+      "type": "integer",
+      "min": 0,
+      "max": 105
+    },
+    "quality_score": {
+      "paths": [
+        "state.archive.works[].quality_score",
+        "report.settlements[].quality_score"
+      ],
+      "type": "integer",
+      "min": 0,
+      "max": 105
+    },
+    "q_final": {
+      "paths": [
+        "report.settlements[].q_final"
+      ],
+      "type": "integer",
+      "min": 0,
+      "max": 105
+    },
+    "q_min": {
+      "paths": [
+        "report.settlements[].q_min"
+      ],
+      "type": "integer",
+      "min": 0,
+      "max": 105
+    },
+    "channel_quality_factor_permille": {
+      "paths": [
+        "state.archive.works[].channel_breakdown[].quality_factor",
+        "report.settlements[].channels[].quality_factor"
+      ],
+      "type": "integer",
+      "min": 200,
+      "max": 1040,
+      "formula": "clamp(200 + quality_score * 8, 200, 1040)"
+    }
+  },
+  "legacy_save_policy": {
+    "missing_new_required_fields": "reject",
+    "silent_defaults_allowed": false,
+    "required_paths_source": "required_on_parse",
+    "new_required_contract_groups": [
+      "WorkItem outsourceable/quality_weight_permille/core_aesthetic/contribution ledger fields",
+      "Recruitment.free_pool and candidate wrapper fields",
+      "WorkRecord.outsourcing_summary and its four fields"
+    ]
+  },
   "reserved_defaults": {
     "state.finance.loans": [],
     "state.finance.solvency": {
@@ -1628,13 +1851,17 @@
     "future_ledger_categories_allowed": false,
     "arrange_financing_export_allowed": false,
     "abort_work_implemented": true,
-    "bankrupt_negative_balance_allowed": true
+    "bankrupt_negative_balance_allowed": true,
+    "strict_new_required_field_decode_implemented": true,
+    "quality_score_105_and_factor_1040_implemented": true
   },
   "vendor_contract": {
     "status_validation_implemented": true,
-    "sign_outsourcing_implemented": false,
+    "sign_outsourcing_implemented": true,
     "weekly_delivery_implemented": true,
-    "fee_settlement_implemented": false,
+    "fee_settlement_implemented": true,
+    "quality_contribution_implemented": true,
+    "outsourcing_summary_implemented": true,
     "reliability_failure_implemented": true,
     "capacity_invariant": "sum(active weekly_cap by supplier_id) <= capacity_per_week",
     "delivery_invariant": "sum(work_done by item_id across contracts) <= work_item.work_total"

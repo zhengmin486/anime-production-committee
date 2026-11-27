@@ -13,7 +13,6 @@ constexpr int kSupervisorSwitchLoss = 100;   // 监督换项目：团队级扣 1
 constexpr int kQualityApproach = 300;        // 质量评级向本周样本靠拢 30%
 constexpr int kCarryOverPermille = 600;      // 质量传递上限：依赖质量的 60%
 constexpr int kCarryOverOffset = 40;         // 质量传递上限：+40
-constexpr int kQualityMax = 105;             // v0.5：质量分上限（展示分仍截顶 100）
 
 int clamp(int value, int low, int high) { return std::max(low, std::min(high, value)); }
 
@@ -322,6 +321,51 @@ int apply_outsourced_quality(WorkItem& item, int supplier_quality, int points, s
     return after - before;
 }
 
+void adjust_quality(Project& work, const std::string& stage_key, int delta) {
+    const auto adjust_item = [delta](WorkItem& item) {
+        for (auto& value : item.quality.dims) value = clamp(value + delta, 0, kQualityMax);
+    };
+    if (stage_key.empty()) {
+        for (auto& item : work.common.items) adjust_item(item);
+    }
+    for (auto& episode : work.episodes) {
+        for (auto& stage : episode.stages) {
+            if (!stage_key.empty() && stage.key != stage_key) continue;
+            for (auto& item : stage.items) adjust_item(item);
+        }
+    }
+}
+
+int add_work_points(Project& work, const std::string& stage_key, int points) {
+    if (points <= 0) return 0;
+    std::vector<WorkItem*> items;
+    for (auto& episode : work.episodes) {
+        for (auto& stage : episode.stages) {
+            if (!stage_key.empty() && stage.key != stage_key) continue;
+            for (auto& item : stage.items) {
+                if (item.is_gate || item.work_done >= item.work_total) continue;
+                items.push_back(&item);
+            }
+        }
+    }
+    std::sort(items.begin(), items.end(), [](const WorkItem* a, const WorkItem* b) { return a->id < b->id; });
+    int left = points;
+    int applied = 0;
+    for (WorkItem* item : items) {
+        if (left <= 0) break;
+        const int take = std::min(left, item->work_total - item->work_done);
+        item->work_done += take;
+        left -= take;
+        applied += take;
+    }
+    return applied;
+}
+
+void adjust_staff_condition(Staff& staff, int fatigue_delta, int morale_delta) {
+    staff.fatigue = clamp(staff.fatigue + fatigue_delta, 0, 100);
+    staff.morale = clamp(staff.morale + morale_delta, 0, 100);
+}
+
 ProductionResult apply_production(WorkItem& item, const Staff& staff, int points, bool hands_over,
                                   std::uint32_t seed, int week, const std::string& stage_key,
                                   const std::array<int, kDimensionCount>& caps) {
@@ -566,9 +610,10 @@ int final_quality_milli(const Project& work, const Staff* supervisor) {
     }
     const std::int64_t common_avg = common_weight > 0 ? common_weighted / common_weight : 0;
     const std::int64_t episode_avg = episode_weight > 0 ? episode_weighted / episode_weight : 0;
-    const std::int64_t layer_weight = common_weight + episode_weight;
+    const std::int64_t episode_layer_weight = work.episodes.empty() ? 0 : episode_weight / work.episodes.size();
+    const std::int64_t layer_weight = common_weight + episode_layer_weight;
     const std::int64_t base_milli =
-        layer_weight > 0 ? (common_avg * common_weight + episode_avg * episode_weight) / layer_weight : 0;
+        layer_weight > 0 ? (common_avg * common_weight + episode_avg * episode_layer_weight) / layer_weight : 0;
     const std::int64_t bonus_milli = bonus_weight > 0 ? bonus_num / bonus_weight : 0;
     const std::int64_t total = base_milli + bonus_milli;
     return static_cast<int>(std::clamp<std::int64_t>(total, 0, 105000));

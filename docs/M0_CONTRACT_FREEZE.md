@@ -63,7 +63,7 @@ GameState {
 SaveRecord { version: 4, savedAt: ISO8601, rules_version: string, state: GameState }
 ```
 
-**不存在的字段**（v3 遗产，禁止复活）：`phase`（全局经营阶段）、`project`（单数）、`pending_event`（顶层单槽）、`preview`（派生）、`last_project_id`、`company.finance`、`project.finance`、`StageResult`。
+**不存在的字段**（v3 遗产，禁止复活）：`phase`（全局经营阶段）、`project`（单数）、`pending_event`（顶层单槽）、`preview`（派生）、`last_project_id`、`company.finance`、`project.finance`、`StageResult`、`OfferSnapshot.previous_work_id`。V4 系列关系只使用 `ip_id` 来源链，不按标题猜测续作。
 
 **派生值不入存档**：`risk`、`preview`、读模型（`company_overview` 等）、`week_receipt`、`target_effective`。加载时由核心重算。
 
@@ -538,7 +538,7 @@ v3 的单项目、五阶段、全局 phase、单事件槽、双份财务汇总�
 - 命令 17（`advance_week`）的推进守卫只统计 `viewed=false` 的条目，`INVALID_PHASE` 消息给出未查看条数；已查看未处理事件原样保留在 `events.pending[]` 并可随周推进继续存在。
 - `events.pending[]` 每条必须带 `work_id/event_id/triggered_week/viewed`（INV-23）。`viewed` 缺失按非法输入拒绝，不静默当作未查看，避免旧形状存档被默认值放行推进。
 - 同一事件选项的 `cost` 与 `funds` 效果在同周产生多条流水时，账本条目 id 必须互不相同（INV-02）；事件强制支出以当前余额封顶，不得让现金转负。
-- 本条登记已实现语义：内容卡 `expires_weeks` 允许 0..8；非 0 卡必须为负面事件并带 `abandon`，运行时以该冻结快照作为默认消极/保守分支。触发周计入期限，`expires_week = triggered_week + expires_weeks - 1`；仅已查看事件在阶段 7 到期处理，自动支出按当前现金封顶，只移除目标 `(work_id,event_id)`。§14.11 的升级规则已由 DEC-EVENT-003 冻结：首次超时执行轻罚并升级一次，沿用原事件身份替换 pending，标记已升级，升级后期限固定2周；二次超时自动执行升级事件预设的强制处理/硬罚并移除 pending，不采用双倍处罚。内容字段、PendingEvent快照和存档契约仍待 #13/#53/#49 对齐并实现；在运行时实现合入前，非空升级配置仍由当前校验器拒绝加载。
+- 本条登记已实现语义：内容卡 `expires_weeks` 允许 0..8；非 0 卡必须为负面事件并带 `abandon`，运行时以该冻结快照作为默认消极/保守分支。触发周计入期限，`expires_week = triggered_week + expires_weeks - 1`；仅已查看事件在阶段 7 到期处理，自动支出按当前现金封顶，只移除目标 `(work_id,event_id)`。§14.11 的升级规则已由 DEC-EVENT-003 冻结：首次超时执行轻罚并升级一次，沿用原事件身份替换 pending，标记已升级，升级后期限固定2周；二次超时自动执行升级事件预设的强制处理/硬罚并移除 pending，不采用双倍处罚。内容字段与 PendingEvent 快照已按 #13/#53/#49 对齐并落地：`timeout_option_id` / `escalated` / `escalation` 三字段随 pending 持久化，旧存档缺字段按「无升级」处理；合法升级配置在加载期放行，非法配置整卡拒绝。运行时语义与对账见 `docs/EVENT_ESCALATION.md`。
 
 ### 14.13 Q3 招聘池与 Q4 定金锁定的字段契约（2026-11-25，依 #53 裁决）
 
@@ -570,6 +570,8 @@ PoolCandidate {
 - **2026-11-27 落地形态**：`recruitment.free_pool[]` 保存回池候选，条目复用 `PoolCandidate` 形状，其中 `expires_week` 在该池内表示**冷却结束周**（常规候选在展示槽上仍必须为 `null`，INV-01 不变）。v0.5 用"每周轮换 2 个展示槽"作为刷新节奏而非硬 2 周窗口；被换下者入池冷却 2 周，冷却结束后优先同身份重返，池空才生成新人。展示槽数、轮换数、冷却周数与自由池上限均为 `[PLACEHOLDER]`。
 - Scout 每周至多一次：以 `last_scout_week ≠ company.week` 判定，不引入额外计数器字段；`last_scout_week` 只由 `scout` 命令写入。
 - 随机坐标（沿用坐标式随机，无计数器入档）：候选生成 `draw(seed, week, "staff/recruit", purpose, index)`；常规轮换 `"staff/recruit_regular"`；保底抽取结果由 pity 计数参与 purpose/index 派生，具体映射由实现提出并经测试固定。
+
+> **2026-11-27 实现边界与待裁决冲突：** 命令 8 `hire_temporary`、INV-10、三字段临时合同、签约费与周薪已经实现，但当前生成器只产生 core 候选。本节要求 `hire_temporary` 从 `recruitment.pool` 解包候选，而同节及 DEC-MARKET-001 又规定项目临时员工不进入招聘候选池；这两条尚无独立临时供给契约。正常临时招聘来源保持阻塞，不得为通过测试而把临时候选塞入招聘池。命令实现与输入夹具只证明合同/归属/计薪链路，不证明正常来源已开放。
 
 #### 14.13.2 Offer 生命周期字段（Market 域）
 
@@ -644,6 +646,8 @@ v3 的单项目、五阶段、全局 phase、单事件槽、双份财务汇总�
 - 非BD渠道毛收入扣除适用前置商业成本与渠道费用后形成净商业池，再按投资比例分配；通用渠道抽成与逐渠道代理费不得重复计取同一费用。
 - BD/DVD继续按 DEC-BD-001 独立处理，不重复扣作委员会前置成本。
 - 具体字段、支付时点、Finance/Archive映射和完整对账仍待实现。
+
+> **2026-11-27 实现边界：** 当前两份额净池已实现最大余数法，以 `company.id/committee_id` 字典序打破并列；公司所得再按非 BD 渠道净额权重与上限拆分，逐渠道不超过净额且合计精确回到公司份额，BD 所得独立保留。`fixed_prelaunch_cost` 与 `channel_overhead_bps` 的输入、支付和财务映射仍未实现，不得把整数分账实现表述为完整前置成本结算。
 
 #### 14.14.3 企划市场槽位边界
 
@@ -721,6 +725,8 @@ v3 的单项目、五阶段、全局 phase、单事件槽、双份财务汇总�
 - 每周按 `(week, contract.id, "outsource_tick")` 生成确定性 roll。roll<reliability 正常交付；`r<=roll<1-0.2*(1-r)` 为当周0交付的常规延误；其余为质量返工，当周0交付并将 work_done 倒扣 `max(1,weekly_cap//4)`，结果不得低于0。
 - 签约即付清；延误、返工、失败均无退款或额外扣款。每周先处理随机结果和 work_done，再检查完成；若本周结算后的已结算周 `week >= due_week` 且仍未完成，转 failed 并释放 weekly_cap。剩余缺口由玩家内部补齐或重新签约。
 
+> **2026-11-27 实现边界：** 命令 9、INV-19/20、四供应商目录、签约预付、共享容量预留、周交付、延误/返工、终态与项目终止释放均已实现。外包与临时合同有效结束周统一为 `min(project.deadline_week,520)`，延期命令同步临时合同，不允许合同越过公司硬终局。供应商 `quality` 对 §14.16 中 `Q_base/Q_ext_cap/Q_item` 的质量贡献仍未实现；目录数值与经济平衡也未验收。
+
 #### 14.15.2 六渠道收入模型与成本口径
 
 - 六渠道统一使用 `ChannelGross=min(Cap_c, BasePool(type,scale)*w_c*TV_Mult_c*QualityFactor*RepFactor*HeatFactor*GenreWeight_c)`。渠道封顶以 `ChannelBase_c=BasePool*w_c` 为基准，`Cap_c=ChannelBase_c*CapMultiplier_c`。
@@ -729,6 +735,8 @@ v3 的单项目、五阶段、全局 phase、单事件槽、双份财务汇总�
 - RepFactor T0 0.90至T7 1.25；HeatFactor 0.75–1.45；GenreWeight 0.80–1.30。具体曲线与题材矩阵待标定。
 - fixed_prelaunch_cost 默认制作费10%，按类型×规模可固定覆盖；项目交付通过进入发行准备时一次性扣除，取消/中止不退。Finance现金扣款与净商业池成本扣除是同一笔成本的两个视角，不得重复扣款。
 - 电视播出、BD/DVD渠道抽成均0 bps；BD/DVD毛收入50%直接归制作公司。外部代理费率替代对应渠道 channel_overhead_bps，二者互斥。
+
+> **2026-11-27 实现边界：** 自然补位企划已提供六个合法渠道潜力，`channels_baseline=["bd_dvd"]`，并允许承制/委员会模式；潜力比例 2000/1200/1000/500/500/400‰ 沿用原创草稿占位基线，待 #59/M7 标定，不代表六渠道收入模型或经济平衡已完成。完整六渠道参数曲线、`fixed_prelaunch_cost`、通用渠道抽成及财务映射仍按上节边界保留为实现缺口。
 
 #### 14.15.3 特殊商业机会与设施阶梯
 

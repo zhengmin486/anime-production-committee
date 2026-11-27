@@ -61,6 +61,8 @@ export function generateOffer(seed, week, index, opts = {}) {
     : params.deposit_rate_tv_small_permille
   const depositAmount = Math.floor(budget / 1000) * depositRate + Math.floor((budget % 1000) * depositRate / 1000)
   const minReputation = Math.min(subBelow(7, 120), opts.reputationCap ?? 120)
+  const commercialPotential = subBelow(6, 101)
+  const potential = (permille) => Math.floor(budget * permille / 1000)
 
   return {
     id: `offer_${PURPOSE.offer_gen.toString(16)}_${week}_${index}`,
@@ -72,14 +74,20 @@ export function generateOffer(seed, week, index, opts = {}) {
     duration_weeks: params.tv_small_weeks,
     target_quality: params.tv_small_target_quality,
     audience_base: 1000 + subBelow(5, 9000),
-    commercial_potential: subBelow(6, 101),
-    channel_potentials: {},
-    channels_baseline: ['bd'],
+    commercial_potential: commercialPotential,
+    channel_potentials: {
+      domestic_streaming: potential(2000),
+      overseas: potential(1200),
+      merchandise: potential(1000),
+      music: potential(500),
+      tv: potential(500),
+      bd_dvd: potential(400),
+    },
+    channels_baseline: ['bd_dvd'],
     allowed_modes: ['contract', 'committee'],
-    committee_candidates: [],
+    committee_candidates: ['partner_tv', 'partner_stream', 'partner_pub'],
     min_reputation: minReputation,
     required_works: [],
-    previous_work_id: null,
     blueprint_id: 'tv_standard',
     episode_count: episodeCount,
     workload_scale_permille: 1000,

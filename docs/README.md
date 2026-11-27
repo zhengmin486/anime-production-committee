@@ -42,7 +42,8 @@
 
 ## 复盘与协作约定
 
-- [开放式增量开发与提前实现原则](OPEN_INCREMENTAL_DEVELOPMENT_POLICY.md)：明确首版范围是最低交付目标而非功能禁区，以及无冲突新增能力的默认接纳边界。
+- [开放式增量开发与提前实现原则](OPEN_INCREMENTAL_DEVELOPMENT_POLICY.md)：明确首版范围是最低交付目标而非功能禁区，并规定未冻结细节的默认决策权、临时假设和局部阻塞。
+- [工程变更治理](ENGINEERING_CHANGE_GOVERNANCE.md)：区分内部修补、兼容扩展、契约修订与破坏性重构，明确何时需要升级裁决。
 - [2026-11 重构复盘与协作约定](REBUILD_RETROSPECTIVE_AND_WORKING_RULES_2026-11-25.md)：记录本次架构纠偏暴露的问题、分支迁移原则、智能体协作要求和 PR 合并检查。
 
 ## 研究资料与外部证据
@@ -106,7 +107,7 @@
 | 工程架构与进度 | [ARCHITECTURE](ARCHITECTURE.md)、[PROGRESS](PROGRESS.md) |
 | 迁移与历史差距 | [V1_GAP_REVIEW](V1_GAP_REVIEW.md)、[REFERENCE_TO_V3_GAP_REVIEW](REFERENCE_TO_V3_GAP_REVIEW.md) |
 | 经济实验 | [经济模拟报告 V0.2](ECONOMIC_SIMULATION_REPORT_V0.2.md)、[V0.3](ECONOMIC_SIMULATION_REPORT_V0.3.md)、[V0.4](ECONOMIC_SIMULATION_REPORT_V0.4.md)、[V0.5](ECONOMIC_SIMULATION_REPORT_V0.5.md)、[V0.6](ECONOMIC_SIMULATION_REPORT_V0.6.md)、[V1 平衡提案](V1_BALANCE_PROPOSAL.md) |
-| 事件系统 | [事件模块设计](EVENT_MODULE_DESIGN.md)、[事件内容指南](EVENT_CONTENT_GUIDE.md)、[终局 pending 结清（#120）](EVENT_TERMINAL_SETTLEMENT.md) |
+| 事件系统 | [事件模块设计](EVENT_MODULE_DESIGN.md)、[事件内容指南](EVENT_CONTENT_GUIDE.md)、[终局 pending 结清（#120）](EVENT_TERMINAL_SETTLEMENT.md)、[限时升级与二次超时（#121）](EVENT_ESCALATION.md)、[应急外包编排准备（#122）](EVENT_VENDOR_ORCHESTRATION.md) |
 | 其他工程专项 | [核心校验器重构设计](CORE_VALIDATOR_REFACTOR_DESIGN.md)、[M2 集成检查表](M2_INTEGRATION_CHECKLIST.md)、[M2 集成审查](M2_INTEGRATION_REVIEW.md) |
 | 前端信息架构与原型 | [WP10 原型交付说明](FRONTEND_WP10_PROTOTYPE.md) |
 
