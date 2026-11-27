@@ -1,0 +1,143 @@
+{
+  "schema_version": 1,
+  "card_id": "character_card_staff_ning_shiqing",
+  "status": "content_proposal_for_review",
+  "source": {
+    "space": "共享资料库",
+    "document": "宁世清_定稿",
+    "author": "笑歌自若",
+    "url": "https://www.workbuddy.cn/space/d/SZRSd6BfIXphkSYtNjwHf3"
+  },
+  "staff": {
+    "id": "staff_ning_shiqing",
+    "name": "宁世清",
+    "role": "监督",
+    "employment": "core",
+    "abilities": {
+      "planning": 72,
+      "direction": 76,
+      "drawing": 42,
+      "animation": 40,
+      "management": 45,
+      "postproduction": 38
+    },
+    "experience": {
+      "planning": 0,
+      "direction": 0,
+      "drawing": 0,
+      "animation": 0,
+      "management": 0,
+      "postproduction": 0
+    },
+    "potential": {
+      "planning": 84,
+      "direction": 88,
+      "drawing": 55,
+      "animation": 52,
+      "management": 62,
+      "postproduction": 50
+    },
+    "revealed_potential": {
+      "planning": false,
+      "direction": false,
+      "drawing": false,
+      "animation": false,
+      "management": false,
+      "postproduction": false
+    },
+    "talent_type": "generalist",
+    "weekly_salary": null,
+    "signing_fee": null,
+    "fatigue": 0,
+    "morale": 60,
+    "departure_warning": false,
+    "assignment_work_id": null,
+    "last_participation": null,
+    "temporary_contract": null
+  },
+  "contract_injection_ready": false,
+  "pending_fields": [
+    {
+      "field": "staff.weekly_salary",
+      "current": null,
+      "reason": "不采用 20000 + 主能力×300 的占位推导（原结果 42800）。需先确定能力综合值 S 的口径，再套用数值目录的薪酬曲线统一计算。V4 运行时要求该字段为正整数，补齐前不可注入。"
+    },
+    {
+      "field": "staff.signing_fee",
+      "current": null,
+      "reason": "原 signing_fee = 能力总和×1000 同属占位推导（原结果 313000），与薪酬曲线尚未统一，不视为正式数值。V4 运行时要求该字段为整数，补齐前不可注入。"
+    },
+    {
+      "field": "staff.talent_type",
+      "current": "generalist",
+      "reason": "保留内容提案原始值。generalist（多维均衡）不等于 steady_floor（稳定发挥），V4 当前枚举不含 generalist；不为通过 Schema 检查强行映射，等系统负责人决定新增枚举或另行解释。"
+    }
+  ],
+  "character_content": {
+    "age": 36,
+    "gender": "女",
+    "one_line": "能把片子做完的监督；握得住完成度，握不住求人和钱。",
+    "bio": "国立传媒大学动画艺术学本硕博连读，提前两年毕业并留校任教。因母亲治疗费用兼职接动画监督，后进入 AC 社任监督，作品质量与观众评价均高；因高层亲属排挤离开。对手接手高人气漫画改编时魔改角色造成重大损失，AC 社回请被拒。现按项目接活，但接受不干预创作判断的稳定核心合同。擅长全流程判断、分镜演出、质量把关与危机项目兜底。",
+    "personality": [
+      "说话短，先给结论不解释；开会不抢话，轮到她只说“这里不对。重做。”",
+      "审片时用食指关节敲桌面，敲第三下才开口",
+      "开会前把袖口卷到小臂同一高度；随身带旧铁皮药盒，放红笔、U 盘和折小的缴费单"
+    ],
+    "quote": "我能把片子做完。别让我求人。",
+    "visual": "36 岁女性，黑发低束，细框眼镜，深灰西装外套洗得发白；冷灰主色，一点红。标志小物件为旧铁皮药盒与卷起的袖口。头像气质疲惫，但眼神不躲。"
+  },
+  "content_proposals": {
+    "ability_qualitative": {
+      "planning": "强：动画艺术学博士，长期研究类型、受众与改编边界，能判断原作可改与不可碰的边界",
+      "direction": "强：AC 社监督经历，分镜与整集节奏都实际做过，作品质量高",
+      "drawing": "中：理论覆盖原画与关键帧，能改构图与表演，不是速度型原画",
+      "animation": "中：懂运动规律与中间帧衔接，做过检查，不靠她赶中间帧",
+      "management": "中：现场能压进度、统筹质量，不擅长跨部门人情协调",
+      "postproduction": "中：摄影合成理论熟，能提意见，现场调色与特效经验少"
+    },
+    "talent_type_source": "generalist 均衡",
+    "talent_type_mapping": "不映射。保留内容提案原始值 generalist（多维能力均衡）；V4 当前天赋枚举没有该值，需系统负责人决定是否新增枚举，不得为通过校验强行替换为 steady_floor（稳定发挥）。",
+    "potential_clues": [
+      "若长期在多项目并行的公司工作，理论判断可能磨成更快的现场决策，往“救火型监督”走。多项目规则以系统最终确认为准。",
+      "在人员严重不足的项目里可能展现跨岗位兜底倾向，但更容易透支；具体表现由系统定。"
+    ],
+    "traits": [
+      {
+        "id": "multi_role_backup",
+        "name": "多岗位协力兜底",
+        "proposal": "演出、监督相关工作项可作为协力参与；问题发现倾向与完成度高于同职业平均，每多兼一项疲劳累积更快。",
+        "status": "content_proposal"
+      },
+      {
+        "id": "quality_gatekeeper",
+        "name": "质量守门",
+        "proposal": "关键检查类工作项更容易提前发现主要问题，减少后续返工倾向；代价是这类工作项推进偏慢。",
+        "status": "content_proposal"
+      }
+    ],
+    "integration_gaps": [
+      "V4 Staff 契约没有 clues / traits / 简历文本字段；本文件把这些内容放在 content_proposals 下，不注入存档，避免破坏严格字段校验。",
+      "特性效果与幅度、潜力线索的揭示时机由系统负责人决定，当前仅为内容提案。",
+      "原卡中 AC 社内部恩怨已压缩为一句话背景，不引入个人剧情、固定关系或复杂人际系统。",
+      "潜力是成长系统的上限/输入，不是入职即兑现的第二套能力；当前能力仍为 72/76/42/40/45/38，潜力字段不参与入职能力计算。"
+    ]
+  },
+  "tuning": {
+    "status": "[PLACEHOLDER] 待系统负责人标定",
+    "ability_key_policy": "存档键固定使用 V4 六字段 planning/direction/drawing/animation/management/postproduction；中文能力名仅作界面显示，不作为存档键。",
+    "ability_basis": "保留本稿候选值 72/76/42/40/45/38，不再改回上一版 82/88/62 等数值。原‘强→72/76，中→38~45’是人为映射，不是职业能力分布标定结果，仅作为候选保留。",
+    "potential_basis": "84/88/55/52/62/50 只表示成长方向合理。潜力遵循成长系统定义：它是成长上限/输入，不是第二套当前能力，员工入职时不会拥有潜力对应的能力；revealed_potential 全部保持 false。",
+    "salary_status": "待计算。不采用 20000 + 主能力×300 的占位推导，也不把推导出的 42800 或能力总和×1000 得到的 313000 当作正式数值。需先统一能力综合值 S 的口径，再按数值目录薪酬曲线计算；两个薪资字段暂置 null，contract_injection_ready=false。",
+    "salary_curve_pending": {
+      "status": "待标定：确定能力综合值 S 的口径后套用",
+      "formula": [
+        { "range": "30 <= S <= 45", "value": "3 + floor((S-30)/8)" },
+        { "range": "46 <= S <= 69", "value": "5 + floor((S-46)/5)" },
+        { "range": "70 <= S <= 84", "value": "10 + floor((S-70)/2)" },
+        { "range": "85 <= S <= 100", "value": "18 + (S-85)" }
+      ],
+      "unit": "沿用数值目录定义，本卡不另行假定单位"
+    },
+    "initial_state": "经验 0、疲劳 0、士气 60、潜力未揭示、无项目归属；作为招聘候选/新入职初始快照。"
+  }
+}
