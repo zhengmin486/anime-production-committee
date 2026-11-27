@@ -53,7 +53,7 @@ test('候选形状符合 v4 Staff 契约（signing_fee+weekly_salary，无 proje
   assert.deepEqual(Object.keys(staff.potential), ABILITIES)
   assert.deepEqual(Object.keys(staff.revealed_potential), ABILITIES)
   assert.ok(PROFESSIONS.includes(staff.role))
-  assert.ok(staff.weekly_salary > 0)
+  assert.ok(Number.isSafeInteger(staff.weekly_salary) && staff.weekly_salary > 0)
   assert.ok(staff.signing_fee > 0)
   assert.equal('project_fee' in staff, false)
   assert.equal(staff.assignment_work_id, null)
@@ -61,6 +61,10 @@ test('候选形状符合 v4 Staff 契约（signing_fee+weekly_salary，无 proje
   assert.equal(staff.temporary_contract, null)
   const primary = PROFESSION_ABILITY[staff.role]
   const primaryValue = staff.abilities[primary]
+  assert.equal(
+    staff.weekly_salary,
+    DEFAULT_PARAMS.salary_base + primaryValue * DEFAULT_PARAMS.salary_per_primary,
+  )
   assert.ok(primaryValue >= 20 && primaryValue <= 100)
   for (const ability of ABILITIES) {
     assert.ok(staff.abilities[ability] >= 0 && staff.abilities[ability] <= 100)
