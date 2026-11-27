@@ -210,7 +210,8 @@ it('样本数据自证已确认规则：单项目归属、六阶段门槛与推�
 })
 
 it('生产入口只在 ?view=prototype 时进入原型，默认仍是原界面', () => {
-  expect(mainSource).toMatch(/get\('view'\) === 'prototype'/)
+  expect(mainSource).toMatch(/view === 'prototype'/)
+  expect(mainSource).toMatch(/view === 'v4'/)
   expect(mainSource).toMatch(/lazy\(\(\) => import\('\.\/prototype\/PrototypeApp'\)\)/)
   expect(mainSource).toContain('<App />')
 })

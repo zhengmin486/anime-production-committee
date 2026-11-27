@@ -1,17 +1,22 @@
 export const V4_DIMENSIONS = ['story', 'direction', 'drawing', 'animation', 'art', 'sound'] as const
 export const V4_WINDOWS = ['domestic_streaming', 'overseas', 'merchandise', 'music', 'tv', 'bd_dvd'] as const
+export const V4_PARTNERSHIP_CHANNELS = [...V4_WINDOWS, 'publishing'] as const
 export const V4_WORK_COST_CATEGORIES = ['salary', 'production', 'temporary', 'outsourcing', 'events', 'extension', 'distribution', 'penalty', 'development'] as const
 
 export type V4Dimension = typeof V4_DIMENSIONS[number]
 export type V4Window = typeof V4_WINDOWS[number]
+export type V4PartnershipChannel = typeof V4_PARTNERSHIP_CHANNELS[number]
 export type V4WorkCostCategory = typeof V4_WORK_COST_CATEGORIES[number]
 export type V4WorkRating = 'S' | 'A' | 'B' | 'C' | 'D'
 export type V4CompanyEndReason = 'time_limit' | 'bankrupt' | 'voluntary'
 export type V4DeliveryReason = 'completed' | 'deadline' | 'company_closed' | 'aborted'
-export type V4WorkSource = 'publisher' | 'studio' | 'manga' | 'light_novel' | 'game' | 'original'
+export const V4_WORK_SOURCES = ['publisher', 'studio', 'manga', 'light_novel', 'game', 'original', 'market'] as const
+export type V4WorkSource = typeof V4_WORK_SOURCES[number]
 export type V4Scale = 'ova' | 'short' | 'tv' | 'movie'
 export type V4CooperationMode = 'contract' | 'committee'
-export type V4StaffRole = 'director' | 'scriptwriter' | 'animation_director' | 'key_animator' | 'animator' | 'production_manager' | 'postproduction'
+export const V4_STAFF_ROLES = ['director', 'scriptwriter', 'animation_director', 'key_animator', 'animator', 'production_manager', 'postproduction',
+  '作画', '演出', '脚本', '摄影', '监督', '音乐', '声优', '美术'] as const
+export type V4StaffRole = typeof V4_STAFF_ROLES[number]
 
 export interface V4Quality {
   dims: Record<V4Dimension, number>
@@ -164,7 +169,7 @@ const isV4FinanceSummary = (value: unknown): value is V4FinanceSummary => exactF
 
 const isV4EpisodeRecord = (value: unknown): value is V4EpisodeRecord => exactFields(value, ['id', 'quality']) && isText(value.id) && isV4Quality(value.quality)
 const isV4TeamMember = (value: unknown): value is V4TeamMember => exactFields(value, ['id', 'name', 'role'])
-  && isText(value.id) && isText(value.name) && choice(value.role, ['director', 'scriptwriter', 'animation_director', 'key_animator', 'animator', 'production_manager', 'postproduction'])
+  && isText(value.id) && isText(value.name) && choice(value.role, V4_STAFF_ROLES)
 
 export const isV4WorkRecord = (value: unknown): value is V4WorkRecord => {
   if (!exactFields(value, ['id', 'ip_id', 'offer_id', 'name', 'source', 'genre', 'scale', 'mode', 'investment_percent',
@@ -173,7 +178,7 @@ export const isV4WorkRecord = (value: unknown): value is V4WorkRecord => {
     'commercial_revenue', 'bd_gross', 'bd_revenue', 'committee_pool', 'investor_share', 'company_received', 'finance_summary',
     'channel_breakdown', 'episodes', 'team', 'rules_status'])) return false
   if (!isText(value.id) || !nullableText(value.ip_id) || !isText(value.offer_id) || !isText(value.name)
-    || !choice(value.source, ['publisher', 'studio', 'manga', 'light_novel', 'game', 'original']) || !isText(value.genre)
+    || !choice(value.source, V4_WORK_SOURCES) || !isText(value.genre)
     || !choice(value.scale, ['ova', 'short', 'tv', 'movie']) || !choice(value.mode, ['contract', 'committee'])
     || !integer(value.investment_percent, 0, 100) || (value.mode === 'contract' ? value.investment_percent !== 0 : value.investment_percent < 10 || value.investment_percent % 10 !== 0)
     || !week(value.start_week) || !week(value.end_week) || value.end_week < value.start_week
@@ -190,7 +195,7 @@ export const isV4WorkRecord = (value: unknown): value is V4WorkRecord => {
     || !arrayOf(value.episodes, isV4EpisodeRecord) || value.episodes.length === 0
     || !unique(value.episodes.map(({ id }) => id)) || !arrayOf(value.team, isV4TeamMember)
     || !unique(value.team.map(({ id }) => id)) || value.rules_status !== 'placeholder') return false
-  if (value.finance_summary.penalty !== value.penalty_paid) return false
+  if (value.finance_summary.penalty !== value.penalty_paid || value.finance_summary.bd_revenue !== value.bd_revenue) return false
   if (value.end_reason === 'completed' && (value.forced || value.gate_completion_permille !== 1000)) return false
   if (!unique(value.channel_breakdown.map(({ window }) => window))) return false
   if (value.channel_breakdown.reduce((sum, line) => sum + line.revenue, 0) !== value.commercial_revenue) return false
@@ -198,7 +203,7 @@ export const isV4WorkRecord = (value: unknown): value is V4WorkRecord => {
   if (value.channel_breakdown.filter(({ window }) => window === 'bd_dvd').reduce((sum, line) => sum + line.gross, 0) !== value.bd_gross) return false
   if (value.channel_breakdown.filter(({ window }) => window === 'bd_dvd').reduce((sum, line) => sum + line.net, 0) !== value.bd_revenue) return false
   const committeePool = value.channel_breakdown.filter(({ window }) => window !== 'bd_dvd').reduce((sum, line) => sum + line.net, 0)
-  if (committeePool !== value.committee_pool || value.finance_summary.commercial_share !== value.finance_summary.bd_revenue) return false
+  if (committeePool !== value.committee_pool) return false
   if (value.investor_share !== committeePool - (value.finance_summary.commercial_share - value.bd_revenue)) return false
   if (value.finance_summary.commercial_share + value.finance_summary.success_reward !== value.company_received) return false
   return true
