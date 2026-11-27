@@ -680,9 +680,13 @@ v3 的单项目、五阶段、全局 phase、单事件槽、双份财务汇总�
 
 **定点数实现约束**
 
-- 能力与监督能力采用百分之一分精度；质量与奖励采用千分之一分精度；比例采用万分比整数；产能倍率采用千分比整数。
-- 所有中间乘法使用 int64，先乘后除，除法统一向下取整；Q_cap 的 round_half_up 独立实现，不依赖语言默认舍入。
-- C++ Runtime 与 TS Oracle 必须统一精度、乘法顺序、除法顺序和边界处理。能力有效值与监督能力的中间计算保留百分之一精度，不得提前截断平均值。
+- 能力与监督能力采用百分之一分精度（1分=100存储单位）；质量与奖励采用千分之一分精度（1分=1000存储单位）；比例采用万分比（100%=10000）；产能倍率采用千分比。
+- S_eff 等价整数计算：`floor((85*S_primary_centi+3*sum(other5_centi))/100)`；S_sup 两类映射在百分之一分精度下计算并向下取整；不得先截断五项平均值。
+- 质量贡献加权均值：`floor(sum(output_points*quality_milli)/sum(output_points))`。监督修型：`Q_sup_milli=Q_base_milli+floor(35*max(0,S_sup_milli-Q_base_milli)/100)`，其中 `S_sup_milli=S_sup_centi*10`。
+- 外包上限：`Q_ext_cap_milli=Q_ext_min_milli+floor(25*max(0,S_sup_milli-Q_ext_min_milli)/100)+floor((10000-r_ext_bp)*12000/10000)`；`r_ext_bp=floor(10000*external_points/total_points)`。
+- 主责上限按整数分 half-up：`Q_cap_milli=min(100000,1000*floor((60*max(Q_inhouse_milli,S_sup_milli)+40*Q_inhouse_milli+50000)/100000)+8000)`。核心审美奖励：`bonus_milli=floor(5*max(0,min(S_sup_milli,Q_item_milli)-70000)/30)`。
+- 全片基础分：`floor(sum(weight_pct*Q_item_milli)/100)`；核心审美奖励按核心审美权重加权平均后相加。所有中间乘法使用 int64，先乘后除，除法统一向下取整；只有 Q_cap 的整数分舍入使用上述 half-up。
+- C++ Runtime 与 TS Oracle 必须统一精度、乘法顺序、除法顺序和边界处理。
 
 以上为目标规则契约，不代表 Runtime、TS Oracle、全片质量结算或回归测试已经实现/验收。
 
