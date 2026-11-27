@@ -2461,7 +2461,9 @@ SettlementOutcome settle_project(GameState& state, Project& work, const std::str
     // #120：强制终局（破产 / 第 520 周）不能再让扣罚把现金推到负数，否则 INV-25 与
     // §14.7「直接破产终局」互相矛盾，公司会被永久卡在无法关闭的状态。可支付额 = 现有现金 + 本次收入；
     // 超出部分只在回执里记为 penalty_waived，不产生欠款、递延或负现金。
-    // [PLACEHOLDER] 破产终局扣罚封顶口径待 zm 在 #120 裁定；公式本身不变，只加可支付上限。
+    // #120 裁决 B1（2026-11-27）：上限只适用于 bankrupt / time_limit 强制终局清算；
+    // penalty_waived = 因终局可用现金不足而未能收取的部分，不是规则豁免，不改变名义扣罚金额。
+    // voluntary 主动关闭不封顶，现金不足仍原子拒绝；调用方用 forced_terminal 区分两种路径。
     std::int64_t penalty_waived = 0;
     if (forced_terminal && penalty > 0) {
         const std::int64_t payable = state.finance.balance + company_revenue;

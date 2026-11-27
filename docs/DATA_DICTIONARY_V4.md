@@ -383,6 +383,7 @@ report {
 - `funds.costs` 只有 3 个键，与 14 类 category 不对应，登记 D-13。
 - `report` 不是 DA §9.4 的 `WeekReceipt`；后者是前端派生读模型，边界见 D-14。
 - 交付/结清的 `report.settlements[]` 同时记录 `bd_gross`（BD/DVD 毛收入）与 `bd_revenue`（公司 50% 所得）；`commercial_revenue` 为全部开放窗口毛收入，`committee_pool` 为非 BD 净池，`commercial_share + investor_share = committee_pool`。
+- `report.settlements[].penalty_waived`（#120 裁决 B1）：仅在 `bankrupt` / `time_limit` 终局清算中可能出现，等于名义扣罚与实付扣罚之差，语义为「因终局可用现金不足而未能收取的部分」，不是规则豁免、不改变名义扣罚金额；主动 `voluntary` 关闭不封顶、该字段恒为 0（现金不足原子拒绝，无回执）。归档 `archive.works[].finance_summary.penalty` 只记实付，与账本一致。
 - 外部代理按 DEC-COMM-001 使用 450/400/350‰；当前“同类成功合作”从 Archive 中 `end_reason=completed` 且 `channel_breakdown[]` 对应渠道 `net>0` 的已完成作品派生，不新增持久化计数字段。
 - 非整除净池分配的取整顺序与余数归属尚未冻结，出现时原子返回 `NOT_IMPLEMENTED`；通用前置商业成本输入字段亦未冻结，登记 D-16。
 
