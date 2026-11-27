@@ -111,7 +111,7 @@ SaveRecord { version: 4, savedAt: ISO8601, rules_version: string, state: GameSta
 | INV-09 | `assignment_work_id` 为 null 或指向 `producing` 项目 | INVALID_STATE |
 | INV-10 | 同一周一名员工只有一个归属；临时人员归属恒等于合同项目 | INVALID_STATE |
 | INV-11 | `last_participation.week` ∈ {`week-1`, null} | INVALID_STATE |
-| INV-12 | `contributors` 只增不删、无重复、只含参与过该工作项的员工 | INVALID_STATE |
+| INV-12 | `contributors` 只增不删、无重复、只含历史上实际参与过该工作项的员工；历史引用不要求其仍在当前 Staff 名册 | INVALID_STATE |
 | INV-13 | 委员会成员不重复、渠道不重复、`bd` 不挂成员 | INVALID_STATE |
 | INV-14 | contract ⇒ `investment.percent=0 ∧ paid=0 ∧ committee_id=null`；committee ⇒ percent ∈ {10..100} 且 committee_id≠null | INVALID_STATE |
 | INV-15 | `allowed_modes`：普通企划含 contract 与 committee；原创仅 committee | INVALID_STATE |
@@ -147,7 +147,7 @@ SaveRecord { version: 4, savedAt: ISO8601, rules_version: string, state: GameSta
 | 5 | `hire_core(staff_id)` | running ∧ 候选人存在 ∧ 现金 ≥ signing_fee ∧ 当前核心员工数 < 已解锁 core_staff_capacity | NOT_FOUND / INSUFFICIENT_FUNDS / CAPACITY_EXCEEDED | 从招聘池解包并加入核心名册，当周可分配；临时员工不占核心编制；signing_fee 通过 Finance 即时入账，首周周薪计入本周下一次周结算 |
 | 6 | `scout(role?, focus_ability?)` | running ∧ `events.pending[]` 为空 ∧ 现金 ≥ 本次费用 ∧ `recruitment.last_scout_week ≠ week`（每周至多一次）∧ role 与 focus_ability 至多传一个 | INVALID_INPUT / INVALID_PHASE / INSUFFICIENT_FUNDS | 池+保底计数+last_scout_week+Finance 费用流水；scout 候选带签约窗口（§14.13） |
 | 7 | `dismiss_staff(staff_id)` | running ∧ core 员工存在 ∧ 解雇后 core 数 ≥1 ∧ 若为监督须先原子替换；无同项目/空闲合格替补则关键岗位锁定 | NOT_FOUND / INVALID_INPUT / INVALID_PHASE | 移出名册+清空归属；不预付遣散费 |
-| 8 | `hire_temporary(work_id, candidate_id)` | running ∧ 项目 producing ∧ 候选人存在 ∧ 现金 ≥ signing_fee | NOT_FOUND / INSUFFICIENT_FUNDS | 临时合同+Finance signing_fee 即时入账；weekly_salary 从后续周结算计提；归属合同项目 |
+| 8 | `hire_temporary(work_id, candidate_id)` | running ∧ 项目 producing ∧ 候选人存在且 `employment=temporary` ∧ 现金 ≥ signing_fee ∧ 弹性工位有空位 | NOT_FOUND / INVALID_INPUT / INSUFFICIENT_FUNDS / CAPACITY_EXCEEDED | 解包临时候选并写入 `temporary_contract={work_id,start_week=week,end_week=project.deadline_week}`、`assignment_work_id=work_id`；Finance `temporary` 类别即时扣签约费；weekly_salary 从后续周结算计提；一次提交 |
 | 9 | `sign_outsourcing(work_id, item_id, supplier_id, work_total, mode)` | 工作项已解锁 ∧ 专业匹配 ∧ 产能余量 ∧ 现金 | DEPENDENCY_UNMET / CAPACITY_EXCEEDED / INSUFFICIENT_FUNDS | 合同+费用+占用 |
 | 10 | `deliver_work(work_id)` | 全部门槛项 delivered ∧ 未过截止 ∧ 项目 producing | GATE_UNMET / INVALID_PHASE | 当次完成交付结算（周数不变） |
 | 11 | `abort_work(work_id)` | running ∧ 项目 producing ∧ 未过截止 ∧ 本项目无 pending | NOT_FOUND / INVALID_PHASE / COMPANY_ENDED | 中止结算、退款/违约金入账、声望重罚、委员会关闭、Archive 履历、人员/外包释放；负余额复用破产关闭 |
@@ -155,7 +155,7 @@ SaveRecord { version: 4, savedAt: ISO8601, rules_version: string, state: GameSta
 | 13 | `adopt_proposal()` | 存在提案 ∧ running | NOT_FOUND | 提案→自定槽 |
 | 14 | `reject_proposal()` | 存在提案 | NOT_FOUND | 清空提案 |
 | 15 | `buy_tv_service(work_id)` | 委员会模式 ∧ 未购买 ∧ 现金 | MODE_NOT_ALLOWED / INSUFFICIENT_FUNDS | 渠道+发行费 |
-| 16 | `request_extension(work_id)` | 委员会模式 ∧ 未用过 ∧ 未过截止 ∧ 现金 | MODE_NOT_ALLOWED / INSUFFICIENT_FUNDS | 延期+费用 |
+| 16 | `request_extension(work_id)` | 委员会模式 ∧ 未用过 ∧ 未过截止 ∧ 现金 | MODE_NOT_ALLOWED / INSUFFICIENT_FUNDS | 延期+费用；在同一原子提交中同步更新该项目所有在聘临时员工 `temporary_contract.end_week` 为新的 `deadline_week` |
 | 17 | `advance_week()` | running ∧ 不存在 `viewed=false` 的 pending 事件 ∧ week<520 ∧ 非 closing | INVALID_PHASE | 八阶段原子周结算；刚性支出预检失败则回滚并直接破产终局 |
 | 18 | `resolve_event(work_id, event_id, option_id)` | 该 work 存在对应 pending 事件 ∧ 选项合法 ∧ 现金充足（若需付款） | NOT_FOUND / INVALID_INPUT / INSUFFICIENT_FUNDS | 效果分派；只移除 `(work_id,event_id)` 对应事件 |
 | 19 | `end_company()` | running | INVALID_PHASE | 锁 closing，未交付转 delivering |
@@ -757,7 +757,9 @@ v3 的单项目、五阶段、全局 phase、单事件槽、双份财务汇总�
 - 能力档：T0–T1为42–52，T2–T4为56–65，T5–T7为66–74；不参与长期成长，exp=0。
 - 周薪为同能力正式员工标准周薪1.20倍，周结算扣除；签约费为周薪2倍，签约时立即扣除。
 - 合同跟随绑定项目，直到交付或中止，不采用固定13周一期。
-- 主动解约或项目中止时，签约费与已发周薪不退；下周起停发周薪并退出项目，不另收违约金。
+- `temporary_contract={work_id,start_week,end_week}`；签约时 `start_week=company.week`，`end_week=project.deadline_week`。`end_week` 是名义预计结束周快照，仅用于展示/审计，不触发自动解约。
+- `request_extension` 成功时，必须在同一原子命令中把该项目全部在聘临时员工合同的 `end_week` 更新为新的 `deadline_week`；延期失败不得改动任何合同。
+- 实际退出仍只由项目交付或中止触发。主动解约或项目中止时，签约费与已发周薪不退；下周起停发周薪并退出项目，不另收违约金。
 - 临时员工不占核心编制，仍受公司弹性工位总人数上限约束。
 
 
@@ -765,3 +767,13 @@ v3 的单项目、五阶段、全局 phase、单事件槽、双份财务汇总�
 - 员工六维字段只允许使用冻结枚举：planning、direction、drawing、animation、management、postproduction。
 - script、art、post 等不是 Schema 字段，不得进入数据结构、接口、运行时或正式能力映射表。
 - 既有工作项能力映射中的别名必须逐项按负责人确认的正式映射修正；未取得正式映射前不得自行猜测替换，也不得改变既有数值结果。
+
+
+### 14.18 单集外包覆盖率与 B 级封顶口径（Q10，2026-11-27）
+
+- 统计粒度为单集，不含项目级公共制作。
+- 分母为该单集第 2–5 阶段中所有允许外包 `WorkItem.work_total` 的总和；第 1/6 阶段工作项不计入。
+- 分子为上述允许外包工作项上，所有外部供应商实际有效交付点数之和，跨供应商累计。只统计实际有效交付；合同金额、合同数、签约工作量和计划外包量均不计入。
+- `R_ext = external_delivered_points / eligible_work_total`。全部允许外包工作项均由外部完成时直接触发该集 B 级封顶。
+- 覆盖率阈值 ≥70% 仅为 `[M7_TEMP]` 首版临时参数，不是最终冻结值；M7 统一校准。拆单、一键打包及供应商数量不得改变同一实际覆盖率结果。
+

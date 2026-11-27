@@ -525,7 +525,7 @@ Staff {
   fatigue: 0..100 ; morale: 0..100 ; departure_warning: bool
   assignment_work_id: null | work_id      // 本周唯一归属；null = 未参与任何项目
   last_participation: null | { work_id, unit_id, week }   // 上次实际参与的单元，磨合判定用
-  temporary_contract: null | { work_id, start_week, end_week }
+  temporary_contract: null | { work_id, start_week, end_week } // end_week 是项目 deadline_week 的名义快照
   joined_week, works_history[]
 }
 ```
@@ -538,6 +538,8 @@ Staff {
 - `employment ∈ {core, temporary}` 时均使用 `signing_fee` 与 `weekly_salary>0`；不再保留 `project_fee`。`core ⇒ temporary_contract=null`；`temporary ⇒ assignment_work_id=temporary_contract.work_id`；临时员工的签约费与周薪归属其合同项目。
 - 公司至少保留 1 名核心员工；`dismiss_staff` 不得将核心名册减到 0。
 - `assignment_work_id` 为 null 或指向 `works` 中处于 `producing` 的项目；临时人员的归属恒等于其合同项目。
+- 临时合同 `end_week` 在签约时快照绑定项目的 `deadline_week`；若 `request_extension` 成功，所有仍在聘、绑定该项目的临时合同 `end_week` 必须随新截止周同步更新，且与延期费用/项目期限在同一原子命令中提交。
+- `end_week` 仅为名义预计结束周，供展示与审计，不是合同自动终止条件；临时员工仍在项目实际交付或中止时退出。
 - 不存在 `support` / 支援份额 / 工时拆分字段：同周一人只出现一次（[已确认] DEC-STAFF-001）。
 - `last_participation.week` 只能是 `week-1`：每次结算覆盖，不累积历史。
 - `fatigue/morale` 只在周结算中变化；命令不得直接改。
@@ -1697,7 +1699,7 @@ SaveRecord { version: 4, savedAt: ISO8601, rules_version, state: GameState }
 
 - 整集打包是应用层的一次性批量签约流程，不建立新的 Vendor 领域或独立供应商规则。
 - 提交前完整预检单集第 2–5 阶段全部可外包工作项、依赖、专业匹配、报价、质量上限和供应商总周产能；所有合同一次性提交或全部不提交。
-- 质量封顶依据单集实际外包覆盖程度判定；一键打包与手动拆分达到相同覆盖条件时适用相同规则。覆盖阈值、分母和协同损耗仍待标定。
+- 质量封顶依据单集实际外包覆盖程度判定；一键打包与手动拆分达到相同覆盖条件时适用相同规则。覆盖率分母为单集第 2–5 阶段所有允许外包 WorkItem 的 `work_total` 之和，分子为这些工作项的外部实际有效交付点数（跨供应商累计）；不计公共制作与第 1/6 阶段，不按合同或计划外包量计算。≥70% 仅为 `[M7_TEMP]` 临时阈值；协同损耗触发条件与幅度仍待标定。
 
 ### 21.5 计划态预览与提醒（Q6–Q9、Q11）
 
