@@ -3,8 +3,8 @@
 - 负责：Event @pyxz0；契约与终局裁决：zm（[#53](https://github.com/zhengmin486/anime-production-committee/issues/53)）
 - 跟踪议题：[#120](https://github.com/zhengmin486/anime-production-committee/issues/120)
 - 依据：M0 §14.7（预检失败直接破产）、§14.11（限时事件默认保守分支）、§14.12（查看与处理分离）、INV-23 / INV-25；DEC-EVENT-001（交付/关闭不得丢弃 pending）
-- 状态：**强制终局路径已实现并有契约测试；M2.5 核心出口已通过验收并合并。Issue #120 保持开放，归档级索引字段与扣罚封顶口径仍待后续裁决**。本文只描述当前代码行为与仍待裁决的部分，不修改其他已冻结规则。
-- 首版安排（2026-11-27）：上述两项后续工作不回退 M2.5 已完成状态，也不阻塞 2026-11-30 首版；首版后再处理。
+- 状态：**强制终局路径已实现并有契约测试；M2.5 核心出口已通过验收并合并。2026-11-27 裁决 A1（不加归档级索引）+ B1（仅强制终局封顶）已收口**，待验证回报后由 zm 复核关闭 #120。
+- 裁决记录（2026-11-27，#120）：A1——不新增 `company_result.pending_closures[]`，回执 + Finance 流水为唯一对账依据；B1——扣罚上限仅适用 `bankrupt/time_limit`，`penalty_waived` 限定为「终局可用现金不足而未能收取的部分」，不是规则豁免，不改变名义扣罚金额。
 
 ## 1. 问题
 
@@ -51,7 +51,7 @@ PR #95 落地了关闭、破产与第 520 周三条终局路径，但携带 `eve
 - 第 520 周：`report.events.expired` = 阶段 7 到期事件 + 阶段 8 终局结清，按处理顺序合并。
 - 现金变化可用 `finance.entries`（`category=events`）逐条对账；`archive.works[].finance_summary.penalty` 只记实付扣罚，与账本一致。
 
-## 5. 破产终局的扣罚上限（待裁决）
+## 5. 破产终局的扣罚上限（已裁决 B1）
 
 破产与第 520 周都要经过 `close_company` → `finalize_delivery` 的项目结清。原实现里未达门槛的项目要吃 `kForcedPenaltyPermille`（30%）扣罚，而 `close_company` 要求结清后余额非负：
 
@@ -64,7 +64,7 @@ PR #95 落地了关闭、破产与第 520 周三条终局路径，但携带 `eve
 - 超出部分在结清回执里记 `penalty_waived`，不产生欠款、递延或负现金；
 - 仅对 `end_reason ∈ {bankrupt, time_limit}` 生效；**主动关闭仍按原口径原子拒绝**，避免用关闭逃避扣罚。
 
-> **[PLACEHOLDER] 待 zm 裁决**：破产终局扣罚是否应封顶、封顶后是否需要在归档里单独记录名义扣罚与豁免额。裁决前该规则只在强制终局生效，且不改变任何已冻结数值。
+> **裁决 B1（2026-11-27）**：保留封顶，仅适用 `bankrupt` / `time_limit` 终局清算；玩家主动 `voluntary` 关闭不封顶，现金不足仍原子拒绝。`penalty_waived` = 名义扣罚 − 实付扣罚，语义是「因终局可用现金不足而未能收取」，不是规则豁免，也不改变名义扣罚金额。归档 `finance_summary.penalty` 只记实付，与唯一账本一致；不新增持久字段。
 
 ## 6. 不变式与测试
 
@@ -74,6 +74,8 @@ PR #95 落地了关闭、破产与第 520 周三条终局路径，但携带 `eve
 | 多项目 pending 的稳定顺序与确定性 | `#120 多项目 pending：按 (work_id,event_id) 稳定顺序结清…` |
 | 现金不足时按余额封顶、不为负 | `#120 终局结清沿用现金封顶…` |
 | 强制终局扣罚封顶、归档与账本一致 | `#120 破产终局：在制合同项目的扣罚按可支付现金封顶…` |
+| A1：回执与账本逐条对账、round-trip 后一致、无归档索引字段 | `#120 A1：结清明细可由 expired[] 与 Finance 流水逐条对账…` |
+| B1：voluntary 不套用终局封顶、现金不足原子拒绝 | `#120 B1：主动关闭（voluntary）不套用终局封顶…` |
 | 无默认分支时原子回滚 | `#120 终局结清失败时原子回滚…` |
 | 第 520 周结清后锁 closing/time_limit | `#120 第 520 周：pending 结清后再锁 closing/time_limit…` |
 | 阶段 7 到期与阶段 8 终局结清的合并顺序 | `#120 第 520 周：阶段 7 到期事件与阶段 8 终局结清按处理顺序合并` |
@@ -83,18 +85,18 @@ PR #95 落地了关闭、破产与第 520 周三条终局路径，但携带 `eve
 
 相关不变式：INV-23（pending 归属必须在制）、INV-25（余额非负）、INV-16（余额 = 期初 + 流水合计）、INV-02（账本 id 唯一）。
 
-## 7. 未完成与依赖
+## 7. 已收口与边界
 
 | 项 | 依赖 | 当前处理 |
 | --- | --- | --- |
-| 归档级结清索引（`company_result.pending_closures[]` 或 #53 指定等价字段） | #53 字段冻结 | 不新增字段；以 `report.events.expired[]` + Finance 流水留痕 |
-| 破产扣罚封顶的正式口径 | #53 / 本议题裁决 | `[PLACEHOLDER]`，仅强制终局生效 |
+| 归档级结清索引 | #120 裁决 A1 | **不新增字段**；`report.events.expired[]` + Finance 流水为对账依据，旧档零迁移 |
+| 破产扣罚封顶口径 | #120 裁决 B1 | **已冻结**；仅 `bankrupt/time_limit`，`penalty_waived` 为未收部分，voluntary 不封顶 |
 | 限时升级、二次超时硬罚 | #121（内容字段 #13 + 契约 #53） | 未实现，`expires_weeks≠0` 的升级配置仍拒绝加载 |
 | 存档恢复后 pending 语义 | #49 | 本次不新增字段，JSON round-trip 形状不变 |
 | 应急外包、公司级/跨项目事件 | #122、#123 | 不涉及 |
 
 ## 8. 验证证据
 
-- 本机：MSVC 19.51 原生 CLI + `scripts/v4.test.mjs` 全文重放，**87/87 通过**（基线 `main@dac0ec3`，含本次新增/改写的 8 条用例）。
+- 本机：MSVC 19.51 原生 CLI + `scripts/v4.test.mjs` 全文重放，**146/146 通过**（基线 `main@8ac373d`，含本次新增的 2 条 A1/B1 用例）。
 - `npm run typecheck`：通过。
 - `npm run test:v4`、`npm run audit:v4`、`npm run check:docs` 需 emsdk/Python 环境，由 CI 执行；本机无 emsdk，不以原生结果替代真实 WASM 证据。

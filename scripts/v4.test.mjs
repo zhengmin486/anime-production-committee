@@ -436,6 +436,46 @@ test('#120 破产终局：在制合同项目的扣罚按可支付现金封顶，
   assert.equal(penaltyEntries[0].amount, -settled.report.penalty)
 })
 
+test('#120 A1：结清明细可由 expired[] 与 Finance 流水逐条对账，round-trip 后一致', () => {
+  const state = forceCash(startedContract(), 1000)
+  state.events.pending.push(terminalEvent('work_01', { cost: 400 }))
+  const result = ok('advance_week', { state })
+  const settled = ok('finalize_delivery', { state: result.state, work_id: 'work_01' })
+  const expired = result.report.events.expired
+  assert.equal(expired.length, 1)
+  const roundTrip = JSON.parse(JSON.stringify(settled.state))
+  assert.equal(ok('hash_state', { state: roundTrip }).hash, ok('hash_state', { state: settled.state }).hash)
+  assert.deepEqual(roundTrip.finance.entries, settled.state.finance.entries)
+  // 每条 expired 都能在唯一账本找到同 work_id / memo=event_id 的 events 支出，金额可对账。
+  for (const item of expired) {
+    const matches = roundTrip.finance.entries.filter((entry) =>
+      entry.category === 'events' && entry.work_id === item.work_id && entry.memo === item.event_id)
+    assert.equal(matches.length, 1, '每条 expired 只对应唯一一笔事件流水')
+    assert.equal(matches.reduce((sum, entry) => sum + entry.amount, 0), -400)
+  }
+  // 名义扣罚 = 实付 + 未收；实付只记在账本与归档，不新增持久字段。
+  assert.equal(settled.report.penalty + settled.report.penalty_waived, 360000)
+  const namedWaived = settled.state.archive.works[0].finance_summary
+  assert.equal(namedWaived.penalty, settled.report.penalty)
+  assert.ok(!settled.state.archive.company_result || !('pending_closures' in settled.state.archive.company_result))
+})
+
+test('#120 B1：主动关闭（voluntary）不套用终局封顶，现金不足仍原子拒绝', () => {
+  let state = ok('initialize', { seed: 7 }).state
+  state = ok('start_work', { state, offer_id: 'offer_01', mode: 'contract' }).state
+  state.events.pending.push(terminalEvent('work_01'))
+  // 先把 pending 处理掉，避免关闭入口因 pending 拒绝；再把现金压到不足以结清扣罚。
+  state.events.pending = []
+  state = forceCash(state, 1000)
+  const before = ok('hash_state', { state }).hash
+  const preview = call('end_company', { state })
+  assert.equal(preview.error.code, 'INSUFFICIENT_FUNDS')
+  assert.equal('state' in preview, false)
+  assert.equal(ok('hash_state', { state }).hash, before)
+  assert.equal(state.company.status, 'running')
+  assert.equal(state.works[0].status, 'producing')
+})
+
 test('#120 终局结清失败时原子回滚：不留半状态、不清空事件', () => {
   let state = setupTiny()
   for (const staffId of ['staff_dir', 'staff_ka', 'staff_anim']) {
