@@ -37,8 +37,6 @@ int capacity_permille(const Staff& staff, const std::string& ability);
 int points_from_capacity(int capacity_permille_value);
 // 员工主专业（由岗位推导，未知岗位按最高能力兜底）
 std::string staff_specialty(const Staff& staff);
-// 职业适配系数：匹配 1000，不匹配 800；不参与 DEC-STAFF-008 产能计算。
-int fit_permille(const Staff& staff, const std::string& ability);
 
 // ---- 分派 ----
 struct ItemAssignment {

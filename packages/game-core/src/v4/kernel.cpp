@@ -118,10 +118,9 @@ std::string staff_specialty(const Staff& staff) {
     return kAbilities[static_cast<std::size_t>(best_index)];
 }
 
-int fit_permille(const Staff& staff, const std::string& ability) {
-    return staff_specialty(staff) == ability ? 1000 : 800;
-}
-
+// 工序有效能力 → 产能倍率。DEC-STAFF-008 的公式域是 S_eff ∈ [30,100]，
+// 但当前招聘生成会产出低能力候选（非主能力 5–45），S_eff 可以低于 30；
+// 这里的线性外推是临时行为，尚未按"越界属于非法状态"收口（缺口登记在 #53）。
 int capacity_permille(const Staff& staff, const std::string& ability) {
     const int primary = ability_value(staff, ability);
     int other_sum = 0;

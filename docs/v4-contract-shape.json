@@ -935,7 +935,8 @@
     "report.funds.costs": [
       "operations",
       "production",
-      "salary"
+      "salary",
+      "temporary"
     ],
     "report.staff[]": [
       "fatigue",

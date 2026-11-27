@@ -313,7 +313,8 @@ GameState decode_state(const Json& request) {
         require(member, "talent_type", where);
         require(member, "signing_fee", where);
         require(member, "weekly_salary", where);
-        // fatigue / morale 会直接影响周结算产能；不能让反序列化默认值掩盖坏存档。
+        // fatigue / morale 在 v0.5 只做持久化与回执展示（DEC-STAFF-008 的产能只读 abilities），
+        // 但仍不能让反序列化默认值掩盖坏存档：缺键会让周结算把上一个存档的数值悄悄抹平。
         require(member, "fatigue", where);
         require(member, "morale", where);
         require(member, "departure_warning", where);
@@ -2397,10 +2398,16 @@ void advance_outsourcing(GameState& state, int week) {
             WorkItem* item = owner == nullptr ? nullptr : find_item(*owner, contract->at("item_id").get<std::string>());
             if (item == nullptr) continue;
             const auto penalty = std::max<std::int64_t>(1, contract->at("weekly_cap").get<std::int64_t>() / 4);
+            // INV-12：contributors 是只追加的历史事实，工作项一旦有人参与过就不能被返工打成 0，
+            // 否则「未开工项不得有参与者」会把合法状态判红、整个周结算返回 INTERNAL_ERROR。
+            // 返工只吃掉合同自身已交付的量；工作项侧再留 1 点作为"已开工"的历史边界。
+            const std::int64_t item_floor = item->contributors.empty() ? 0 : 1;
             const auto loss = std::min({penalty, contract->at("work_done").get<std::int64_t>(),
-                                        static_cast<std::int64_t>(item->work_done)});
-            contract->at("work_done") = contract->at("work_done").get<std::int64_t>() - loss;
-            item->work_done -= static_cast<int>(loss);
+                                        static_cast<std::int64_t>(item->work_done) - item_floor});
+            if (loss > 0) {
+                contract->at("work_done") = contract->at("work_done").get<std::int64_t>() - loss;
+                item->work_done -= static_cast<int>(loss);
+            }
         } else if (roll >= r * 100) {
             continue;
         } else {
@@ -2891,6 +2898,8 @@ SettlementOutcome settle_project(GameState& state, Project& work, const std::str
                           {"net_received", company_revenue + contract_refund - penalty},
                           {"channels", channel_report}};
 
+    // 终态合同随项目一起清掉。冻结契约要求终态合同仍可校验引用，但当前没有外包归档形状，
+    // 该缺口已登记在 DATA_DICTIONARY §3.10，不在校验里放宽、也不在这里留悬空引用。
     state.contracts.erase(std::remove_if(state.contracts.begin(), state.contracts.end(), [&work_id](const Json& contract) {
         return contract.is_object() && contract.value("work_id", std::string{}) == work_id;
     }), state.contracts.end());
@@ -2904,9 +2913,6 @@ SettlementOutcome settle_project(GameState& state, Project& work, const std::str
     for (auto& member : state.staff) {
         if (member.assignment_work_id && *member.assignment_work_id == work_id) member.assignment_work_id.reset();
     }
-    state.contracts.erase(std::remove_if(state.contracts.begin(), state.contracts.end(), [&work_id](const Json& contract) {
-        return contract.is_object() && contract.value("work_id", std::string{}) == work_id;
-    }), state.contracts.end());
     state.works.erase(std::remove_if(state.works.begin(), state.works.end(),
                                      [&work_id](const Project& item) { return item.id == work_id; }),
                       state.works.end());
@@ -3517,8 +3523,17 @@ std::string advance_week(const std::string& input) {
         for (const Staff* member : ordered_staff) {
             if (member->assignment_work_id) ++assigned_count[*member->assignment_work_id];
         }
+        // 周薪按账本同一口径拆两个桶：核心员工 salary、临时员工 temporary。
+        // 预检与回执都用两桶之和，避免"预检算一套、流水记另一套"。
         int64_t salary_total = 0;
-        for (const auto& member : state.staff) salary_total += member.weekly_salary;
+        int64_t temporary_total = 0;
+        for (const auto& member : state.staff) {
+            if (member.employment == "temporary") {
+                temporary_total += member.weekly_salary;
+            } else {
+                salary_total += member.weekly_salary;
+            }
+        }
         const int64_t operations_total = kernel::weekly_operations_cost();
         int64_t production_total = 0;
         for (const Project* work : ordered) {
@@ -3526,7 +3541,7 @@ std::string advance_week(const std::string& input) {
             if (assigned_count[work->id] == 0) continue;   // 没人做就不开工，也不计制作费
             production_total += kernel::weekly_production_cost(work->plan.intensity);
         }
-        const int64_t total_cost = salary_total + operations_total + production_total;
+        const int64_t total_cost = salary_total + temporary_total + operations_total + production_total;
         if (state.finance.balance < total_cost) {
             const int64_t gap = total_cost - state.finance.balance;
             // #120：破产是强制终局，不能因为还有 pending 就永久卡死。先按默认保守分支逐条结清，
@@ -3718,6 +3733,9 @@ std::string advance_week(const std::string& input) {
         // 扣罚与评价修正由 gate_completion_permille 决定。
         Json settlements = Json::array();
         std::vector<std::string> due;
+        // 截止周语义：本周（week）是最后一个生产周，结算记在 next_week=deadline 名下。
+        // 因此玩家最后一个可行动的周是 deadline-1；deliver_work / request_extension 的
+        // `company.week > deadline` 守卫现在只是防御性上界，正常态下走不到。
         for (const Project* work : ordered) {
             if (work->status == "producing" && week + 1 >= work->deadline_week) due.push_back(work->id);
         }
@@ -3808,6 +3826,7 @@ std::string advance_week(const std::string& input) {
                            {"funds", Json{{"delta", state.finance.balance - snapshot.finance.balance},
                                           {"balance", state.finance.balance},
                                           {"costs", Json{{"salary", salary_total},
+                                                         {"temporary", temporary_total},
                                                          {"operations", operations_total},
                                                          {"production", production_total}}}}}};
         return encode(Json{{"state", state}, {"report", report}});

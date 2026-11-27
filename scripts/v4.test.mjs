@@ -218,7 +218,8 @@ test('阶段 2-3：临时员工周薪同样进入刚性预检与唯一账本', (
   state = assign(state, 'staff_ka', 'work_01')
   const experienceBefore = JSON.parse(JSON.stringify(temporary.experience))
   const result = ok('advance_week', { state })
-  assert.equal(result.report.funds.costs.salary, 628000)
+  assert.equal(result.report.funds.costs.salary, 578000)
+  assert.equal(result.report.funds.costs.temporary, 50000)
   assert.deepEqual(result.state.staff.find((member) => member.id === 'staff_ka').experience, experienceBefore)
   assert.equal(result.state.finance.entries.filter((entry) => entry.category === 'salary').length, 3)
   assert.equal(result.state.finance.entries.filter((entry) => entry.category === 'temporary').length, 1)
@@ -2377,6 +2378,20 @@ test('外包周结算：坐标与 JS oracle 一致，正常/延误/返工区间�
   assert.equal(floorResult.report.works[0].items.find((item) => item.item_id === 'work_01.ep01.inbetween').points, -2)
 })
 
+test('外包返工不得把已开工工作项扣成 0（INV-12 回归）', () => {
+  // 同一工作项先被社内员工做过（contributors 非空），再抽到返工：工作项侧只能扣到 1，
+  // 否则「未开工项不得有参与者」会把合法状态判红，整周结算返回 INTERNAL_ERROR。
+  const id = contractIdForRoll((roll, normal, rework) => roll >= rework)
+  const state = outsourceTickState(id, 80, { work_done: 2 })
+  const item = findItem(state, 'work_01', 'ep01.inbetween')
+  item.work_done = 2
+  item.contributors = ['staff_ka']
+  const result = ok('advance_week', { state })
+  assert.equal(findItem(result.state, 'work_01', 'ep01.inbetween').work_done, 1)
+  assert.equal(result.state.contracts[0].work_done, 1)
+  assert.equal(result.report.works[0].items.find((entry) => entry.item_id === item.id).points, -1)
+})
+
 test('外包周结算：同项按剩余需求比例、最大余数及 weekly_cap 分配', () => {
   const normal = (roll, threshold) => roll < threshold
   const aId = contractIdForRoll(normal)
@@ -3168,7 +3183,8 @@ test('hire_temporary：解包签约、项目合同、临时账目与延期联动
   assert.equal(salary.category, 'temporary')
   assert.equal(salary.work_id, started.work_id)
   assert.equal(salary.amount, -50000)
-  assert.equal(advanced.report.funds.costs.salary, 836000)
+  assert.equal(advanced.report.funds.costs.salary, 786000)
+  assert.equal(advanced.report.funds.costs.temporary, 50000)
   assert.deepEqual(advanced.state.staff.find((entry) => entry.id === candidate.id).experience, experienceBefore)
   assert.equal(advanced.state.finance.opening_funds + advanced.state.finance.entries.reduce((sum, entry) => sum + entry.amount, 0), advanced.state.finance.balance)
 })
