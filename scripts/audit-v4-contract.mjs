@@ -856,7 +856,7 @@ if (asserted.join(',') !== shape.invariants.asserted_in_validate.slice().sort().
   if (added.length) fail(`新增不变式断言未登记：${added.join(', ')}`)
   if (gone.length) fail(`不变式断言消失：${gone.join(', ')}`)
 }
-if (shape.invariants.declared_total !== 29) fail('数据字典声明的不变式总数应为 29（M0 §4）')
+if (shape.invariants.declared_total !== 30) fail('数据字典声明的不变式总数应为 30（M0 §4，INV-01..INV-30）')
 const codesInSource = [...new Set([
   ...[...v4Sources.matchAll(/error_body\(\s*"([A-Z][A-Z_]{3,})"/g)].map((match) => match[1]),
   ...[...v4Sources.matchAll(/(?:\.code|code)\s*=\s*"([A-Z][A-Z_]{3,})"/g)].map((match) => match[1])

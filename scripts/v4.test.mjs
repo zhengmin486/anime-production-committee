@@ -424,6 +424,17 @@ test('§14.7 预检失败：整周回滚并直接破产终局，不产生半结�
   assert.equal(findItem(result.state, 'work_01', 'common.series_comp').work_done, 0)
 })
 
+test('周回执形状稳定：破产提前返回同样带 outsourcing/settlement 空数组', () => {
+  let state = ok('initialize', { seed: 7 }).state
+  state.finance.opening_funds = 0
+  state.finance.balance = 0
+  const result = ok('advance_week', { state })
+  assert.equal(result.report.bankrupt, true)
+  assert.deepEqual(result.report.outsourcing, [])
+  assert.deepEqual(result.report.settlements, [])
+  assert.deepEqual(result.report.works, [])
+})
+
 test('#120 破产终局：pending 按默认保守分支结清，不再以 NOT_IMPLEMENTED 卡死', () => {
   let state = setupTiny()
   for (const staffId of ['staff_dir', 'staff_ka', 'staff_anim']) {
@@ -2514,6 +2525,18 @@ test('sign_outsourcing：守卫齐全且失败原子', () => {
     state: early, work_id: 'work_01', item_id: inbetween.id, supplier_id: 'supplier_edit', work_total: 10, mode: 'normal'
   })
   assert.equal(notYet.error?.code, 'NOT_FOUND')
+
+  // 剩余周数不足以完成：不允许签下必定违约的合同
+  // 剩余周数不足以完成：把 supplier 周产能压到 40 点/周，100 点需要 3 周，只剩 2 周
+  const rushed = outsourcedState()
+  const slow = rushed.suppliers.find((entry) => entry.id === 'supplier_douga')
+  slow.capacity_per_week = 200
+  slow.speed = 20
+  rushed.works[0].deadline_week = 2
+  const tooLate = call('sign_outsourcing', {
+    state: rushed, work_id: 'work_01', item_id: inbetween.id, supplier_id: 'supplier_douga', work_total: 100, mode: 'normal'
+  })
+  assert.equal(tooLate.error?.code, 'INVALID_INPUT', '需要 3 周但只剩 2 周，应拒绝签下必定违约的合同')
 
   // 现金不足
   const poor = outsourcedState()

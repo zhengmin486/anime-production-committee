@@ -1,7 +1,7 @@
 # M1 运行时切片：能跑一周
 
 > 状态：**M1 已完成并通过出口验收（2026-11-26）**。本文件记录 M1 v4 运行时切片及后续补丁；交付、事件、Archive、完整存档 round-trip 与破产终局按后续阶段实现。2026-11-25 按 PR #42 复审修正质量模型、不变式、维度权重与公共制作传递，见 §11
-> **v0.5 口径变更（2026-11-27）**：产能改按 DEC-STAFF-008（1 人周 = 70 点、S_eff 单一因子、士气/疲劳不再参与产能）。下文 §4 的 M1 产能公式与 100 点换算属于历史记录，不得当作现行口径引用；现行数值见 [NUMERICAL_PARAMETERS_CATALOG](NUMERICAL_PARAMETERS_CATALOG.md) 与 `packages/game-core/src/v4/kernel.cpp`。
+> **v0.5 口径变更（2026-11-27）**：产能改按 DEC-STAFF-008（1 人周 = 70 点、S_eff 单一因子、士气/疲劳不再参与产能），质量聚合改为按工作项 `quality_weight_permille` 加权并并入公共层。下文 §4 的产能公式、100 点换算与"阶段均权 → 单集均权"属于历史记录，不得当作现行口径引用；现行数值见 [NUMERICAL_PARAMETERS_CATALOG](NUMERICAL_PARAMETERS_CATALOG.md) 与 `packages/game-core/src/v4/kernel.cpp`。
 > 契约依据：[M0_CONTRACT_FREEZE.md](M0_CONTRACT_FREEZE.md)、[DOMAIN_ARCHITECTURE.md](DOMAIN_ARCHITECTURE.md)
 > 路线依据：[DEVELOPMENT_ROADMAP.md](DEVELOPMENT_ROADMAP.md) 的 M1 条
 > 分支：`feat/v4-m1-runtime`

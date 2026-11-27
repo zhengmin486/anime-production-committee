@@ -3722,6 +3722,10 @@ std::string sign_outsourcing(const std::string& input) {
         const std::int64_t weeks_needed = (work_total + weekly_cap - 1) / weekly_cap;
         const std::int64_t buffer = mode == "emergency" ? (weeks_needed * 15 + 99) / 100
                                                        : (weeks_needed + 3) / 4 + 1;
+        const std::int64_t remaining_weeks = work->deadline_week - state.company.week;
+        if (remaining_weeks < weeks_needed) {
+            return encode(error_body("INVALID_INPUT", "项目剩余周数不足以完成这份外包，避免签下必定违约的合同"));
+        }
         const std::int64_t due_week = std::min<std::int64_t>(
             {kMaxWeek, work->deadline_week, state.company.week + weeks_needed + buffer});
 
@@ -3739,11 +3743,11 @@ std::string sign_outsourcing(const std::string& input) {
                                                   std::to_string(suffix)));
         }
 
+        const std::optional<std::string> contract_episode = episode_id_of(*work, item_id);
         state.contracts.push_back(Json{{"id", contract_id},
                                        {"supplier_id", supplier_id},
                                        {"work_id", work_id},
-                                       {"episode_id", episode_id_of(*work, item_id) ? Json(*episode_id_of(*work, item_id))
-                                                                                     : Json(nullptr)},
+                                       {"episode_id", contract_episode ? Json(*contract_episode) : Json(nullptr)},
                                        {"item_id", item_id},
                                        {"ability", item->ability},
                                        {"mode", mode},
@@ -3911,6 +3915,7 @@ std::string advance_week(const std::string& input) {
                                                {"works", Json::array()},
                                                {"staff", Json::array()},
                                                {"settlements", Json::array()},
+                                               {"outsourcing", Json::array()},
                                                {"events", Json{{"drawn", 0},
                                                                {"reason", "bankrupt"},
                                                                {"expired", terminal_expired}}}}}});

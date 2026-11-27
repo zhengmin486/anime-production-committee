@@ -554,7 +554,7 @@
       "INV-29",
       "INV-30"
     ],
-    "declared_total": 29,
+    "declared_total": 30,
     "source": "packages/game-core/src/v4/runtime.cpp"
   },
   "ledger": {
