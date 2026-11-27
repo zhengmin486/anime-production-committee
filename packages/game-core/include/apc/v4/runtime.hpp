@@ -49,6 +49,9 @@ std::string view_event(const std::string& input);        // {state, work_id, eve
 // M0 命令 18：{state, work_id, event_id, option_id}。
 std::string resolve_event(const std::string& input);
 
+// M0 命令 23：{state, offer_id}。Q4 定金锁定，语义见 §14.13.2。
+std::string lock_offer(const std::string& input);
+
 // 内部/构建诊断：校验一份事件卡目录，返回 {ok,count,ids,issues}。不是玩家命令。
 std::string validate_event_catalog(const std::string& input);  // {catalog, source?}
 std::string event_catalog_info(const std::string& input);      // 内嵌目录自检，忽略入参

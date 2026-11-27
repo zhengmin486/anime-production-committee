@@ -5,10 +5,9 @@
 //
 // 契约依据：M0_CONTRACT_FREEZE §14.13.2（#53 裁决，PR #97 合入）、DECISION_LOG §17 Q4、
 // DATA_DICTIONARY_V4 §3.12、DESIGN_BACKLOG STATUS-49/51。
-// 已冻结语义：初始 4/上限 10、锁定期两周（W/W+1 有效，W+2 开局失效）、终身一次锁定、
-// 定金普通 5%/IP 上门 10% × deposit_basis（生成时固定，后续预算调整不追溯）、
-// 签约 100% 抵扣（仅锁定期内）、到期定金不退。
-// 生成参数（weekly_add、有效期分布等）仍为 [PLACEHOLDER]，由 #59 标定。
+// DEC-MARKET-001：企划市场固定四槽，锁定期两周（W/W+1 有效，W+2 开局失效）、
+// 终身一次锁定、定金普通 5%/IP 上门 10% × deposit_basis（生成时固定）、
+// 签约 100% 抵扣（仅锁定期内）、到期定金不退。每周只补空槽，存活企划不重抽。
 // 危机机制已废除：守卫不含危机分支，CRISIS_COMMITMENT_BLOCKED 为废弃占位码。
 //
 // 坐标随机统一使用 scripts/lib/coordinate-random.mjs，与 kernel.cpp 同一算法。
@@ -25,12 +24,14 @@ export const PURPOSE = Object.freeze({
 // [PLACEHOLDER] 内容样本与生成参数，不是标定结论。
 export const GENRES = Object.freeze(['action', 'fantasy', 'scifi', 'daily', 'idol', 'sports'])
 export const SCALES = Object.freeze(['short', 'ova', 'tv', 'movie'])
+// 非 TV 蓝图尚未注册，生成器暂只产出可立项的 TV 企划；SCALES 保留完整规模词表。
+const GENERATED_SCALES = Object.freeze(['tv'])
 export const HEAT_LEVELS = Object.freeze(['low', 'mid', 'high', 'boom'])
 
 export const DEFAULT_PARAMS = Object.freeze({
-  market_cap: 10,        // STATUS-49/51 已确认上限
-  initial_slots: 4,      // STATUS-49/51 已确认初始
-  weekly_add: 2,         // [PLACEHOLDER] 每周自然补充数量
+  market_cap: 4,         // DEC-MARKET-001：企划市场固定四槽
+  initial_slots: 4,      // DEC-MARKET-001：初始生成四个
+  min_acceptable: 2,     // DEC-MARKET-001：至少两个可立即承接
   expiry_min: 1,         // [PLACEHOLDER] 有效期范围 1–3 周（STATUS-49 确认范围）
   expiry_max: 3,
   lock_weeks: 2,         // Q4 已确认：锁定期两周，非待标定参数
@@ -46,10 +47,11 @@ export function generateOffer(seed, week, index, opts = {}) {
   const subBelow = (k, bound) => sub(k) % bound
 
   const genre = GENRES[subBelow(0, GENRES.length)]
-  const scale = SCALES[subBelow(1, SCALES.length)]
+  const scale = GENERATED_SCALES[0]
   const episodeCount = { short: 1, ova: 2, tv: 12, movie: 1 }[scale]
   const budget = (500 + subBelow(2, 1500)) * 10000
   const sourceType = opts.sourceType ?? 'market'
+  const minReputation = Math.min(subBelow(7, 120), opts.reputationCap ?? 120)
 
   return {
     id: `offer_${PURPOSE.offer_gen.toString(16)}_${week}_${index}`,
@@ -66,7 +68,7 @@ export function generateOffer(seed, week, index, opts = {}) {
     channels_baseline: ['bd'],
     allowed_modes: ['contract', 'committee'],
     committee_candidates: [],
-    min_reputation: subBelow(7, 120),
+    min_reputation: minReputation,
     required_works: [],
     previous_work_id: null,
     blueprint_id: 'tv_standard',
@@ -86,8 +88,14 @@ export function generateOffer(seed, week, index, opts = {}) {
 
 export function initialMarket(seed, opts = {}) {
   const params = { ...DEFAULT_PARAMS, ...(opts.params ?? {}) }
+  const reputation = opts.reputation ?? 100
   const slots = []
-  for (let i = 0; i < params.initial_slots; i++) slots.push(generateOffer(seed, 0, i, { params }))
+  for (let i = 0; i < params.initial_slots; i++) {
+    slots.push(generateOffer(seed, 0, i, {
+      params,
+      reputationCap: i < params.min_acceptable ? reputation : 120,
+    }))
+  }
   return slots
 }
 
@@ -109,11 +117,16 @@ export function releaseExpiredLocks(slots, week) {
 
 export function topUpMarket(slots, seed, week, opts = {}) {
   const params = { ...DEFAULT_PARAMS, ...(opts.params ?? {}) }
+  const reputation = opts.reputation ?? 100
   const alive = expireOffers(slots, week)
   const free = Math.max(0, params.market_cap - alive.length)
-  const add = Math.min(free, params.weekly_add)
+  let acceptable = alive.filter((o) => (o.min_reputation ?? 0) <= reputation).length
   const added = []
-  for (let i = 0; i < add; i++) added.push(generateOffer(seed, week, i, { params }))
+  for (let i = 0; i < free; i++) {
+    const cap = acceptable < params.min_acceptable ? reputation : 120
+    added.push(generateOffer(seed, week, i, { params, reputationCap: cap }))
+    if (cap <= reputation) acceptable++
+  }
   return { slots: [...alive, ...added], added_ids: added.map((o) => o.id) }
 }
 
@@ -147,7 +160,8 @@ export function depositAmount(offer, params = DEFAULT_PARAMS) {
   const rate = offer.offer_source_type === 'ip_visit'
     ? params.deposit_rate_ip_permille
     : params.deposit_rate_regular_permille
-  return Math.floor(depositBase(offer) * rate / 1000)
+  const basis = depositBase(offer)
+  return Math.floor(basis / 1000) * rate + Math.floor((basis % 1000) * rate / 1000)
 }
 
 // 正式接单抵扣：仅锁定期内（week < locked_until）定金 100% 抵扣（预付款），

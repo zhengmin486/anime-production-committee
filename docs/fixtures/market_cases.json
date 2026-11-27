@@ -1,5 +1,5 @@
 {
-  "description": "v4 市场契约用例（M0_CONTRACT_FREEZE §14.13.2 / DECISION_LOG §17 Q4 / DATA_DICTIONARY_V4 §3.12 / STATUS-49/51）。oracle: scripts/lib/market-oracle.mjs。生成参数为 [PLACEHOLDER] 测试参数；定金档位 5%/10%、锁定两周、初始 4/上限 10 为已冻结语义。",
+  "description": "v4 市场契约用例（M0_CONTRACT_FREEZE §14.13.2 / DECISION_LOG DEC-MARKET-001 / DATA_DICTIONARY_V4 §3.12）。oracle: scripts/lib/market-oracle.mjs。生成参数为 [PLACEHOLDER] 测试参数；固定四槽、每周只补空槽、至少两个可承接、定金档位 5%/10%、锁定两周为已冻结语义。",
   "cases": [
     {
       "id": "MC-01",
@@ -13,7 +13,7 @@
       "desc": "每周自然补充：存活企划逐字段不变，不清空重抽",
       "op": "topup",
       "input": {
-        "seed": 42, "week": 1, "params": { "weekly_add": 2 },
+        "seed": 42, "week": 1,
         "slots": [
           { "id": "o0", "expires_week": 5, "locked_until": null, "lock_used": false, "deposit_paid": 0, "contract_budget": 10000000 },
           { "id": "o1", "expires_week": 6, "locked_until": null, "lock_used": false, "deposit_paid": 0, "contract_budget": 20000000 }
@@ -23,23 +23,18 @@
     },
     {
       "id": "MC-03",
-      "desc": "补充不超过上限 10",
+      "desc": "固定四槽满员不补充",
       "op": "topup",
       "input": {
-        "seed": 42, "week": 1, "params": { "weekly_add": 5, "market_cap": 10 },
+        "seed": 42, "week": 1,
         "slots": [
           { "id": "a0", "expires_week": 9, "locked_until": null, "lock_used": false, "deposit_paid": 0 },
           { "id": "a1", "expires_week": 9, "locked_until": null, "lock_used": false, "deposit_paid": 0 },
           { "id": "a2", "expires_week": 9, "locked_until": null, "lock_used": false, "deposit_paid": 0 },
-          { "id": "a3", "expires_week": 9, "locked_until": null, "lock_used": false, "deposit_paid": 0 },
-          { "id": "a4", "expires_week": 9, "locked_until": null, "lock_used": false, "deposit_paid": 0 },
-          { "id": "a5", "expires_week": 9, "locked_until": null, "lock_used": false, "deposit_paid": 0 },
-          { "id": "a6", "expires_week": 9, "locked_until": null, "lock_used": false, "deposit_paid": 0 },
-          { "id": "a7", "expires_week": 9, "locked_until": null, "lock_used": false, "deposit_paid": 0 },
-          { "id": "a8", "expires_week": 9, "locked_until": null, "lock_used": false, "deposit_paid": 0 }
+          { "id": "a3", "expires_week": 9, "locked_until": null, "lock_used": false, "deposit_paid": 0 }
         ]
       },
-      "expect": { "added_count": 1, "total": 10 }
+      "expect": { "added_count": 0, "total": 4 }
     },
     {
       "id": "MC-04",

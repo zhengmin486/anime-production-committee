@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { validateCard } from './lib/event-schema.mjs'
 import { generateCandidate, scout as oracleScout, rotatePool, PURPOSE } from './lib/recruit-oracle.mjs'
+import { generateOffer, weeklyMarketStep, startWorkCash, depositAmount } from './lib/market-oracle.mjs'
 
 // v4 M1 契约测试：直接加载 emcc 构建的模块，全部通过 JSON 字符串接口调用。
 // 依赖 build/v4/v4.mjs（npm run build:v4 生成）。
@@ -2848,4 +2849,340 @@ test('scout 窗口：expires_week 是首个不可签约周，regular 不受影�
   state = ok('advance_week', { state }).state
   assert.ok(!state.recruitment.pool.some((candidate) => candidate.staff.id === scoutId))
   assert.ok(state.recruitment.pool.every((candidate) => candidate.origin !== 'regular' || candidate.expires_week === null))
+})
+
+// ---- 市场生命周期（M0 命令 23 / §14.13.2）：与 scripts/lib/market-oracle.mjs 逐位对拍 ----
+
+const withOffers = (state, offers) => {
+  const copy = structuredClone(state)
+  copy.market.slots = offers
+  return copy
+}
+
+test('initialize 市场：4 个 fixture 槽带齐生命周期字段', () => {
+  const state = ok('initialize', { seed: 42 }).state
+  assert.equal(state.market.slots.length, 4)
+  for (const offer of state.market.slots) {
+    assert.equal(offer.expires_week, 3)
+    assert.equal(offer.locked_until, null)
+    assert.equal(offer.lock_used, false)
+    assert.equal(offer.deposit_paid, 0)
+    assert.equal(offer.offer_source_type, 'market')
+    assert.equal(offer.deposit_basis, offer.contract_budget)
+  }
+})
+
+test('市场生成企划只使用已注册 TV 蓝图，可正常立项', () => {
+  for (const seed of [42, 7, 20261127]) {
+    for (const week of [0, 1, 2]) {
+      for (const index of [0, 1]) {
+        const offer = generateOffer(seed, week, index)
+        assert.equal(offer.scale, 'tv')
+        assert.equal(offer.blueprint_id, 'tv_standard')
+        assert.equal(offer.episode_count, 12)
+      }
+    }
+  }
+  const base = ok('initialize', { seed: 42 }).state
+  const offer = generateOffer(42, 0, 0)
+  offer.min_reputation = 0
+  const started = ok('start_work', {
+    state: withOffers(base, [offer]), offer_id: offer.id, mode: 'contract'
+  })
+  assert.equal(started.state.works[0].offer.blueprint_id, 'tv_standard')
+})
+
+test('advance_week 市场周步骤：释放→过期→补充与 oracle weeklyMarketStep 一致', () => {
+  for (const seed of [42, 20261127]) {
+    const base = ok('initialize', { seed }).state
+    const offers = [0, 1, 2].map((i) => generateOffer(seed, 0, i))
+    offers[0].expires_week = 1
+    offers[1].expires_week = 1
+    let state = rich(withOffers(base, offers))
+    state = ok('lock_offer', { state, offer_id: offers[1].id }).state
+    const lockedSlots = structuredClone(state.market.slots)
+    state = ok('advance_week', { state }).state
+    const expected = weeklyMarketStep(lockedSlots, seed, 1, base.company.reputation)
+    assert.deepEqual(state.market.slots, expected.slots)
+    assert.equal(state.market.refresh_week, 1)
+  }
+})
+
+test('企划到期边界：expires_week 首个失效周，锁定期内受保护，W+2 开局释放', () => {
+  const seed = 7
+  const base = ok('initialize', { seed }).state
+  const offer = generateOffer(seed, 0, 0)
+  offer.expires_week = 2
+  let state = withOffers(base, [offer])
+  state = ok('advance_week', { state }).state
+  assert.ok(state.market.slots.some((o) => o.id === offer.id))
+  state = ok('lock_offer', { state, offer_id: offer.id }).state
+  state = ok('advance_week', { state }).state
+  assert.ok(state.market.slots.some((o) => o.id === offer.id), 'expires_week 到达但锁定期内受保护')
+  state = ok('advance_week', { state }).state
+  assert.ok(!state.market.slots.some((o) => o.id === offer.id), 'locked_until 开局释放槽位')
+})
+
+test('lock_offer：定金 5%、locked_until=week+2、终身一次、Finance 唯一一笔', () => {
+  let state = rich(ok('initialize', { seed: 42 }).state)
+  const offer = state.market.slots[0]
+  const before = state.finance.balance
+  const receipt = ok('lock_offer', { state, offer_id: offer.id })
+  assert.equal(receipt.offer_id, offer.id)
+  const deposit = Math.floor((offer.deposit_basis * 50) / 1000)
+  assert.equal(receipt.deposit_paid, deposit)
+  const locked = receipt.state.market.slots.find((o) => o.id === offer.id)
+  assert.equal(locked.locked_until, state.company.week + 2)
+  assert.equal(locked.lock_used, true)
+  assert.equal(locked.deposit_paid, deposit)
+  assert.equal(receipt.state.finance.balance, before - deposit)
+  const entry = receipt.state.finance.entries.at(-1)
+  assert.equal(entry.id, `w${state.company.week}.production.${offer.id}.deposit`)
+  assert.equal(entry.category, 'production')
+  assert.equal(entry.amount, -deposit)
+  assert.equal(call('lock_offer', { state: receipt.state, offer_id: offer.id }).error.code, 'INVALID_INPUT')
+})
+
+test('lock_offer 守卫：NOT_FOUND/INVALID_INPUT/INSUFFICIENT_FUNDS', () => {
+  const state = ok('initialize', { seed: 42 }).state
+  assert.equal(call('lock_offer', { state, offer_id: 'offer_nope' }).error.code, 'NOT_FOUND')
+  assert.equal(call('lock_offer', { state, offer_id: 5 }).error.code, 'INVALID_INPUT')
+  const expensive = generateOffer(42, 0, 0)
+  expensive.deposit_basis = 500_000_000
+  const poor = withOffers(state, [expensive])
+  const rejected = call('lock_offer', { state: poor, offer_id: expensive.id })
+  assert.equal(rejected.error.code, 'INSUFFICIENT_FUNDS')
+  assert.equal(rejected.error.gap, 25_000_000 - poor.finance.balance)
+})
+
+test('lock_offer：IP 上门企划定金 10%，档位由来源分类决定', () => {
+  let state = rich(ok('initialize', { seed: 42 }).state)
+  const offer = generateOffer(42, 0, 0, { sourceType: 'ip_visit' })
+  state = withOffers(state, [offer])
+  const receipt = ok('lock_offer', { state, offer_id: offer.id })
+  assert.equal(receipt.deposit_paid, Math.floor((offer.deposit_basis * 100) / 1000))
+})
+
+test('lock_offer：大定金基数使用安全算术，不溢出', () => {
+  const state = ok('initialize', { seed: 42 }).state
+  const offer = generateOffer(42, 0, 0, { sourceType: 'ip_visit' })
+  offer.deposit_basis = 92233720368547760
+  const expectedDeposit = Math.floor(offer.deposit_basis / 1000) * 100 +
+    Math.floor((offer.deposit_basis % 1000) * 100 / 1000)
+  const rejected = call('lock_offer', { state: withOffers(state, [offer]), offer_id: offer.id })
+  assert.equal(rejected.error.code, 'INSUFFICIENT_FUNDS')
+  assert.equal(rejected.error.gap, expectedDeposit - state.finance.balance)
+})
+
+test('start_work：锁定快照必须与唯一 Finance 定金流水对账', () => {
+  const base = rich(ok('initialize', { seed: 42 }).state)
+  const forged = generateOffer(42, 0, 0)
+  forged.locked_until = 2
+  forged.lock_used = true
+  forged.deposit_paid = depositAmount(forged)
+  assert.equal(call('start_work', {
+    state: withOffers(base, [forged]), offer_id: forged.id, mode: 'contract'
+  }).error.code, 'INVALID_STATE')
+
+  let locked = base
+  const offer = locked.market.slots[0]
+  locked = ok('lock_offer', { state: locked, offer_id: offer.id }).state
+  const tampered = structuredClone(locked)
+  tampered.market.slots.find((o) => o.id === offer.id).deposit_paid += 1
+  assert.equal(call('start_work', {
+    state: tampered, offer_id: offer.id, mode: 'contract'
+  }).error.code, 'INVALID_STATE')
+
+  const corruptId = structuredClone(locked)
+  corruptId.finance.entries.find((e) => e.counterparty === offer.id).id += '.corrupt'
+  assert.equal(call('start_work', {
+    state: corruptId, offer_id: offer.id, mode: 'contract'
+  }).error.code, 'INVALID_STATE')
+})
+
+test('lock_offer：有待处理事件时拒绝（INVALID_PHASE）', () => {
+  let state = rich(setupTiny(20261127))
+  for (let i = 0; i < 24 && state.events.pending.length === 0; i++) state = ok('advance_week', { state }).state
+  assert.ok(state.events.pending.length > 0)
+  assert.equal(call('lock_offer', { state, offer_id: state.market.slots[0].id }).error.code, 'INVALID_PHASE')
+})
+
+test('lock_offer：企划离开市场后回归仍拒绝再锁（Finance 终身历史不可绕过）', () => {
+  let state = rich(ok('initialize', { seed: 42 }).state)
+  const offer = generateOffer(42, 0, 0)
+  offer.expires_week = 10
+  state = withOffers(state, [offer])
+  state = ok('lock_offer', { state, offer_id: offer.id }).state
+  state.market.slots = []
+  state.market.slots.push(structuredClone(offer))
+  const entriesBefore = structuredClone(state.finance.entries)
+  const rejected = call('lock_offer', { state, offer_id: offer.id })
+  assert.equal(rejected.error.code, 'INVALID_STATE')
+  assert.deepEqual(state.finance.entries, entriesBefore)
+})
+
+test('lock_offer：损坏流水 ID 仍作为终身历史，不能重复锁定', () => {
+  let state = rich(ok('initialize', { seed: 42 }).state)
+  const offer = generateOffer(42, 0, 0)
+  offer.expires_week = 10
+  state = withOffers(state, [offer])
+  state = ok('lock_offer', { state, offer_id: offer.id }).state
+  state.finance.entries.find((e) => e.counterparty === offer.id).id += '.corrupt'
+  state.market.slots = []
+  state.market.slots.push(structuredClone(offer))
+  const entriesBefore = structuredClone(state.finance.entries)
+  const rejected = call('lock_offer', { state, offer_id: offer.id })
+  assert.equal(rejected.error.code, 'INVALID_STATE')
+  assert.deepEqual(state.finance.entries, entriesBefore)
+})
+
+test('定金基数生成时固定：后续预算调整不追溯改变定金', () => {
+  let state = rich(ok('initialize', { seed: 42 }).state)
+  const offer = generateOffer(42, 0, 0)
+  state = withOffers(state, [offer])
+  state.market.slots[0].contract_budget = offer.contract_budget * 2
+  const receipt = ok('lock_offer', { state, offer_id: offer.id })
+  assert.equal(receipt.deposit_paid, depositAmount(offer))
+})
+
+test('start_work：锁定期内定金 100% 抵扣，投资流水按差额入账', () => {
+  let state = rich(ok('initialize', { seed: 42 }).state)
+  const offer = state.market.slots[0]
+  state = ok('lock_offer', { state, offer_id: offer.id }).state
+  const lockedOffer = state.market.slots.find((o) => o.id === offer.id)
+  const deposit = lockedOffer.deposit_paid
+  const before = state.finance.balance
+  const started = ok('start_work', {
+    state, offer_id: offer.id, mode: 'committee', percent: 50,
+    committee_partner_ids: ['partner_tv', 'partner_stream']
+  })
+  const paid = (offer.contract_budget * 2 * 50) / 100
+  const oracle = startWorkCash(lockedOffer, paid, 0)
+  assert.equal(oracle.deposit_applied, deposit)
+  assert.equal(oracle.cash_due, paid - deposit)
+  const entry = started.state.finance.entries.find((e) => e.id === `w0.investment.${started.work_id}`)
+  assert.equal(entry.amount, -(paid - deposit))
+  assert.equal(started.state.finance.balance, before + offer.contract_budget - (paid - deposit))
+  const work = started.state.works.find((w) => w.id === started.work_id)
+  assert.equal(work.investment.paid, paid)
+})
+
+test('start_work：抵扣以应付款为上限，cash_due=0 不产生投资流水', () => {
+  let state = rich(ok('initialize', { seed: 42 }).state)
+  const offer = generateOffer(42, 0, 0)
+  offer.scale = 'tv'
+  offer.episode_count = 12
+  offer.min_reputation = 0
+  offer.contract_budget = 100000
+  offer.deposit_basis = 50_000_000
+  state = withOffers(state, [offer])
+  state = ok('lock_offer', { state, offer_id: offer.id }).state
+  const started = ok('start_work', {
+    state, offer_id: offer.id, mode: 'committee', percent: 50,
+    committee_partner_ids: ['partner_tv', 'partner_stream']
+  })
+  assert.ok(!started.state.finance.entries.some((e) => e.id === `w0.investment.${started.work_id}`))
+  const work = started.state.works.find((w) => w.id === started.work_id)
+  assert.equal(work.investment.paid, 100000)
+})
+
+test('start_work：自然到期边界与 W+2 锁定开局均拒绝开工', () => {
+  const base = rich(ok('initialize', { seed: 42 }).state)
+  const expired = generateOffer(42, 0, 0)
+  expired.expires_week = base.company.week
+  assert.equal(call('start_work', {
+    state: withOffers(base, [expired]), offer_id: expired.id, mode: 'contract'
+  }).error.code, 'NOT_FOUND')
+
+  let state = base
+  const offer = state.market.slots[0]
+  state = ok('lock_offer', { state, offer_id: offer.id }).state
+  const stale = structuredClone(state)
+  stale.company.week = offer.locked_until ?? stale.company.week + 2
+  assert.equal(call('start_work', {
+    state: stale, offer_id: offer.id, mode: 'contract'
+  }).error.code, 'NOT_FOUND')
+
+  state = ok('advance_week', { state }).state
+  assert.ok(state.market.slots.some((o) => o.id === offer.id), 'W+1 锁定仍有效')
+  state = ok('advance_week', { state }).state
+  assert.ok(!state.market.slots.some((o) => o.id === offer.id), 'W+2 开局释放')
+  const worksBefore = state.works.length
+  const entriesBefore = state.finance.entries.length
+  assert.equal(call('start_work', {
+    state, offer_id: offer.id, mode: 'contract'
+  }).error.code, 'NOT_FOUND')
+  assert.equal(state.works.length, worksBefore)
+  assert.equal(state.finance.entries.length, entriesBefore)
+})
+
+test('市场固定四槽：自然补满空槽，存活企划逐字段不变', () => {
+  const seed = 42
+  const base = ok('initialize', { seed }).state
+  const offers = Array.from({ length: 3 }, (_, i) => {
+    const offer = generateOffer(seed, 0, i)
+    offer.expires_week = 10
+    return offer
+  })
+  const expected = weeklyMarketStep(offers, seed, 1, base.company.reputation)
+  const advanced = ok('advance_week', { state: withOffers(base, offers) }).state
+  assert.equal(advanced.market.slots.length, 4)
+  assert.deepEqual(advanced.market.slots.slice(0, 3), offers)
+  assert.deepEqual(advanced.market.slots, expected.slots)
+  const full = Array.from({ length: 4 }, (_, i) => {
+    const offer = generateOffer(seed, 0, i)
+    offer.expires_week = 10
+    return offer
+  })
+  const advancedFull = ok('advance_week', { state: withOffers(base, full) }).state
+  assert.equal(advancedFull.market.slots.length, 4)
+  assert.deepEqual(advancedFull.market.slots, full)
+})
+
+test('市场补位保证至少两个可立即承接的企划', () => {
+  const base = ok('initialize', { seed: 42 }).state
+  const offers = [0, 1].map((i) => {
+    const offer = generateOffer(42, 0, i)
+    offer.expires_week = 10
+    offer.min_reputation = base.company.reputation + 100
+    return offer
+  })
+  const advanced = ok('advance_week', { state: withOffers(base, offers) }).state
+  assert.equal(advanced.market.slots.length, 4)
+  assert.deepEqual(advanced.market.slots.slice(0, 2), offers)
+  assert.equal(advanced.market.slots.filter((o) => o.min_reputation <= base.company.reputation).length, 2)
+})
+
+test('advance_week：fixture 目录按 PLACEHOLDER 窗口到期，补充企划与 oracle 逐位一致', () => {
+  const seed = 20261127
+  let state = ok('initialize', { seed }).state
+  state = ok('advance_week', { state }).state
+  state = ok('advance_week', { state }).state
+  const prior = state.market.slots
+  state = ok('advance_week', { state }).state
+  assert.ok(!state.market.slots.some((o) => o.id.startsWith('offer_0')))
+  assert.deepEqual(state.market.slots, weeklyMarketStep(prior, seed, 3, state.company.reputation).slots)
+})
+
+test('validate：槽位超 4 与生命周期快照篡改被拒绝', () => {
+  const seed = 42
+  const base = ok('initialize', { seed }).state
+  const five = Array.from({ length: 5 }, (_, i) => {
+    const offer = generateOffer(seed, 0, i)
+    offer.expires_week = 10
+    return offer
+  })
+  assert.equal(call('advance_week', { state: withOffers(base, five) }).error.code, 'INVALID_STATE')
+  const inconsistent = generateOffer(seed, 0, 0)
+  inconsistent.lock_used = false
+  inconsistent.deposit_paid = 50000
+  assert.equal(call('advance_week', { state: withOffers(base, [inconsistent]) }).error.code, 'INVALID_STATE')
+  const forged = generateOffer(seed, 0, 0)
+  forged.locked_until = 2
+  forged.lock_used = true
+  forged.deposit_paid = depositAmount(forged)
+  assert.equal(call('advance_week', { state: withOffers(base, [forged]) }).error.code, 'INVALID_STATE')
+  const missing = generateOffer(seed, 0, 0)
+  delete missing.expires_week
+  assert.equal(call('advance_week', { state: withOffers(base, [missing]) }).error.code, 'INVALID_STATE')
 })

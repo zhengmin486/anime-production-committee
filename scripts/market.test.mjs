@@ -13,6 +13,9 @@ test('企划形状符合架构 §7.4 + §14.13 生命周期字段', () => {
   const offer = generateOffer(42, 3, 0)
   assert.ok(GENRES.includes(offer.genre))
   assert.ok(SCALES.includes(offer.scale))
+  assert.equal(offer.scale, 'tv', '非 TV 蓝图未注册，生成器暂只产出 TV')
+  assert.equal(offer.blueprint_id, 'tv_standard')
+  assert.equal(offer.episode_count, 12)
   assert.ok(offer.episode_count > 0)
   assert.ok(offer.contract_budget > 0)
   assert.deepEqual(offer.allowed_modes, ['contract', 'committee'])
@@ -32,22 +35,23 @@ test('企划 id 坐标决定：同周同 index 同 id，跨周不同（终身唯
   assert.notEqual(a.id, c.id)
 })
 
-test('初始市场 4 个，互不重复', () => {
+test('初始市场 4 个，互不重复且至少两个可立即承接', () => {
   const slots = initialMarket(42)
   assert.equal(slots.length, 4)
   assert.equal(new Set(slots.map((o) => o.id)).size, 4)
+  assert.ok(slots.filter((o) => o.min_reputation <= 100).length >= 2)
 })
 
 // ---- 自然补充与过期 ----
 
-function offer(id, expires, lockedUntil = null) {
-  return { id, expires_week: expires, locked_until: lockedUntil, lock_used: lockedUntil != null, deposit_paid: 0 }
+function offer(id, expires, lockedUntil = null, minReputation = 0) {
+  return { id, expires_week: expires, locked_until: lockedUntil, lock_used: lockedUntil != null, deposit_paid: 0, min_reputation: minReputation }
 }
 
 test('自然补充保留存活企划逐字段不变，不清空重抽', () => {
   const slots = [offer('o0', 5), offer('o1', 6)]
   const snapshot = JSON.stringify(slots)
-  const result = topUpMarket(slots, 42, 1, { params: { weekly_add: 2 } })
+  const result = topUpMarket(slots, 42, 1)
   for (const o of result.slots.filter((x) => ['o0', 'o1'].includes(x.id))) {
     assert.equal(JSON.stringify(o), JSON.stringify(slots.find((b) => b.id === o.id)))
   }
@@ -55,14 +59,22 @@ test('自然补充保留存活企划逐字段不变，不清空重抽', () => {
   assert.equal(JSON.stringify(slots), snapshot, '入参不被修改')
 })
 
-test('补充受上限 10 约束；满员不补充', () => {
-  const full = Array.from({ length: 10 }, (_, i) => offer('f' + i, 50))
-  const result = topUpMarket(full, 42, 1, { params: { weekly_add: 5 } })
+test('补充受固定四槽约束；满员不补充', () => {
+  const full = Array.from({ length: 4 }, (_, i) => offer('f' + i, 50))
+  const result = topUpMarket(full, 42, 1)
   assert.equal(result.added_ids.length, 0)
-  assert.equal(result.slots.length, 10)
-  const nine = full.slice(0, 9)
-  const r2 = topUpMarket(nine, 42, 1, { params: { weekly_add: 5 } })
-  assert.equal(r2.slots.length, 10)
+  assert.equal(result.slots.length, 4)
+  const three = full.slice(0, 3)
+  const r2 = topUpMarket(three, 42, 1)
+  assert.equal(r2.slots.length, 4)
+})
+
+test('补位优先保证至少两个可立即承接，不修改存活企划', () => {
+  const slots = [offer('locked-a', 50, null, 500), offer('locked-b', 50, null, 500)]
+  const result = topUpMarket(slots, 42, 1, { reputation: 100 })
+  assert.deepEqual(result.slots.slice(0, 2), slots)
+  assert.equal(result.added_ids.length, 2)
+  assert.equal(result.slots.filter((o) => o.min_reputation <= 100).length, 2)
 })
 
 test('自然过期边界：expires_week 是失效周，该周开局移除', () => {
@@ -84,14 +96,15 @@ test('锁定到期未接单：W+2 开局释放槽位，即使自然有效期未�
   assert.deepEqual(releaseExpiredLocks(slots, 8).map((o) => o.id), ['N'])
 })
 
-test('周结算市场步顺序：释放到期锁定 → 自然过期 → 补充', () => {
+test('周结算市场步顺序：释放到期锁定 → 自然过期 → 补满空槽', () => {
   const slots = [offer('deadLock', 20, 4), offer('expired', 2), offer('alive', 30)]
-  const result = weeklyMarketStep(slots, 42, 5, { params: { weekly_add: 1 } })
+  const result = weeklyMarketStep(slots, 42, 5)
   const ids = result.slots.map((o) => o.id)
   assert.ok(!ids.includes('deadLock'))
   assert.ok(!ids.includes('expired'))
   assert.ok(ids.includes('alive'))
-  assert.equal(result.added_ids.length, 1)
+  assert.equal(result.added_ids.length, 3)
+  assert.equal(result.slots.length, 4)
 })
 
 // ---- 定金锁定 ----

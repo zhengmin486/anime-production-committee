@@ -35,8 +35,7 @@
     ],
     "documented_not_exported": [
       "hire_temporary",
-      "sign_outsourcing",
-      "lock_offer"
+      "sign_outsourcing"
     ],
     "exported": [
       "abort_work",
@@ -56,6 +55,7 @@
       "initialize",
       "initialize_game",
       "instantiate_work",
+      "lock_offer",
       "reject_proposal",
       "request_extension",
       "resolve_event",
@@ -198,18 +198,11 @@
   ],
   "future_contract": {
     "source": "M0 §14.13 / DECISION_LOG §17 Q3/Q4",
-    "status": "frozen_target_not_implemented",
-    "fields": {
-      "state.market.slots[]": [
-        "deposit_paid",
-        "expires_week",
-        "lock_used",
-        "locked_until"
-      ]
-    },
+    "status": "frozen_baselines_implemented_in_v4_runtime",
+    "fields": {},
     "market_slots": {
       "initial": 4,
-      "maximum": 10
+      "maximum": 4
     },
     "lock_offer": {
       "covered_weeks": [
@@ -296,12 +289,18 @@
             "partner_stream"
           ],
           "contract_budget": 1200000,
+          "deposit_basis": 1200000,
+          "deposit_paid": 0,
           "duration_weeks": 26,
           "episode_count": 12,
+          "expires_week": 3,
           "genre": "sf",
           "id": "offer_01",
+          "lock_used": false,
+          "locked_until": null,
           "min_reputation": 0,
           "name": "星海邮差",
+          "offer_source_type": "market",
           "origin": "publisher",
           "required_works": [],
           "scale": "tv",
@@ -334,12 +333,18 @@
             "partner_pub"
           ],
           "contract_budget": 900000,
+          "deposit_basis": 900000,
+          "deposit_paid": 0,
           "duration_weeks": 24,
           "episode_count": 12,
+          "expires_week": 3,
           "genre": "drama",
           "id": "offer_02",
+          "lock_used": false,
+          "locked_until": null,
           "min_reputation": 0,
           "name": "雨夜食堂",
+          "offer_source_type": "market",
           "origin": "publisher",
           "required_works": [],
           "scale": "tv",
@@ -373,12 +378,18 @@
             "partner_pub"
           ],
           "contract_budget": 1500000,
+          "deposit_basis": 1500000,
+          "deposit_paid": 0,
           "duration_weeks": 30,
           "episode_count": 12,
+          "expires_week": 3,
           "genre": "family",
           "id": "offer_03",
+          "lock_used": false,
+          "locked_until": null,
           "min_reputation": 0,
           "name": "机甲夏令营",
+          "offer_source_type": "market",
           "origin": "publisher",
           "required_works": [],
           "scale": "tv",
@@ -410,12 +421,18 @@
             "partner_stream"
           ],
           "contract_budget": 700000,
+          "deposit_basis": 700000,
+          "deposit_paid": 0,
           "duration_weeks": 20,
           "episode_count": 12,
+          "expires_week": 3,
           "genre": "romance",
           "id": "offer_04",
+          "lock_used": false,
+          "locked_until": null,
           "min_reputation": 0,
           "name": "无声的告白",
+          "offer_source_type": "market",
           "origin": "publisher",
           "required_works": [],
           "scale": "tv",
@@ -522,6 +539,7 @@
       "INV-21",
       "INV-22",
       "INV-23",
+      "INV-24",
       "INV-25",
       "INV-27",
       "INV-29"
@@ -745,14 +763,20 @@
       "committee_candidates",
       "contract_budget",
       "created_week",
+      "deposit_basis",
+      "deposit_paid",
       "development_fee",
       "draft_status",
       "duration_weeks",
       "episode_count",
+      "expires_week",
       "genre",
       "id",
+      "lock_used",
+      "locked_until",
       "min_reputation",
       "name",
+      "offer_source_type",
       "origin",
       "required_works",
       "rules_status",
@@ -805,13 +829,19 @@
       "commercial_potential",
       "committee_candidates",
       "contract_budget",
+      "deposit_basis",
+      "deposit_paid",
       "duration_weeks",
       "episode_count",
+      "expires_week",
       "genre",
       "id",
       "ip_id",
+      "lock_used",
+      "locked_until",
       "min_reputation",
       "name",
+      "offer_source_type",
       "origin",
       "required_works",
       "scale",
@@ -1033,13 +1063,20 @@
       "commercial_potential",
       "committee_candidates",
       "contract_budget",
+      "deposit_basis",
+      "deposit_paid",
       "duration_weeks",
       "episode_count",
+      "expires_week",
       "genre",
       "id",
+      "lock_used",
+      "locked_until",
       "min_reputation",
       "name",
+      "offer_source_type",
       "origin",
+      "previous_work_id",
       "required_works",
       "scale",
       "source",
@@ -1357,6 +1394,11 @@
       "state",
       "work_id"
     ],
+    "lock_offer": [
+      "deposit_paid",
+      "offer_id",
+      "state"
+    ],
     "reject_proposal": [
       "state"
     ],
@@ -1390,6 +1432,11 @@
       "state"
     ],
     "dismiss_staff": [
+      "state"
+    ],
+    "lock_offer": [
+      "deposit_paid",
+      "offer_id",
       "state"
     ]
   },

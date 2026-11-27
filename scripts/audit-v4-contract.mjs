@@ -172,12 +172,15 @@ for (const term of ['100% 抵扣', '定金不退', '锁定一次', '每周至多
     fail(`Q3/Q4 产品语义未在四份权威文档同步：${term}`)
   }
 }
-if (shape.future_contract.market_slots.initial !== 4 || shape.future_contract.market_slots.maximum !== 10) {
-  fail('市场槽位基线必须为初始 4、最大 10')
+if (shape.future_contract.market_slots.initial !== 4 || shape.future_contract.market_slots.maximum !== 4) {
+  fail('企划市场槽位基线必须为固定 4 槽（DEC-MARKET-001）')
 }
-if (!m0Source.includes('slots ≤ 10，初始 4')) fail('docs/M0_CONTRACT_FREEZE.md 市场槽位仍为旧 4 槽上限')
-if (!architectureSource.includes('slots: Offer[4]') || !/上限\s*10/.test(architectureSource)) {
-  fail('docs/DOMAIN_ARCHITECTURE.md 市场槽位必须同时说明初始 4 与上限 10')
+if (!m0Source.includes('market.slots ≤ 4') || !m0Source.includes('初始生成 4 个企划')) {
+  fail('docs/M0_CONTRACT_FREEZE.md 未登记企划市场固定四槽与初始四企划')
+}
+if (!architectureSource.includes('slots: Offer[4]') || !architectureSource.includes('每周只补空槽') ||
+    !architectureSource.includes('至少 2 个企划')) {
+  fail('docs/DOMAIN_ARCHITECTURE.md 未同步企划市场固定四槽、补空槽与最低可承接数')
 }
 if (!shape.future_contract.lock_offer.once_per_proposal_lifetime ||
     shape.future_contract.lock_offer.deposit_refund_on_expiry !== false ||
@@ -343,6 +346,22 @@ collect(hireReceipt.state, 'state', observed)
 const dismissReceipt = unwrap('dismiss_staff', { state: hireReceipt.state, staff_id: hireReceipt.staff_id })
 collect(dismissReceipt.state, 'state', observed)
 
+// 市场闭环（M0 命令 23/2）：独立状态走 lock_offer → start_work（锁定期内定金抵扣），
+// 再对未锁定状态 advance_week 一次，观察坐标生成企划与周补充形状。
+const marketBase = fundedInitialize()
+const lockReceipt = unwrap('lock_offer', { state: marketBase, offer_id: marketBase.market.slots[0].id })
+collect(lockReceipt.state, 'state', observed)
+const lockedStartReceipt = unwrap('start_work', {
+  state: lockReceipt.state,
+  offer_id: lockReceipt.offer_id,
+  mode: 'committee',
+  percent: 50,
+  committee_partner_ids: ['partner_tv', 'partner_stream']
+})
+collect(lockedStartReceipt.state, 'state', observed)
+const marketWeekReceipt = unwrap('advance_week', { state: marketBase })
+collect(marketWeekReceipt.state, 'state', observed)
+
 collect(state, 'state', observed)
 collect(vendorState, 'state', observed)
 collect(pendingState, 'state', observed)
@@ -470,6 +489,7 @@ const receipts = {
   scout: Object.keys(scoutReceipt).filter((key) => key !== 'error'),
   hire_core: Object.keys(hireReceipt).filter((key) => key !== 'error'),
   dismiss_staff: Object.keys(dismissReceipt).filter((key) => key !== 'error'),
+  lock_offer: Object.keys(lockReceipt).filter((key) => key !== 'error'),
   hash_state: Object.keys(unwrap('hash_state', { state })).filter((key) => key !== 'error')
 }
 if (viewReceipt) receipts.view_event = Object.keys(viewReceipt).filter((key) => key !== 'error')

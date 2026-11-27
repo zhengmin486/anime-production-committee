@@ -668,6 +668,146 @@ const PoolCandidate* find_candidate(const GameState& state, const std::string& s
     return nullptr;
 }
 
+// ---------------- 市场生命周期（M0 §14.13.2 / Q4）----------------
+// 企划市场固定四槽、每周只补空槽，并保障至少两个可立即承接的企划。
+// 锁定期两周、定金 5%/10% × deposit_basis（生成时固定）、锁定期内签约 100% 抵扣、
+// 到期定金不退为冻结语义；有效期分布为 [PLACEHOLDER]（#59/M7）。
+// 初始 4 槽沿用 M1 fixture 目录（内容待 #59 标定，现有验收用例依赖），生命周期字段按冻结契约补齐；
+// 每周自然补充走坐标生成，与 scripts/lib/market-oracle.mjs generateOffer 逐位一致。
+// 企划 id 含 week+index 坐标，终身唯一由构造保证；锁定历史不得被槽位刷新洗掉（M0 §14.13.2）。
+
+constexpr int kMarketCap = 4;                 // DEC-MARKET-001：企划市场固定四槽
+constexpr int kMinimumAcceptableOffers = 2;   // DEC-MARKET-001：至少两个可立即承接
+constexpr int kExpiryMin = 1;                 // [PLACEHOLDER] STATUS-49 确认范围 1–3 周
+constexpr int kExpiryMax = 3;
+constexpr int kLockWeeks = 2;                 // Q4 冻结：W/W+1 有效，W+2 开局失效
+constexpr int kDepositRegularPermille = 50;   // §14.13.2 冻结：普通企划 5%
+constexpr int kDepositIpPermille = 100;       // §14.13.2 冻结：IP 上门 10%
+constexpr int kFixtureExpiresWeek = 3;        // [PLACEHOLDER] fixture 目录到期周，待 #59 标定
+
+const char* const kOfferGenres[6] = {"action", "fantasy", "scifi", "daily", "idol", "sports"};
+// 非 TV 蓝图尚未注册；生成器暂只产出可立项的 TV 企划，规模词表仍保留给其他来源。
+const char* const kGeneratedOfferScales[1] = {"tv"};
+
+std::uint32_t purpose_offer_gen() { return kernel::hash_text("offer_gen"); }
+
+int episode_count_of_scale(const std::string& scale) {
+    if (scale == "short") return 1;
+    if (scale == "ova") return 2;
+    if (scale == "movie") return 1;
+    return 12;
+}
+
+// 候选内子坐标 index*16+k（k=0..15），与 oracle generateOffer 逐位一致。
+Json generate_offer(std::uint32_t seed, int week, int index, const std::string& source_type,
+                    int reputation_cap = 120) {
+    const auto sub = [&](int k) {
+        return kernel::draw(seed, week, kernel::Stream::market, purpose_offer_gen(),
+                            static_cast<std::uint32_t>(index * 16 + k));
+    };
+    const std::string genre = kOfferGenres[sub(0) % 6];
+    const std::string scale = kGeneratedOfferScales[0];
+    const std::int64_t budget = static_cast<std::int64_t>(500 + sub(2) % 1500) * 10000;
+    const std::string id = "offer_" + hex32(purpose_offer_gen()) + "_" + std::to_string(week) + "_" + std::to_string(index);
+    return Json{{"id", id},
+                {"name", genre + "_" + scale + "_" + std::to_string(week) + "_" + std::to_string(index)},
+                {"source", "market"},
+                {"genre", genre},
+                {"scale", scale},
+                {"contract_budget", budget},
+                {"duration_weeks", 12 + static_cast<int>(sub(3) % 27)},
+                {"target_quality", 40 + static_cast<int>(sub(4) % 51)},
+                {"audience_base", 1000 + static_cast<int>(sub(5) % 9000)},
+                {"commercial_potential", static_cast<int>(sub(6) % 101)},
+                {"channel_potentials", Json::object()},
+                {"channels_baseline", Json::array({"bd"})},
+                {"allowed_modes", Json::array({"contract", "committee"})},
+                {"committee_candidates", Json::array()},
+                {"min_reputation", std::min(static_cast<int>(sub(7) % 120), reputation_cap)},
+                {"required_works", Json::array()},
+                {"previous_work_id", nullptr},
+                {"blueprint_id", "tv_standard"},
+                {"episode_count", episode_count_of_scale(scale)},
+                {"workload_scale_permille", 1000},
+                {"origin", "market"},
+                {"style", "standard"},
+                {"offer_source_type", source_type},
+                {"deposit_basis", budget},
+                {"expires_week", week + kExpiryMin + static_cast<int>(sub(8) % static_cast<std::uint32_t>(kExpiryMax - kExpiryMin + 1))},
+                {"locked_until", nullptr},
+                {"lock_used", false},
+                {"deposit_paid", 0}};
+}
+
+// 定金档位由来源分类决定（玩家不可切换）；基数取生成时固定的 deposit_basis，
+// 后续预算调整不追溯。先除后乘，避免大基数在乘法阶段溢出；整数千分比向下取整。
+std::int64_t offer_deposit_amount(const Json& offer) {
+    const std::int64_t basis = offer.value("deposit_basis", static_cast<std::int64_t>(0));
+    if (basis <= 0) return 0;
+    const int rate = offer.value("offer_source_type", std::string("market")) == "ip_visit"
+                         ? kDepositIpPermille
+                         : kDepositRegularPermille;
+    constexpr std::int64_t divisor = 1000;
+    return (basis / divisor) * rate + (basis % divisor) * rate / divisor;
+}
+
+std::string offer_deposit_entry_id(int week, const std::string& offer_id) {
+    return "w" + std::to_string(week) + ".production." + offer_id + ".deposit";
+}
+
+bool is_offer_deposit_entry(const LedgerEntry& entry, const std::string& offer_id) {
+    if (entry.category == "production" && !entry.work_id.has_value() &&
+        entry.counterparty && *entry.counterparty == offer_id &&
+        entry.memo == "定金锁定（到期不退）") {
+        return true;
+    }
+    const std::string marker = ".production." + offer_id + ".deposit";
+    return entry.id.find(marker) != std::string::npos;
+}
+
+std::vector<const LedgerEntry*> offer_deposit_entries(const GameState& state, const std::string& offer_id) {
+    std::vector<const LedgerEntry*> entries;
+    for (const auto& entry : state.finance.entries) {
+        if (is_offer_deposit_entry(entry, offer_id)) entries.push_back(&entry);
+    }
+    return entries;
+}
+
+bool offer_in_lock(const Json& offer, int week) {
+    return offer.contains("locked_until") && offer.at("locked_until").is_number_integer() &&
+           week < offer.at("locked_until").get<int>();
+}
+
+// 周结算市场步（开局边界）：先释放到期锁定（定金不退），再自然过期（锁定期内受保护），
+// 最后补满空槽——不是清空重抽，存活企划逐字段不变。
+Json weekly_market_step(const Json& market, std::uint32_t seed, int week, int reputation) {
+    Json next = market;
+    Json slots = Json::array();
+    if (market.contains("slots") && market.at("slots").is_array()) {
+        for (const auto& offer : market.at("slots")) {
+            if (!offer.is_object()) continue;
+            const bool has_lock = offer.contains("locked_until") && offer.at("locked_until").is_number_integer();
+            if (has_lock && week >= offer.at("locked_until").get<int>()) continue;
+            if (week >= offer.value("expires_week", kMaxWeek) && !offer_in_lock(offer, week)) continue;
+            slots.push_back(offer);
+        }
+    }
+    int acceptable = 0;
+    for (const auto& offer : slots) {
+        if (offer.value("min_reputation", 0) <= reputation) ++acceptable;
+    }
+    const int free = std::max(0, kMarketCap - static_cast<int>(slots.size()));
+    for (int i = 0; i < free; ++i) {
+        const int cap = acceptable < kMinimumAcceptableOffers ? reputation : 120;
+        slots.push_back(generate_offer(seed, week, i, "market", cap));
+        if (cap <= reputation) ++acceptable;
+    }
+    next["slots"] = std::move(slots);
+    next["refresh_week"] = week;
+    return next;
+}
+
+
 }  // namespace
 
 bool archive_exact_fields(const Json& value, std::initializer_list<const char*> fields) {
@@ -1630,7 +1770,7 @@ std::vector<std::string> validate(const GameState& state) {
     } else {
         if (state.market.contains("slots")) {
             if (!state.market.at("slots").is_array()) error("INV-01 market.slots 必须是数组");
-            else if (state.market.at("slots").size() > 4) error("INV-01 market.slots 最多 4 个");
+            else if (state.market.at("slots").size() > static_cast<std::size_t>(kMarketCap)) error("INV-01 market.slots 最多 4 个");
             else {
                 for (const auto& offer : state.market.at("slots")) {
                     const std::string offer_id = offer.value("id", std::string{});
@@ -1648,6 +1788,61 @@ std::vector<std::string> validate(const GameState& state) {
                     }
                     if (!offer.contains("allowed_modes") || offer.at("allowed_modes").empty()) {
                         error("INV-01 offer.allowed_modes 不能为空: " + offer_id);
+                    }
+                    // §14.13.2 生命周期字段（市场槽必填；自定/提案槽透传不强制）。
+                    if (!offer.contains("expires_week") || !offer.at("expires_week").is_number_integer() ||
+                        offer.at("expires_week").get<int>() < 0) {
+                        error("INV-01 offer.expires_week 必须为非负整数: " + offer_id);
+                    }
+                    if (!offer.contains("locked_until") ||
+                        (!offer.at("locked_until").is_null() && !offer.at("locked_until").is_number_integer())) {
+                        error("INV-01 offer.locked_until 必须为 null 或整数: " + offer_id);
+                    }
+                    if (!offer.contains("lock_used") || !offer.at("lock_used").is_boolean()) {
+                        error("INV-01 offer.lock_used 必须为布尔: " + offer_id);
+                    }
+                    if (!offer.contains("deposit_paid") || !offer.at("deposit_paid").is_number_integer() ||
+                        offer.at("deposit_paid").get<std::int64_t>() < 0) {
+                        error("INV-01 offer.deposit_paid 必须为非负整数: " + offer_id);
+                    }
+                    if (!offer.contains("offer_source_type") || !offer.at("offer_source_type").is_string() ||
+                        offer.at("offer_source_type").get<std::string>().empty()) {
+                        error("INV-01 offer.offer_source_type 缺失: " + offer_id);
+                    }
+                    if (!offer.contains("deposit_basis") || !offer.at("deposit_basis").is_number_integer() ||
+                        offer.at("deposit_basis").get<std::int64_t>() <= 0) {
+                        error("INV-01 offer.deposit_basis 必须为正: " + offer_id);
+                    }
+                    const bool has_lock = offer.contains("locked_until") && offer.at("locked_until").is_number_integer();
+                    const bool lock_used = offer.value("lock_used", false);
+                    const auto deposits = offer_deposit_entries(state, offer_id);
+                    if (lock_used) {
+                        const std::int64_t expected_deposit = offer_deposit_amount(offer);
+                        if (deposits.size() != 1) {
+                            error("INV-01 offer 已锁定但 Finance 定金流水不唯一: " + offer_id);
+                        } else {
+                            const LedgerEntry& entry = *deposits.front();
+                            if (offer.value("deposit_paid", static_cast<std::int64_t>(0)) != expected_deposit) {
+                                error("INV-01 offer.deposit_paid 与定金公式不一致: " + offer_id);
+                            }
+                            if (!has_lock || offer.at("locked_until").get<int>() != entry.week + kLockWeeks) {
+                                error("INV-01 offer.locked_until 与定金流水不一致: " + offer_id);
+                            }
+                            if (entry.id != offer_deposit_entry_id(entry.week, offer_id) ||
+                                entry.week > state.company.week || entry.work_id.has_value() ||
+                                entry.category != "production" || entry.amount != -expected_deposit ||
+                                !entry.counterparty || *entry.counterparty != offer_id ||
+                                entry.memo != "定金锁定（到期不退）") {
+                                error("INV-01 Finance 定金流水不是规范流水: " + offer_id);
+                            }
+                        }
+                    } else {
+                        if (has_lock || offer.value("deposit_paid", static_cast<std::int64_t>(0)) > 0) {
+                            error("INV-01 offer 锁定快照不一致（lock_used=false）: " + offer_id);
+                        }
+                        if (!deposits.empty()) {
+                            error("INV-24 Finance 已有该企划的终身锁定历史: " + offer_id);
+                        }
                     }
                 }
             }
@@ -1823,7 +2018,7 @@ Json make_partner(const char* id, const char* name, const char* type, const char
 Json make_offer(const char* id, const char* name, const char* source, const char* genre, int budget, int weeks,
                 int target_quality, int audience, int commercial, Json potentials, Json channels, Json modes,
                 Json candidates) {
-    return Json{{"id", id},
+    Json offer = Json{{"id", id},
                 {"name", name},
                 {"source", source},
                 {"genre", genre},
@@ -1844,6 +2039,15 @@ Json make_offer(const char* id, const char* name, const char* source, const char
                 {"workload_scale_permille", 1000},
                 {"origin", "publisher"},
                 {"style", "standard"}};
+    // §14.13.2 生命周期字段：fixture 目录的到期窗口为 [PLACEHOLDER]，
+    // 定金基数按生成时固定的基础立项费用快照。
+    offer["offer_source_type"] = "market";
+    offer["deposit_basis"] = budget;
+    offer["expires_week"] = kFixtureExpiresWeek;
+    offer["locked_until"] = nullptr;
+    offer["lock_used"] = false;
+    offer["deposit_paid"] = 0;
+    return offer;
 }
 
 Json initial_market() {
@@ -3206,12 +3410,19 @@ std::string advance_week(const std::string& input) {
                                    {"option_id", option->id}, {"automatic", true}});
         }
 
+        // ---- 阶段 7：下一周开场状态步（先于阶段 8 事件抽取）----
+        const int next_week = week + 1;
+        // 招聘池进入新周先清理到期 scout 窗口，再部分轮换常规池。
+        // 市场释放到期锁定 → 自然过期 → 自然补充；破产路径已在阶段 2 提前返回。
+        state.recruitment.pool = rotate_pool(state.recruitment.pool, state.seed, next_week);
+        state.market = weekly_market_step(state.market, state.seed, next_week, state.company.reputation);
+
         // ---- 阶段 8：随机事件抽取与周数 +1 ----
         // 每个 producing 项目各自至多一条；已有待处理事件的项目不再追加。
         // 第 520 周先合法完成当周结算，再统一收尾：不再抽事件，剩余项目转 closing 结清。
         Json events_report = Json::object();
         Json terminal_expired = Json::array();
-        if (week + 1 >= kMaxWeek) {
+        if (next_week >= kMaxWeek) {
             // #120：第 520 周同样是强制终局。本周已到期的限时事件已在阶段 7 处理，
             // 这里结清仍在 pending 的其余事件（默认保守分支），再关闭公司。
             if (!state.events.pending.empty()) {
@@ -3231,12 +3442,9 @@ std::string advance_week(const std::string& input) {
             events_report = event::draw(state, week + 1);
         }
 
-        state.company.week = week + 1;
+        state.company.week = next_week;
         // 阶段 7 的到期事件与阶段 8 的终局结清共用已登记的 expired 形状，按处理顺序合并。
         for (const auto& item : terminal_expired) expired.push_back(item);
-        // 招聘池周步骤（§14.13.1）：进入新周先清理到期 scout 窗口，再部分轮换常规池。
-        // 破产路径在阶段 2 已提前返回，不会走到这里。
-        state.recruitment.pool = rotate_pool(state.recruitment.pool, state.seed, week + 1);
         events_report["expired"] = expired;
 
         const auto post_errors = validate(state);
@@ -3306,6 +3514,7 @@ std::string create_custom_offer(const std::string& input) {
                                             {"style", style},
                                             {"genre", "original"},
                                             {"origin", "custom"},
+                                            {"offer_source_type", "custom"},
                                             {"draft_status", "valid"},
                                             {"created_week", state.company.week},
                                             {"contract_budget", budget},
@@ -3392,6 +3601,65 @@ std::string reject_proposal(const std::string& input) {
     }
 }
 
+// 命令 23 lock_offer（M0 §14.13.2 / Q4）：定金锁定市场槽企划。
+// 终身一次（lock_used 永不复位）、锁定期两周（W/W+1 有效，W+2 开局释放）、
+// 定金 = deposit_basis × 档位（普通 5% / IP 上门 10%），现金权威唯一走 Finance。
+// 自定/提案槽不适用定金锁定（其生命周期语义未冻结，见 #6 缺口说明）。
+std::string lock_offer(const std::string& input) {
+    try {
+        const Json request = Json::parse(input);
+        GameState state = decode_state(request);
+        const auto input_errors = validate(state);
+        if (!input_errors.empty()) return encode(error_body("INVALID_STATE", input_errors.front()));
+        if (state.company.status != "running") return encode(error_body("COMPANY_ENDED", "公司已结束"));
+        if (!request.contains("offer_id") || !request.at("offer_id").is_string()) {
+            return encode(error_body("INVALID_INPUT", "offer_id 必须是字符串"));
+        }
+        const std::string offer_id = request.at("offer_id").get<std::string>();
+        if (!state.events.pending.empty()) return encode(error_body("INVALID_PHASE", "有待处理事件时不能锁定企划"));
+        const int week = state.company.week;
+
+        Json* slot = nullptr;
+        if (state.market.contains("slots") && state.market.at("slots").is_array()) {
+            for (auto& offer : state.market.at("slots")) {
+                if (offer.is_object() && offer.value("id", std::string{}) == offer_id) {
+                    slot = &offer;
+                    break;
+                }
+            }
+        }
+        if (slot == nullptr) return encode(error_body("NOT_FOUND", "企划不存在或已过期"));
+        if (slot->value("lock_used", false)) {
+            return encode(error_body("INVALID_INPUT", "该企划已用过定金锁定（终身一次）"));
+        }
+        if (week >= slot->value("expires_week", kMaxWeek)) {
+            return encode(error_body("NOT_FOUND", "企划已过期"));
+        }
+        const std::int64_t deposit = offer_deposit_amount(*slot);
+        if (state.finance.balance < deposit) {
+            return encode(Json{{"error", {{"code", "INSUFFICIENT_FUNDS"},
+                                          {"message", "现金不足以支付定金"},
+                                          {"gap", deposit - state.finance.balance}}}});
+        }
+
+        (*slot)["locked_until"] = week + kLockWeeks;
+        (*slot)["lock_used"] = true;
+        (*slot)["deposit_paid"] = deposit;
+        state.finance.entries.push_back(LedgerEntry{
+            offer_deposit_entry_id(week, offer_id), week, std::nullopt,
+            "production", -deposit, offer_id, "定金锁定（到期不退）"});
+        state.finance.balance -= deposit;
+
+        const auto errors = validate(state);
+        if (!errors.empty()) return encode(error_body("INTERNAL_ERROR", "锁定后状态非法: " + errors.front()));
+        return encode(Json{{"state", state}, {"offer_id", offer_id}, {"deposit_paid", deposit}});
+    } catch (const Json::exception&) {
+        return encode(error_body("INVALID_INPUT", "JSON 或字段类型无效"));
+    } catch (...) {
+        return encode(error_body("INTERNAL_ERROR", "内部错误"));
+    }
+}
+
 std::string start_work(const std::string& input) {
     try {
         const Json request = Json::parse(input);
@@ -3414,6 +3682,25 @@ std::string start_work(const std::string& input) {
         const Json* offer = find_offer(state, offer_id);
         if (offer == nullptr) return encode(error_body("NOT_FOUND", "企划不存在或已被消费"));
         const Json& snapshot = *offer;
+        const int week = state.company.week;
+        bool market_slot = false;
+        if (state.market.contains("slots") && state.market.at("slots").is_array()) {
+            for (const auto& slot : state.market.at("slots")) {
+                if (slot.is_object() && slot.value("id", std::string{}) == offer_id) {
+                    market_slot = true;
+                    break;
+                }
+            }
+        }
+        if (market_slot) {
+            const bool has_lock = snapshot.contains("locked_until") && snapshot.at("locked_until").is_number_integer();
+            const bool lock_expired = has_lock && week >= snapshot.at("locked_until").get<int>();
+            const bool naturally_expired = week >= snapshot.value("expires_week", kMaxWeek) &&
+                                           !offer_in_lock(snapshot, week);
+            if (lock_expired || naturally_expired) {
+                return encode(error_body("NOT_FOUND", "企划不存在或已过期"));
+            }
+        }
         if (snapshot.contains("ip_id") && !snapshot.at("ip_id").is_null() && !archive_text(snapshot.at("ip_id"))) {
             return encode(error_body("INVALID_STATE", "企划 ip_id 必须是非空字符串或 null"));
         }
@@ -3527,13 +3814,20 @@ std::string start_work(const std::string& input) {
 
         const std::int64_t total_investment = mode == "committee" ? budget * 2 : 0;
         const std::int64_t paid = total_investment * percent / 100;
-        if (state.finance.balance < paid) {
+        // §14.13.2 签约抵扣：仅锁定期内（week < locked_until）定金 100% 抵扣本次应付投资额。
+        // 定金已在 lock_offer 入账，这里只减少本次现金支出，不重复计成本、不新增退款流水。
+        // 承制模式无应付投资额（paid=0），按冻结公式 applied=min(deposit,0)=0（缺口已报 #6）。
+        const auto deposits = offer_deposit_entries(state, offer_id);
+        const std::int64_t deposit_paid = deposits.empty() ? 0 : -deposits.front()->amount;
+        const std::int64_t deposit_applied = market_slot && offer_in_lock(snapshot, week)
+                                                  ? std::min(deposit_paid, paid)
+                                                  : 0;
+        const std::int64_t cash_due = paid - deposit_applied;
+        if (state.finance.balance < cash_due) {
             return encode(Json{{"error", {{"code", "INSUFFICIENT_FUNDS"},
                                           {"message", "现金不足以支付投资额"},
-                                          {"gap", paid - state.finance.balance}}}});
+                                          {"gap", cash_due - state.finance.balance}}}});
         }
-
-        const int week = state.company.week;
         const std::string work_id = next_id(state, "work_", static_cast<int>(state.works.size()));
         Project work;
         std::string error;
@@ -3594,11 +3888,11 @@ std::string start_work(const std::string& input) {
                 budget, std::nullopt, offer_id});
             state.finance.balance += budget;
         }
-        if (paid > 0) {
+        if (cash_due > 0) {
             state.finance.entries.push_back(LedgerEntry{
                 "w" + std::to_string(week) + ".investment." + work_id, week, work_id, "investment_paid",
-                -paid, committee_id.empty() ? std::nullopt : std::optional<std::string>(committee_id), offer_id});
-            state.finance.balance -= paid;
+                -cash_due, committee_id.empty() ? std::nullopt : std::optional<std::string>(committee_id), offer_id});
+            state.finance.balance -= cash_due;
         }
 
         // 消费企划
