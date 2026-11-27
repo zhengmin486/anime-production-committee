@@ -5,6 +5,7 @@ import { validateCard } from './lib/event-schema.mjs'
 import { generateCandidate, generateTemporary, refreshTemporary, scout as oracleScout, rotatePool, PURPOSE } from './lib/recruit-oracle.mjs'
 import { generateOffer, weeklyMarketStep, startWorkCash, depositAmount } from './lib/market-oracle.mjs'
 import { draw, hashText, Stream } from './lib/coordinate-random.mjs'
+import { finalQualityMilli } from './lib/quality-oracle.mjs'
 
 // v4 M1 契约测试：直接加载 emcc 构建的模块，全部通过 JSON 字符串接口调用。
 // 依赖 build/v4/v4.mjs（npm run build:v4 生成）。
@@ -1879,6 +1880,46 @@ test('DEC-STAFF-008 四段修型：Q_base→Q_sup→Q_cap→Q_ext_cap 取最小'
   // 全外包、供应商 50 分、强监督 100：Q_ext_cap = 50 + 25%×50 + 0 = 62.5 → 被木桶压到 62
   const outsourced = build({ supervisor: 100, inHouseQuality: 0, externalQuality: 50, externalPoints: 100 })
   assert.equal(outsourced.report.q_final, 62, '协力木桶必须压住监督修型后的 67.5')
+
+  // DEC-QUALITY-002：临时员工进协力桶，不进 Q_inhouse。
+  // 同样 48 分、同样点位，核心员工做 = 66（Q_sup 抬升且不走木桶）；
+  // 临时工做 = 61（Q_inhouse 记 0 → 上限用 Q_base，且协力木桶 100% 生效）。
+  const core48 = build({ supervisor: 100, inHouseQuality: 48 })
+  assert.equal(core48.report.q_final, 66)
+  const temp48 = build({ supervisor: 100, inHouseQuality: 0, externalQuality: 48, externalPoints: 100 })
+  assert.equal(temp48.report.q_final, 61)
+})
+
+test('DEC-STAFF-008：Q_final 的 C++ 实现与 TS Oracle 逐位一致', () => {
+  const build = () => {
+    let state = funded(ok('initialize', { seed: 11 }).state)
+    state = ok('start_work', { state, offer_id: 'offer_01', mode: 'contract' }).state
+    const director = state.staff.find((member) => member.id === 'staff_dir')
+    director.abilities.direction = 88
+    director.abilities.management = 74
+    const items = allItems(state, 'work_01')
+    items.forEach((item, index) => {
+      const points = 40 + (index * 7) % 60
+      const ability = 55 + (index * 11) % 40
+      item.work_done = item.work_total
+      item.in_house_points = points
+      item.in_house_ability_centi_sum = points * ability * 100
+      if (index % 5 === 0) {   // 每五个工作项掺一份外包，覆盖 Q_ext_cap 分支
+        const supplierQuality = 50 + index % 30
+        item.external_points = 25
+        item.external_quality_milli_sum = 25 * supplierQuality * 1000
+        item.external_min_quality = supplierQuality
+      }
+      item.core_aesthetic = index % 3 === 0
+    })
+    return state
+  }
+
+  const state = build()
+  const expected = Math.floor(finalQualityMilli(state.works[0], state.staff.find((m) => m.id === 'staff_dir')) / 1000)
+  const delivered = ok('deliver_work', { state, work_id: 'work_01' })
+  assert.ok(expected > 0 && expected <= 105, `oracle 应给出有效分：${expected}`)
+  assert.equal(delivered.report.q_final, expected, 'C++ 与 Oracle 必须逐位一致')
 })
 
 test('DEC-QUALITY-001：Q_min 未达标按 2%/分扣罚、扣声望与委员会好感', () => {
@@ -4657,8 +4698,8 @@ test('M2 v0.5：固定 seed 真实推进十集、事件、外包、交付、Fina
   const record = first.state.archive.works[0]
   // v0.5 基线质量：权重制 + 外包质量的首次可复现锚点（全外包、四人混合派工）
   assert.equal(first.diagnostics.quality_mean, 56, detail)     // 六维聚合（展示口径）
-  assert.equal(first.diagnostics.quality_score, 59, detail)    // Q_final：Q_item 四段修型后按权重加权
-  assert.equal(first.diagnostics.rating, 'C', detail)
+  assert.equal(first.diagnostics.quality_score, 66, detail)    // Q_final：四段修型（含 inhouse=0 → Q_base fallback）
+  assert.equal(first.diagnostics.rating, 'B', detail)   // 66 分，跨过 Q_min 65 的达标线
   assert.equal(record.episodes.length, 10)
   assert.equal(record.start_week, 0)
   assert.equal(record.end_week, 52)

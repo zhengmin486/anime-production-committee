@@ -332,10 +332,20 @@ ProductionResult apply_production(WorkItem& item, const Staff& staff, int points
     if (gain <= 0) return result;
 
     item.work_done += gain;
-    // 贡献账本：Q_base 需要"谁做的、什么水准、做了多少点"
-    item.in_house_points += gain;
-    item.in_house_ability_centi_sum +=
-        static_cast<std::int64_t>(gain) * effective_ability_centi(staff, item.ability);
+    // 贡献账本：Q_base 需要"谁做的、什么水准、做了多少点"。
+    // DEC-QUALITY-002：Q_inhouse 只统计正式核心员工；临时员工与外部供应商统一计入
+    // Q_base 与协力计算，所以临时员工的点数进 "external" 桶（协力分母与木桶下限一起算）。
+    const int ability_centi = effective_ability_centi(staff, item.ability);
+    if (staff.employment == "temporary") {
+        item.external_points += gain;
+        item.external_quality_milli_sum += static_cast<std::int64_t>(gain) * ability_centi * 10;
+        const int quality = ability_centi / 100;
+        item.external_min_quality =
+            item.external_min_quality == 0 ? quality : std::min(item.external_min_quality, quality);
+    } else {
+        item.in_house_points += gain;
+        item.in_house_ability_centi_sum += static_cast<std::int64_t>(gain) * ability_centi;
+    }
     result.points = gain;
 
     if (std::find(item.contributors.begin(), item.contributors.end(), staff.id) == item.contributors.end()) {
@@ -481,7 +491,9 @@ int item_quality_milli(const WorkItem& item, std::int64_t supervisor_milli) {
     const std::int64_t q_sup = q_base + 35 * std::max<std::int64_t>(0, supervisor_milli - q_base) / 100;
 
     // Q_cap：主责团队质量上限（整数分 half-up 后再 +8）
-    const std::int64_t q_inhouse = item.in_house_points > 0 ? in_house_milli_sum / item.in_house_points : 0;
+    // DEC-QUALITY-002：没有社内核心产出时，用 Q_base 代替 Q_inhouse 代入上限公式
+    const std::int64_t q_inhouse =
+        item.in_house_points > 0 ? in_house_milli_sum / item.in_house_points : q_base;
     const std::int64_t cap_inner = 60 * std::max(q_inhouse, supervisor_milli) + 40 * q_inhouse + 50000;
     const std::int64_t q_cap =
         std::min<std::int64_t>(100000, 1000 * (cap_inner / 100000) + 8000);
