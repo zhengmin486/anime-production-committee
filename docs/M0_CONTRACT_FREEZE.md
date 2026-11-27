@@ -111,7 +111,7 @@ SaveRecord { version: 4, savedAt: ISO8601, rules_version: string, state: GameSta
 | INV-09 | `assignment_work_id` 为 null 或指向 `producing` 项目 | INVALID_STATE |
 | INV-10 | 同一周一名员工只有一个归属；临时人员归属恒等于合同项目 | INVALID_STATE |
 | INV-11 | `last_participation.week` ∈ {`week-1`, null} | INVALID_STATE |
-| INV-12 | `contributors` 只增不删、无重复、只含参与过该工作项的员工 | INVALID_STATE |
+| INV-12 | `contributors` 只增不删、无重复、只含历史上实际参与过该工作项的员工；历史引用不要求其仍在当前 Staff 名册 | INVALID_STATE |
 | INV-13 | 委员会成员不重复、渠道不重复、`bd` 不挂成员 | INVALID_STATE |
 | INV-14 | contract ⇒ `investment.percent=0 ∧ paid=0 ∧ committee_id=null`；committee ⇒ percent ∈ {10..100} 且 committee_id≠null | INVALID_STATE |
 | INV-15 | `allowed_modes`：普通企划含 contract 与 committee；原创仅 committee | INVALID_STATE |
