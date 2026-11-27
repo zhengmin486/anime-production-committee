@@ -34,7 +34,7 @@ superseded_by: []
 
 ## 新增决定的做法
 
-1. 复制 [ADR 模板](../templates/ADR_TEMPLATE.md)，编号递增，文件名用 `ADR-0005-kebab-topic.md`。
+1. 复制 [ADR 模板](../templates/ADR_TEMPLATE.md)，编号递增，文件名用 `ADR-0006-kebab-topic.md`。
 2. 写清背景、决定、后果、被否决方案和来源；状态从 `proposed` 开始。
 3. 负责人确认后改为 `accepted`，正文冻结；需要变更时新建 ADR，并用 `supersedes` 指向旧文件。
 4. 在本文清单加一行，并运行 `npm run check:docs`。
