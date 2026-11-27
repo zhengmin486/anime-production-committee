@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { ArrowUpRight, Building2, Clapperboard, Megaphone, UsersRound, X } from 'lucide-react'
+import { ArrowUpRight, Bell, Building2, CalendarDays, Clapperboard, Coins, FileCheck2, FolderKanban, Handshake, Megaphone, Monitor, Trophy, UsersRound, X } from 'lucide-react'
 import { AssetScene } from './AssetScenes'
 import type { MainScene, SceneAction } from './AssetScenes'
 import { CompanyOverview } from './CompanyOverview'
@@ -27,6 +27,42 @@ const panelNames: Record<PanelName, string> = {
   market: '市场企划', release: '作品发行', archive: '作品 Archive', performance: '业绩与历史',
 }
 
+type SceneActionOption = {
+  action: SceneAction
+  label: string
+  description: string
+  icon: typeof Building2
+  primary?: boolean
+}
+
+const sceneActions: Record<MainScene, SceneActionOption[]> = {
+  office: [
+    { action: 'company', label: '查看员工与设施', description: '公司账目、人员归属与设施状态', icon: UsersRound, primary: true },
+    { action: 'work', label: '打开在制作品', description: '公共制作、单集与六阶段进度', icon: FolderKanban },
+    { action: 'finance', label: '查看公司现金', description: '现金流水与项目归因', icon: Coins },
+    { action: 'week', label: '打开周经营', description: '周次快照、事件与经营状态', icon: CalendarDays },
+  ],
+  studio: [
+    { action: 'work', label: '查看当前单集', description: '聚焦单集的六阶段制作进度', icon: Clapperboard, primary: true },
+    { action: 'work', label: '查看公共制作', description: '角色设定与作品公共制作工作项', icon: FileCheck2 },
+    { action: 'work', label: '打开作品详情', description: '完整作品、单集与交付状态', icon: FolderKanban },
+    { action: 'week', label: '打开周经营', description: '从制作现场进入周经营', icon: CalendarDays },
+  ],
+  meeting: [
+    { action: 'week', label: '处理待决议题', description: '选择合法选项并确认本周事件', icon: CalendarDays, primary: true },
+    { action: 'week', label: '查看决策文件', description: '查看事件代价、可能收益与风险', icon: FileCheck2 },
+    { action: 'week', label: '打开周经营', description: '切换 W16—W19 周次快照', icon: FolderKanban },
+  ],
+  market: [
+    { action: 'market', label: '企划承接', description: '查看预算、周期与承接条件', icon: Handshake, primary: true },
+    { action: 'release', label: '作品发行', description: '在制作品与已发行作品反馈', icon: Monitor, primary: true },
+    { action: 'market', label: '查看业务公告板', description: '新企划、委托与合作机会', icon: Bell },
+    { action: 'archive', label: '查看公司作品墙', description: '已交付作品与商业表现', icon: Clapperboard },
+    { action: 'performance', label: '查看业绩看板', description: '收入、声望与历史成绩', icon: Trophy },
+    { action: 'week', label: '打开周经营', description: '查看当前经营周与事件', icon: CalendarDays },
+  ],
+}
+
 function CashCard({ data, label = '公司现金' }: { data: PrototypeData; label?: string }) {
   return <div className="scene-cash-card">
     <span>{label}</span>
@@ -52,62 +88,66 @@ function SceneSidebar({ scene, data, project, receipt, onSelectProject, onAction
   onSelectProject: (id: string) => void
   onAction: (action: SceneAction) => void
 }) {
-  if (scene === 'office') return <aside className="scene-sidebar" role="region" aria-label="办公室信息">
-    <div className="scene-side-heading"><p className="eyebrow">COMPANY OVERVIEW</p><h2>公司正在发生什么</h2><p>主地图只保留此刻最值得关注的变化，完整账目与人员表从详情进入。</p></div>
-    <CashCard data={data} />
-    <dl className="scene-quick-stats">
-      <div><dt>公司声望</dt><dd>{data.company.reputation}</dd></div>
-      <div><dt>核心 / 临时</dt><dd>{data.staff.filter((person) => person.employment === 'core').length} / {data.staff.filter((person) => person.employment === 'temporary').length}</dd></div>
-      <div><dt>在制作品</dt><dd>{data.projects.length} 部</dd></div>
-    </dl>
-    <div className="scene-side-section"><div className="scene-section-title"><h3>在制作品</h3><span>点击进入制作现场</span></div>
-      <div className="scene-project-list">{data.projects.map((item) => <ProjectRow key={item.id} project={item} active={item.id === project.id} onClick={() => { onSelectProject(item.id); onAction('work') }} />)}</div>
-    </div>
-    <button className="button secondary scene-side-action" onClick={() => onAction('company')}>查看公司账与人员<ArrowUpRight size={16} aria-hidden="true" /></button>
-  </aside>
+  const actions = sceneActions[scene]
+  return <aside className="scene-sidebar" role="region" aria-label={`${sceneMeta[scene].title}信息`}>
+    <div className="scene-side-heading"><p className="eyebrow">{sceneMeta[scene].english} / SCENE ACTIONS</p><h2>{sceneMeta[scene].title}交互</h2><p>当前场景的全部操作集中在这里；右侧画面保持纯净展示。</p></div>
+    <section className="scene-action-panel" aria-label="场景交互选项">
+      <div className="scene-section-title"><h3>场景交互</h3><span>{actions.length} 项操作</span></div>
+      <div className="scene-action-list">{actions.map((item) => {
+        const Icon = item.icon
+        return <button key={`${item.action}-${item.label}`} className={`scene-action-button${item.primary ? ' is-primary' : ''}`} onClick={() => onAction(item.action)}>
+          <span className="scene-action-icon"><Icon size={17} aria-hidden="true" /></span>
+          <span className="scene-action-copy"><strong>{item.label}</strong><small>{item.description}</small></span>
+          <ArrowUpRight size={15} aria-hidden="true" />
+        </button>
+      })}</div>
+    </section>
 
-  if (scene === 'studio') {
-    const focusEpisode = project.episodes.find((episode) => episode.isFocus) ?? project.episodes[0]
-    const commonWork = sumWork(project.commonItems)
-    const completion = projectCompletion(project)
-    return <aside className="scene-sidebar" role="region" aria-label="制作现场信息">
-      <div className="scene-side-heading"><p className="eyebrow">PRODUCTION BOARD</p><h2>这部作品做到哪了</h2><p>公共制作与单集制作分开；工作项默认折叠，不把长列表铺到首屏。</p></div>
-      <div className="scene-project-switch" role="group" aria-label="作品切换">{data.projects.map((item) => <button key={item.id} className={item.id === project.id ? 'is-active' : ''} onClick={() => onSelectProject(item.id)}>{item.title}</button>)}</div>
-      <div className="scene-focus-project"><span>{scaleNames[project.scale]} · {project.mode === 'committee' ? '制作委员会' : '承制'}</span><h3>{project.title}</h3><div><strong>{completion}%</strong><small>计划 {project.plannedCompletion}%</small></div><Bar value={completion} tone={completion < project.plannedCompletion ? 'behind' : 'lead'} /></div>
-      <div className="scene-side-section"><div className="scene-section-title"><h3>第 {focusEpisode.index} 集《{focusEpisode.title}》</h3><span>六阶段</span></div>
-        <div className="scene-stage-grid">{EPISODE_STAGES.map((stage) => {
-          const work = sumWork(focusEpisode.workItems.filter((item) => item.stage === stage))
-          const percent = work.total === 0 ? 0 : Math.round(work.done / work.total * 100)
-          return <div key={stage}><span>{episodeStageShortNames[stage]}</span><strong>{percent}%</strong><i><b style={{ width: `${percent}%` }} /></i></div>
-        })}</div>
+    {scene === 'office' && <>
+      <CashCard data={data} />
+      <dl className="scene-quick-stats">
+        <div><dt>公司声望</dt><dd>{data.company.reputation}</dd></div>
+        <div><dt>核心 / 临时</dt><dd>{data.staff.filter((person) => person.employment === 'core').length} / {data.staff.filter((person) => person.employment === 'temporary').length}</dd></div>
+        <div><dt>在制作品</dt><dd>{data.projects.length} 部</dd></div>
+      </dl>
+      <div className="scene-side-section"><div className="scene-section-title"><h3>在制作品</h3><span>快捷进入</span></div>
+        <div className="scene-project-list">{data.projects.map((item) => <ProjectRow key={item.id} project={item} active={item.id === project.id} onClick={() => { onSelectProject(item.id); onAction('work') }} />)}</div>
       </div>
-      <div className="scene-common-work"><div><span>公共制作</span><strong>{commonWork.done} / {commonWork.total} 点</strong></div><Bar value={commonWork.total === 0 ? 0 : commonWork.done / commonWork.total * 100} tone="neutral" /></div>
-      <button className="button primary scene-side-action" onClick={() => onAction('work')}>打开作品详情<ArrowUpRight size={16} aria-hidden="true" /></button>
-    </aside>
-  }
+    </>}
 
-  if (scene === 'meeting') return <aside className="scene-sidebar" role="region" aria-label="会议室信息">
-    <div className="scene-side-heading"><p className="eyebrow">COMMITTEE TABLE</p><h2>需要集体决策的事</h2><p>会议室承载有分量的选择，不新增谈判数值或会议小游戏。</p></div>
-    {receipt.event ? <div className="meeting-agenda-card is-active"><span className="agenda-state">待处理 · 第 {receipt.event.deadlineWeek} 周前</span><h3>{receipt.event.title}</h3><p>{receipt.event.description}</p><button className="button primary" onClick={() => onAction('week')}>进入议题处理<ArrowUpRight size={16} aria-hidden="true" /></button></div> :
-      <div className="meeting-agenda-card"><span className="agenda-state">本期无待决议题</span><h3>桌案已准备好</h3><p>有待处理事件时，议题会出现在这里并可直接进入处理。</p></div>}
-    <div className="scene-side-section"><div className="scene-section-title"><h3>会议结构</h3><span>只读预览</span></div>
-      <ul className="meeting-structure"><li><span>01</span><div><strong>待决议题</strong><small>来自事件卡与合法选项</small></div></li><li><span>02</span><div><strong>参会方</strong><small>产业关系尚未开放</small></div></li><li><span>03</span><div><strong>决策文件</strong><small>确定代价、可能收益与风险</small></div></li></ul>
-    </div>
-    <p className="scene-boundary-note">M4 产业关系落地前，委员会与合作区块只做结构展示，不宣称可玩。</p>
-  </aside>
+    {scene === 'studio' && (() => {
+      const focusEpisode = project.episodes.find((episode) => episode.isFocus) ?? project.episodes[0]
+      const commonWork = sumWork(project.commonItems)
+      const completion = projectCompletion(project)
+      return <>
+        <div className="scene-project-switch" role="group" aria-label="作品切换">{data.projects.map((item) => <button key={item.id} className={item.id === project.id ? 'is-active' : ''} onClick={() => onSelectProject(item.id)}>{item.title}</button>)}</div>
+        <div className="scene-focus-project"><span>{scaleNames[project.scale]} · {project.mode === 'committee' ? '制作委员会' : '承制'}</span><h3>{project.title}</h3><div><strong>{completion}%</strong><small>计划 {project.plannedCompletion}%</small></div><Bar value={completion} tone={completion < project.plannedCompletion ? 'behind' : 'lead'} /></div>
+        <div className="scene-side-section"><div className="scene-section-title"><h3>第 {focusEpisode.index} 集《{focusEpisode.title}》</h3><span>六阶段</span></div>
+          <div className="scene-stage-grid" aria-label="当前单集六阶段">{EPISODE_STAGES.map((stage) => {
+            const work = sumWork(focusEpisode.workItems.filter((item) => item.stage === stage))
+            const percent = work.total === 0 ? 0 : Math.round(work.done / work.total * 100)
+            return <div key={stage}><span>{episodeStageShortNames[stage]}</span><strong>{percent}%</strong><i><b style={{ width: `${percent}%` }} /></i></div>
+          })}</div>
+        </div>
+        <div className="scene-common-work"><div><span>公共制作</span><strong>{commonWork.done} / {commonWork.total} 点</strong></div><Bar value={commonWork.total === 0 ? 0 : commonWork.done / commonWork.total * 100} tone="neutral" /></div>
+      </>
+    })()}
 
-  return <aside className="scene-sidebar" role="region" aria-label="发行与市场信息">
-    <div className="scene-side-heading"><p className="eyebrow">MARKET & RELEASE</p><h2>市场业务从这里展开</h2><p>企划承接与作品发行是两个主入口；公告板、作品墙和业绩看板共用同一场景。</p></div>
-    <div className="market-entry-grid">
-      <button className="button primary" onClick={() => onAction('market')}>企划承接<ArrowUpRight size={16} aria-hidden="true" /></button>
-      <button className="button secondary" onClick={() => onAction('release')}>作品发行<ArrowUpRight size={16} aria-hidden="true" /></button>
-    </div>
-    <CashCard data={data} label="结算后公司现金" />
-    <div className="scene-side-section"><div className="scene-section-title"><h3>市场企划</h3><span>{data.marketOffers.length} 个机会</span></div>
-      <div className="market-offer-list">{data.marketOffers.slice(0, 3).map((offer) => <button key={offer.id} onClick={() => onAction('market')}><span><strong>{offer.title}</strong><small>{scaleNames[offer.scale]} · 热度{heatNames[offer.heat]}</small></span><b>{yuan(offer.budget)}</b></button>)}</div>
-    </div>
-    <dl className="scene-quick-stats market-stats"><div><dt>已交付履历</dt><dd>{data.history.length} 部</dd></div><div><dt>在制作品</dt><dd>{data.projects.length} 部</dd></div><div><dt>合作关系</dt><dd>{data.relationships.length} 组</dd></div></dl>
-    <button className="button secondary scene-side-action" onClick={() => onAction('performance')}>查看业绩与历史<ArrowUpRight size={16} aria-hidden="true" /></button>
+    {scene === 'meeting' && <>
+      <div className={`meeting-agenda-card${receipt.event ? ' is-active' : ''}`}><span className="agenda-state">{receipt.event ? `待处理 · 第 ${receipt.event.deadlineWeek} 周前` : '本期无待决议题'}</span><h3>{receipt.event?.title ?? '桌案已准备好'}</h3><p>{receipt.event?.description ?? '有待处理事件时，议题会出现在这里并可直接进入处理。'}</p></div>
+      <div className="scene-side-section"><div className="scene-section-title"><h3>会议结构</h3><span>只读预览</span></div>
+        <ul className="meeting-structure"><li><span>01</span><div><strong>待决议题</strong><small>来自事件卡与合法选项</small></div></li><li><span>02</span><div><strong>参会方</strong><small>产业关系尚未开放</small></div></li><li><span>03</span><div><strong>决策文件</strong><small>确定代价、可能收益与风险</small></div></li></ul>
+      </div>
+      <p className="scene-boundary-note">M4 产业关系落地前，委员会与合作区块只做结构展示，不宣称可玩。</p>
+    </>}
+
+    {scene === 'market' && <>
+      <CashCard data={data} label="结算后公司现金" />
+      <div className="scene-side-section"><div className="scene-section-title"><h3>市场企划</h3><span>{data.marketOffers.length} 个机会</span></div>
+        <div className="market-offer-list">{data.marketOffers.slice(0, 3).map((offer) => <button key={offer.id} onClick={() => onAction('market')}><span><strong>{offer.title}</strong><small>{scaleNames[offer.scale]} · 热度{heatNames[offer.heat]}</small></span><b>{yuan(offer.budget)}</b></button>)}</div>
+      </div>
+      <dl className="scene-quick-stats market-stats"><div><dt>已交付履历</dt><dd>{data.history.length} 部</dd></div><div><dt>在制作品</dt><dd>{data.projects.length} 部</dd></div><div><dt>合作关系</dt><dd>{data.relationships.length} 组</dd></div></dl>
+    </>}
   </aside>
 }
 
@@ -170,8 +210,8 @@ export default function PrototypeApp() {
     <main className="prototype-main">
       <div className="scene-intro"><div><p className="eyebrow">{sceneMeta[scene].english} / SCENE 0{sceneOrder.indexOf(scene) + 1}</p><h2>{sceneMeta[scene].title}</h2></div><p>{sceneMeta[scene].description}</p><span className="keyboard-hint"><kbd>1</kbd>—<kbd>4</kbd> 切换场景</span></div>
       <div className="scene-layout">
-        <div className={`scene-frame${scene === 'market' ? ' scene-frame-market' : ''}`}><AssetScene scene={scene} project={project} hasEvent={receipt.event !== null} onAction={handleAction} /></div>
         <SceneSidebar scene={scene} data={data} project={project} receipt={receipt} onSelectProject={setProjectId} onAction={handleAction} />
+        <div className="scene-frame" role="region" aria-label={`${sceneMeta[scene].title}画面`}><AssetScene scene={scene} /></div>
       </div>
       <section className="transaction-bar" aria-label="事务中心">
         <div className="transaction-title"><p className="eyebrow">WEEKLY DESK</p><div><h3>事务中心</h3><span className={`transaction-state state-${receipt.state}`}>{weekStateNames[receipt.state]}</span></div></div>
