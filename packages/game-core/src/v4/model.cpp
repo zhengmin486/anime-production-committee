@@ -183,6 +183,7 @@ void to_json(Json& j, const WorkItem& value) {
              {"deliver_at", value.deliver_at},
              {"deps", value.deps},
              {"is_gate", value.is_gate},
+             {"outsourceable", value.outsourceable},
              {"quality", dims_to_json(value.quality.dims)},
              {"contributors", value.contributors}};
 }
@@ -196,6 +197,7 @@ void from_json(const Json& j, WorkItem& value) {
     value.deliver_at = j.value("deliver_at", 1000);
     value.deps = strings_from_json(j.value("deps", Json::array()));
     value.is_gate = j.value("is_gate", false);
+    value.outsourceable = j.value("outsourceable", false);
     value.quality.dims = dims_from_json(j.value("quality", Json::object()));
     value.contributors = strings_from_json(j.value("contributors", Json::array()));
 }

@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs'
 import { validateCard } from './lib/event-schema.mjs'
 import { generateCandidate, scout as oracleScout, rotatePool, PURPOSE } from './lib/recruit-oracle.mjs'
 import { generateOffer, weeklyMarketStep, startWorkCash, depositAmount } from './lib/market-oracle.mjs'
+import { draw, hashText, Stream } from './lib/coordinate-random.mjs'
 
 // v4 M1 契约测试：直接加载 emcc 构建的模块，全部通过 JSON 字符串接口调用。
 // 依赖 build/v4/v4.mjs（npm run build:v4 生成）。
@@ -28,7 +29,7 @@ const tiny = {
   episode: [
     { key: 'script', stage: 'content_design', name: '脚本', ability: 'planning', work_total: 100, deliver_at: 1000, deps: [] },
     { key: 'storyboard', stage: 'storyboard_key_animation', name: '分镜', ability: 'direction', work_total: 100, deliver_at: 1000, deps: ['script'] },
-    { key: 'inbetween', stage: 'animation', name: '动画', ability: 'animation', work_total: 100, deliver_at: 1000, deps: ['storyboard'] },
+    { key: 'inbetween', stage: 'animation', name: '动画', ability: 'animation', work_total: 100, deliver_at: 1000, deps: ['storyboard'], outsourceable: true },
     { key: 'background', stage: 'art_visual', name: '背景', ability: 'drawing', work_total: 100, deliver_at: 1000, deps: ['storyboard'] },
     { key: 'composite', stage: 'photography_editing', name: '摄影', ability: 'postproduction', work_total: 100, deliver_at: 1000, deps: ['inbetween', 'background'] },
     { key: 'master', stage: 'sound_delivery', name: '母版', ability: 'postproduction', work_total: 100, deliver_at: 1000, is_gate: true, deps: ['composite'] }
@@ -57,6 +58,29 @@ function setupTiny(seed = 7, workId = 'work_01') {
   return created.state
 }
 
+function funded(state, extra = 400_000_000) {
+  const copy = structuredClone(state)
+  copy.finance.opening_funds += extra
+  copy.finance.balance += extra
+  return copy
+}
+
+function addTemporaryCandidate(state, id = 'temp_candidate_01') {
+  const member = structuredClone(state.recruitment.pool[0].staff)
+  member.id = id
+  member.name = id
+  member.employment = 'temporary'
+  member.experience = Object.fromEntries(Object.keys(member.experience).map((ability) => [ability, 0]))
+  member.weekly_salary = 50000
+  member.signing_fee = 100000
+  member.fatigue = 0
+  member.assignment_work_id = null
+  member.last_participation = null
+  member.temporary_contract = null
+  state.recruitment.pool[state.recruitment.pool.length - 1] = { staff: member, origin: 'regular', expires_week: null }
+  return member
+}
+
 test('initialize 生成合法状态，同 seed 哈希一致', () => {
   const first = ok('initialize', { seed: 42 })
   const second = ok('initialize', { seed: 42 })
@@ -64,7 +88,11 @@ test('initialize 生成合法状态，同 seed 哈希一致', () => {
   const hashB = ok('hash_state', { state: second.state }).hash
   assert.equal(first.state.version, 4)
   assert.equal(first.state.company.week, 0)
-  assert.equal(first.state.staff.length, 3)
+  assert.equal(first.state.staff.length, 4)
+  assert.deepEqual(first.state.staff.map((member) => member.weekly_salary), [238000, 208000, 170000, 170000])
+  assert.equal(first.state.staff.reduce((sum, member) => sum + member.weekly_salary, 0), 786000)
+  assert.equal(first.state.finance.opening_funds, 14000000)
+  assert.equal(first.state.finance.balance, 14000000)
   assert.equal(first.state.staff[0].signing_fee, 0)
   assert.equal('project_fee' in first.state.staff[0], false)
   assert.deepEqual(first.state.finance.loans, [])
@@ -72,15 +100,18 @@ test('initialize 生成合法状态，同 seed 哈希一致', () => {
   assert.equal(hashA, hashB)
 })
 
-test('实例化 tv_standard 得到 174 个工作项（12×14 + 6）', () => {
+test('实例化 tv_standard 得到 125 个工作项（10×12 + 5）', () => {
   const blueprint = JSON.parse(readFileSync('docs/blueprints/tv_standard.blueprint.json', 'utf8'))
   const base = ok('initialize', { seed: 1 })
-  const created = ok('instantiate_work', { state: base.state, blueprint, work_id: 'work_tv', duration_weeks: 26 })
+  const created = ok('instantiate_work', { state: base.state, blueprint, work_id: 'work_tv', duration_weeks: 52 })
   const items = allItems(created.state, 'work_tv')
-  assert.equal(created.state.works[0].episodes.length, 12)
-  assert.equal(items.length, 174)
-  const gates = items.filter((item) => item.is_gate)
-  assert.equal(gates.length, 12)
+  assert.equal(created.state.works[0].episodes.length, 10)
+  assert.equal(items.length, 125)
+  assert.equal(items.filter((item) => item.is_gate).length, 10)
+  assert.equal(items.reduce((sum, item) => sum + item.work_total, 0), 25800)
+  assert.equal(items.filter((item) => !item.id.includes('.common.') && !item.is_gate && item.outsourceable)
+    .reduce((sum, item) => sum + item.work_total, 0), 15200)
+  assert.equal(items.filter((item) => item.id.includes('.common.')).every((item) => !item.outsourceable), true)
 })
 
 test('首周产出与独立手算逐项一致', () => {
@@ -90,36 +121,43 @@ test('首周产出与独立手算逐项一致', () => {
   }
   const advanced = ok('advance_week', { state })
 
-  // 手算（产能按主专业；跨专业按 800‰ 折算并四舍五入；分配期按未被占用的剩余量扣减）：
-  // staff_anim 80 点 → 公共项 80→64（余 20）
-  // staff_dir  82 点 → 公共项 20→16（余 0），脚本 62→50（余 38）
-  // staff_ka   85 点 → 脚本 38→30（余 0）
+  // 手算（S_eff=floor((85*主能力+3*其余五项和)/100)，1 人周=70 点，整数向下取整）：
+  // staff_anim 主专业 animation：75 点；planning 工序上限 55 点 → 公共 55、脚本 20。
+  // staff_dir 主专业 direction：77 点，监督执行五折后 38 点 → 公共 38。
+  // staff_ka 主专业 drawing：79 点；planning 工序上限 58 点 → 公共 7、脚本 58。
+  // 同周参与者都以周初快照判断磨合；最终公共 100、脚本 78。
   const common = findItem(advanced.state, 'work_01', 'common.series_comp')
   const script = findItem(advanced.state, 'work_01', 'ep01.script')
-  assert.equal(common.work_done, 80)
-  assert.equal(script.work_done, 80)
+  assert.equal(common.work_done, 100)
+  assert.equal(script.work_done, 78)
+  assert.deepEqual(Object.fromEntries(advanced.report.staff.map((member) => [member.staff_id, member.produced])), {
+    staff_dir: 38,
+    staff_ka: 65,
+    staff_anim: 75,
+    staff_post: 0
+  })
 
   // 质量是评级，不是点数换算：公共项按能力落到 story，脚本只允许 story/direction。
   // 旧公式（点数 × ability_q）会得到 58 / 62；新模型下质量与点数无关，由人和随机决定。
   const commonDims = Object.entries(common.quality).filter(([, value]) => value > 0)
   assert.equal(commonDims.length, 1, '公共项本周只写入一个质量维度')
   assert.equal(commonDims[0][0], 'story', '公共制作按 planning 落到 story')
-  assert.ok(commonDims[0][1] >= 0 && commonDims[0][1] <= 100, '质量是 0..100 的评级')
+  assert.ok(commonDims[0][1] >= 0 && commonDims[0][1] <= 105, '质量是 0..105 的评级')
 
   const scriptDims = Object.entries(script.quality).filter(([, value]) => value > 0)
   assert.ok(scriptDims.length >= 1 && scriptDims.length <= 2, '脚本只应落在 content_design 的两个维度')
   for (const [dim] of scriptDims) assert.ok(['story', 'direction'].includes(dim), `意外维度 ${dim}`)
 
-  // 周结算同时记账：工资 120000 + 运营 30000 + 制作 60000 = 210000
-  assert.equal(advanced.report.funds.costs.salary, 120000)
+  // 周结算同时记账：四人工资 786000 + 运营 30000 + 制作 60000 = 876000
+  assert.equal(advanced.report.funds.costs.salary, 786000)
   assert.equal(advanced.report.funds.costs.operations, 30000)
   assert.equal(advanced.report.funds.costs.production, 60000)
-  assert.equal(advanced.report.funds.delta, -210000)
-  assert.equal(advanced.report.funds.balance, 1790000)
-  assert.equal(advanced.state.finance.balance, 1790000)
+  assert.equal(advanced.report.funds.delta, -876000)
+  assert.equal(advanced.report.funds.balance, 13124000)
+  assert.equal(advanced.state.finance.balance, 13124000)
   const ledgerSum = advanced.state.finance.entries.reduce((sum, entry) => sum + entry.amount, 0)
   assert.equal(advanced.state.finance.opening_funds + ledgerSum, advanced.state.finance.balance)
-  assert.equal(advanced.state.finance.entries.length, 5)   // 3 工资 + 1 运营 + 1 制作
+  assert.equal(advanced.state.finance.entries.length, 6)   // 4 工资 + 1 运营 + 1 制作
   assert.ok(advanced.state.finance.entries.some((entry) => entry.category === 'production' && entry.work_id === 'work_01'))
 
   // 质量聚合进入回执：工作项 → 阶段 → 单集 → 作品
@@ -135,22 +173,58 @@ test('首周产出与独立手算逐项一致', () => {
     assert.equal(fatigue[id], 8)
     assert.equal(morale[id], 78)
   }
+  assert.equal(fatigue.staff_post, 0)
+  assert.equal(morale.staff_post, 81)
   assert.equal(advanced.state.company.week, 1)
+})
+
+function runCapacityAnchor(anchor, fatigue = 0, morale = 100) {
+  const blueprint = structuredClone(tiny)
+  blueprint.common[0].ability = 'animation'
+  blueprint.common[0].work_total = 1000
+  let state = ok('initialize', { seed: 7 }).state
+  state = ok('instantiate_work', { state, blueprint, work_id: 'work_anchor', duration_weeks: 26 }).state
+  state.staff = state.staff.filter((member) => ['staff_dir', 'staff_anim'].includes(member.id))
+  for (const member of state.staff) {
+    member.abilities = Object.fromEntries(Object.keys(member.abilities).map((ability) => [ability, anchor]))
+    member.fatigue = fatigue
+    member.morale = morale
+  }
+  state = ok('assign_staff', { state, staff_id: 'staff_dir', work_id: 'work_anchor' }).state
+  state = ok('assign_staff', { state, staff_id: 'staff_anim', work_id: 'work_anchor' }).state
+  return ok('advance_week', { state })
+}
+
+test('DEC-STAFF-008：S=30/60/100 产能锚点与整数点取整', () => {
+  assert.deepEqual([30, 60, 100].map((anchor) =>
+    runCapacityAnchor(anchor).report.staff.find((member) => member.staff_id === 'staff_anim').produced), [45, 70, 91])
+})
+
+test('DEC-STAFF-008：非红灯区间不重复扣除已计入利用率的疲劳与士气', () => {
+  const rested = runCapacityAnchor(60, 40, 60)
+  const strained = runCapacityAnchor(60, 80, 30)
+  assert.equal(rested.report.staff.find((member) => member.staff_id === 'staff_anim').produced, 70)
+  assert.equal(strained.report.staff.find((member) => member.staff_id === 'staff_anim').produced, 70)
 })
 
 test('阶段 2-3：临时员工周薪同样进入刚性预检与唯一账本', () => {
   let state = setupTiny(21)
   const temporary = state.staff.find((member) => member.id === 'staff_ka')
   temporary.employment = 'temporary'
+  temporary.temporary_contract = { work_id: 'work_01', start_week: 0, end_week: 26 }
+  temporary.assignment_work_id = 'work_01'
   temporary.weekly_salary = 50000
   state = assign(state, 'staff_dir', 'work_01')
   state = assign(state, 'staff_ka', 'work_01')
   const experienceBefore = JSON.parse(JSON.stringify(temporary.experience))
   const result = ok('advance_week', { state })
-  assert.equal(result.report.funds.costs.salary, 130000)
+  assert.equal(result.report.funds.costs.salary, 628000)
   assert.deepEqual(result.state.staff.find((member) => member.id === 'staff_ka').experience, experienceBefore)
   assert.equal(result.state.finance.entries.filter((entry) => entry.category === 'salary').length, 3)
-  assert.equal(result.state.finance.entries.find((entry) => entry.id.endsWith('.salary.staff_ka')).amount, -50000)
+  assert.equal(result.state.finance.entries.filter((entry) => entry.category === 'temporary').length, 1)
+  const temporaryEntry = result.state.finance.entries.find((entry) => entry.id === 'w0.temporary.staff_ka.salary')
+  assert.equal(temporaryEntry.amount, -50000)
+  assert.equal(temporaryEntry.work_id, 'work_01')
   assert.equal(result.state.finance.opening_funds + result.state.finance.entries.reduce((sum, entry) => sum + entry.amount, 0), result.state.finance.balance)
 })
 
@@ -158,6 +232,8 @@ test('临时员工不积累长期经验，结项后退出名册但保留团队�
   let state = setupTiny(24)
   const temporary = state.staff.find((member) => member.id === 'staff_ka')
   temporary.employment = 'temporary'
+  temporary.temporary_contract = { work_id: 'work_01', start_week: 0, end_week: 26 }
+  temporary.assignment_work_id = 'work_01'
   state = assign(state, 'staff_dir', 'work_01')
   state = assign(state, 'staff_ka', 'work_01')
   state = ok('advance_week', { state }).state
@@ -176,7 +252,7 @@ test('周结算重复提交同一状态不产生双工资、双生产或双推�
   const repeated = ok('advance_week', { state })
   assert.deepEqual(repeated, first)
   assert.equal(first.state.company.week, 1)
-  assert.equal(first.state.finance.entries.filter((entry) => entry.category === 'salary').length, 3)
+  assert.equal(first.state.finance.entries.filter((entry) => entry.category === 'salary').length, 4)
   assert.equal(first.state.finance.entries.filter((entry) => entry.category === 'production').length, 1)
   assert.equal(ok('hash_state', { state }).hash, before)
 })
@@ -331,14 +407,14 @@ test('§14.7 预检失败：整周回滚并直接破产终局，不产生半结�
   for (const staffId of ['staff_dir', 'staff_ka', 'staff_anim']) {
     state = ok('assign_staff', { state, staff_id: staffId, work_id: 'work_01' }).state
   }
-  // 本周需要 210000，只留 100000
+  // 本周需要 876000，只留 100000
   state.finance.opening_funds = 100000
   state.finance.balance = 100000
 
   const result = ok('advance_week', { state })
   assert.equal(result.report.bankrupt, true)
   assert.equal(result.report.skipped, true)
-  assert.equal(result.report.gap, 110000)
+  assert.equal(result.report.gap, 776000)
   assert.equal(result.state.company.week, 0)
   assert.equal(result.state.company.status, 'closing')
   assert.equal(result.state.company.end_reason, 'bankrupt')
@@ -423,10 +499,10 @@ test('#120 破产终局：在制合同项目的扣罚按可支付现金封顶，
   assert.equal(closed.state.events.pending.length, 0)
   assert.equal(closed.state.works[0].status, 'delivering')
 
-  // 关闭路径的结清在 finalize_delivery 落地：名义扣罚 360000（预算 120 万 × 缺口 100% × 30%），
+  // 关闭路径的结清在 finalize_delivery 落地：名义扣罚 51000000（预算 170M × 缺口 100% × 30%），
   // 只能收走「现有现金 + 本次商业收入」，其余记 penalty_waived。
   const settled = ok('finalize_delivery', { state: closed.state, work_id: 'work_01' })
-  assert.equal(settled.report.penalty + settled.report.penalty_waived, 360000)
+  assert.equal(settled.report.penalty + settled.report.penalty_waived, 51000000)
   assert.ok(settled.report.penalty_waived > 0)
   assert.equal(settled.state.finance.balance, 0, '扣罚不得把现金推成负数')
   // 归档扣罚等于实付金额，与账本一致；不产生负现金或欠款。
@@ -733,8 +809,19 @@ test('不变式：全局 id、公共项、归属、参与记录与贡献者都�
   }, 'INV-12 重复贡献者')
   reject((state) => {
     state.works[0].common.items[0].work_done = 10
-    state.works[0].common.items[0].contributors = ['nobody']
-  }, 'INV-12 未知贡献者')
+    state.works[0].common.items[0].contributors = ['']
+  }, 'INV-12 空贡献者')
+  reject((state) => {
+    state.staff[0].temporary_contract = { work_id: 'work_01', start_week: 0, end_week: 26 }
+  }, 'INV-10 核心员工带临时合同')
+  reject((state) => {
+    state.staff[1].employment = 'temporary'
+  }, 'INV-10 临时员工缺少合同')
+  reject((state) => {
+    state.staff[1].employment = 'temporary'
+    state.staff[1].assignment_work_id = 'work_01'
+    state.staff[1].temporary_contract = { work_id: 'work_01', start_week: 0, end_week: 25 }
+  }, 'INV-10 临时合同截止周未同步')
   const capped = JSON.parse(JSON.stringify(base))
   capped.company.week = 520
   const cappedResult = call('assign_staff', { state: capped, staff_id: 'staff_dir', work_id: 'work_01' })
@@ -966,7 +1053,7 @@ function twoProjectsNearDeadline() {
   state = ok('instantiate_work', { state, blueprint: tiny, work_id: 'work_a', duration_weeks: 26 }).state
   state = addIdleSupervisor(state)
   state = ok('instantiate_work', { state, blueprint: tiny, work_id: 'work_b', duration_weeks: 26 }).state
-  for (const work of state.works) work.deadline_week = 2
+  for (const work of state.works) work.deadline_week = 3
   state = assign(state, 'staff_dir', 'work_a')
   state = assign(state, 'staff_ka', 'work_b')
   return setAnimationQuality(setAnimationQuality(state, 'work_a', 50), 'work_b', 50)
@@ -1080,7 +1167,7 @@ test('INV-23：查看只标记目标事件，不结算不移除；全部查看�
 
 function timedEventState() {
   let state = setupTiny(17)
-  state.works[0].deadline_week = 2
+  state.works[0].deadline_week = 3
   state = assign(state, 'staff_dir', 'work_01')
   state = ok('advance_week', { state }).state
   const event = state.events.pending.find((entry) => entry.event_id === 'schedule_slip')
@@ -1155,7 +1242,7 @@ test('INV-29：多项目按 work_id/event_id 稳定到期，其他 pending 不�
   state = addIdleSupervisor(state, 'staff_pm2')
   for (const workId of ['work_a', 'work_b', 'work_c']) {
     state = ok('instantiate_work', { state, blueprint: tiny, work_id: workId, duration_weeks: 26 }).state
-    state.works.find((work) => work.id === workId).deadline_week = 2
+    state.works.find((work) => work.id === workId).deadline_week = 3
   }
   state = assign(state, 'staff_dir', 'work_a')
   state = assign(state, 'staff_pm', 'work_b')
@@ -1186,6 +1273,7 @@ test('INV-29：多项目按 work_id/event_id 稳定到期，其他 pending 不�
 
 test('INV-29：自动默认分支成本按现金封顶，余额不为负', () => {
   const state = timedEventState()
+  forceCash(state, 900000)
   state.events.pending[0].options[0].cost = 2000000
   const weeklyCost = state.staff.reduce((sum, member) => sum + member.weekly_salary, 0) + 30000 + 60000
   const remaining = state.finance.balance - weeklyCost
@@ -1210,7 +1298,7 @@ test('INV-29：阶段 8 校验失败不返回半结算，阶段 6 守卫先于�
   assert.equal(ok('hash_state', { state }).hash, before)
 
   const deliveryFirst = timedEventState()
-  deliveryFirst.works[0].deadline_week = deliveryFirst.company.week
+  deliveryFirst.works[0].deadline_week = deliveryFirst.company.week + 1
   const blocked = call('advance_week', { state: deliveryFirst })
   assert.equal(blocked.error.code, 'INVALID_PHASE')
   assert.ok(blocked.error.message.includes('阶段 6'))
@@ -1316,17 +1404,18 @@ test('M2 立项：承制模式消费企划、合同预算入账、项目按蓝�
   assert.equal(work.mode, 'contract')
   assert.deepEqual(work.channels, ['domestic_streaming', 'tv'])
   assert.equal(work.offer.id, 'offer_01')
-  assert.equal(work.deadline_week, 26)
-  assert.equal(work.episodes.length, 12)
-  assert.equal(work.common.items.length + work.episodes.reduce((sum, ep) => sum + ep.stages.reduce((n, st) => n + st.items.length, 0), 0), 174)
-  assert.equal(state.finance.balance, before + 1200000)
+  assert.equal(work.deadline_week, 52)
+  assert.equal(work.episodes.length, 10)
+  assert.equal(work.common.items.length + work.episodes.reduce((sum, ep) => sum + ep.stages.reduce((n, st) => n + st.items.length, 0), 0), 125)
+  assert.equal(state.finance.balance, before + 170000000)
   assert.equal(state.finance.entries.length, 1)
   assert.equal(state.finance.entries[0].category, 'contract_received')
   assert.equal(state.finance.opening_funds + state.finance.entries.reduce((sum, e) => sum + e.amount, 0), state.finance.balance)
 })
 
 test('M2 立项：委员会模式成立委员会、支付投资份额、成员渠道映射', () => {
-  let state = ok('initialize', { seed: 7 }).state
+  let state = funded(ok('initialize', { seed: 7 }).state)
+  const before = state.finance.balance
   const started = ok('start_work', {
     state,
     offer_id: 'offer_01',
@@ -1336,10 +1425,10 @@ test('M2 立项：委员会模式成立委员会、支付投资份额、成员�
   })
   state = started.state
   assert.equal(started.committee_id, 'committee_01')
-  assert.equal(state.finance.balance, 2000000)   // +1.2M 合同预算 -1.2M 投资
+  assert.equal(state.finance.balance, before)   // +170M 合同预算 -170M 投资
   assert.equal(state.finance.entries.length, 2)
   assert.equal(state.finance.entries[1].category, 'investment_paid')
-  assert.equal(state.finance.entries[1].amount, -1200000)
+  assert.equal(state.finance.entries[1].amount, -170000000)
   const committee = state.committees[0]
   assert.equal(committee.status, 'active')
   assert.equal(committee.members.length, 2)
@@ -1359,16 +1448,60 @@ test('M2 立项：委员会模式成立委员会、支付投资份额、成员�
     percent: 50,
     committee_partner_ids: ['partner_stream', 'partner_pub']
   })
-  assert.equal(second.state.finance.balance, 2000000)
+  assert.equal(second.state.finance.balance, before)
   const withTv = ok('buy_tv_service', { state: second.state, work_id: second.work_id })
   assert.equal(withTv.paid, 300000)   // 60 万 × 50%
-  assert.equal(withTv.state.finance.balance, 1700000)
+  assert.equal(withTv.state.finance.balance, before - 300000)
   assert.equal(withTv.state.works.find((w) => w.id === second.work_id).tv_service.multiplier, 1300)
   const extended = ok('request_extension', { state: withTv.state, work_id: second.work_id })
-  assert.equal(extended.state.works.find((w) => w.id === second.work_id).deadline_week, 28)
-  assert.equal(extended.state.finance.balance, 1450000)
+  assert.equal(extended.state.works.find((w) => w.id === second.work_id).deadline_week, 56)
+  assert.equal(extended.state.finance.balance, before - 550000)
   const twice = call('request_extension', { state: extended.state, work_id: second.work_id })
   assert.equal(twice.error.code, 'INVALID_PHASE')
+})
+
+test('D-07：延期原子同步本项目临时合同 end_week，失败不改写合同', () => {
+  let state = funded(ok('initialize', { seed: 7 }).state)
+  state = ok('start_work', { state, offer_id: 'offer_01', mode: 'contract' }).state
+  state = addIdleSupervisor(state)
+  const started = ok('start_work', {
+    state,
+    offer_id: 'offer_02',
+    mode: 'committee',
+    percent: 50,
+    committee_partner_ids: ['partner_stream', 'partner_pub']
+  })
+  state = started.state
+  const addTemporary = (sourceId, id, workId) => {
+    const member = structuredClone(state.staff.find((entry) => entry.id === sourceId))
+    member.id = id
+    member.name = id
+    member.employment = 'temporary'
+    member.assignment_work_id = workId
+    member.temporary_contract = { work_id: workId, start_week: 0, end_week: 52 }
+    state.staff.push(member)
+  }
+  addTemporary('staff_ka', 'temp_ka_02', started.work_id)
+  addTemporary('staff_post', 'temp_post_02', started.work_id)
+  addTemporary('staff_anim', 'temp_anim_01', 'work_01')
+
+  const poor = structuredClone(state)
+  const balance = poor.finance.balance
+  poor.finance.entries.push({
+    id: 'manual.cash.drain', week: 0, work_id: null, category: 'production', amount: -balance, memo: 'fixture'
+  })
+  poor.finance.balance = 0
+  const before = ok('hash_state', { state: poor }).hash
+  const failed = call('request_extension', { state: poor, work_id: started.work_id })
+  assert.equal(failed.error.code, 'INSUFFICIENT_FUNDS')
+  assert.equal('state' in failed, false)
+  assert.equal(ok('hash_state', { state: poor }).hash, before)
+
+  const extended = ok('request_extension', { state, work_id: started.work_id })
+  assert.equal(extended.state.works.find((work) => work.id === started.work_id).deadline_week, 56)
+  assert.equal(extended.state.staff.find((member) => member.id === 'temp_ka_02').temporary_contract.end_week, 56)
+  assert.equal(extended.state.staff.find((member) => member.id === 'temp_post_02').temporary_contract.end_week, 56)
+  assert.equal(extended.state.staff.find((member) => member.id === 'temp_anim_01').temporary_contract.end_week, 52)
 })
 
 test('M2 交付：门槛未达拒绝；达标后结算、归档、清归属、移除项目', () => {
@@ -1377,7 +1510,7 @@ test('M2 交付：门槛未达拒绝；达标后结算、归档、清归属、�
   state = assign(state, 'staff_dir')
   const early = call('deliver_work', { state, work_id: 'work_01' })
   assert.equal(early.error.code, 'GATE_UNMET')
-  assert.equal(early.error.items.length, 12)
+  assert.equal(early.error.items.length, 10)
 
   state = completeWork(state, 'work_01', 70)
   // 让团队快照有内容：真实流程里由周结算写入 contributors。
@@ -1395,11 +1528,11 @@ test('M2 交付：门槛未达拒绝；达标后结算、归档、清归属、�
   assert.equal(delivered.state.works.length, 0)
   assert.equal(delivered.state.staff.find((s) => s.id === 'staff_dir').assignment_work_id, null)
   assert.equal(delivered.state.company.reputation, 102)
-  assert.equal(delivered.state.finance.balance, 3200000 + delivered.report.bd_revenue)
+  assert.equal(delivered.state.finance.balance, 184000000 + delivered.report.bd_revenue)
   const record = delivered.state.archive.works[0]
   assert.equal(record.id, 'work_01')
   assert.equal(record.mode, 'contract')
-  assert.equal(record.finance_summary.contract_received, 1200000)
+  assert.equal(record.finance_summary.contract_received, 170000000)
   assert.equal(record.finance_summary.success_reward, 0)
   assert.equal(record.finance_summary.bd_revenue, delivered.report.bd_revenue)
   assert.equal(record.finance_summary.commercial_share, delivered.report.bd_revenue)
@@ -1410,7 +1543,7 @@ test('M2 交付：门槛未达拒绝；达标后结算、归档、清归属、�
 })
 
 test('M4 交付：委员会按投资比例分账、关闭委员会并沉淀伙伴关系', () => {
-  let state = ok('initialize', { seed: 7 }).state
+  let state = funded(ok('initialize', { seed: 7 }).state)
   state = ok('start_work', {
     state,
     offer_id: 'offer_01',
@@ -1521,11 +1654,12 @@ test('DEC-PROJECT-001：中止 50% 收 15% 违约金、顶格声望重罚并归�
   const total = items.reduce((sum, item) => sum + item.work_total, 0)
   state = setProjectProgress(state, 'work_01', total / 2)
   const balance = state.finance.balance
+  const expectedPenalty = state.works[0].offer.contract_budget * 150 / 1000
   const result = ok('abort_work', { state, work_id: 'work_01' })
 
-  assert.equal(result.report.penalty, 180000)
+  assert.equal(result.report.penalty, expectedPenalty)
   assert.equal(result.report.contract_refund, 0)
-  assert.equal(result.state.finance.balance, balance - 180000)
+  assert.equal(result.state.finance.balance, balance - expectedPenalty)
   assert.equal(result.state.company.reputation, 0)
   assert.equal(result.state.works.length, 0)
   assert.equal(result.state.staff.find((member) => member.id === 'staff_dir').assignment_work_id, null)
@@ -1533,7 +1667,7 @@ test('DEC-PROJECT-001：中止 50% 收 15% 违约金、顶格声望重罚并归�
   assert.equal(record.status, 'ABORTED')
   assert.equal(record.end_reason, 'aborted')
   assert.equal(record.aborted_week, record.end_week)
-  assert.equal(record.penalty_paid, 180000)
+  assert.equal(record.penalty_paid, expectedPenalty)
   assert.equal(record.finance_summary.contract_refund, 0)
   assert.equal(record.commercial_revenue, 0)
   assert.equal(result.state.archive.series.length, 0)
@@ -1546,7 +1680,7 @@ test('DEC-PROJECT-001：超过 50% 按未完成进度退款且不收违约金', 
   const total = allItems(state, 'work_01').reduce((sum, item) => sum + item.work_total, 0)
   state = setProjectProgress(state, 'work_01', Math.floor(total / 2) + 1)
   const balance = state.finance.balance
-  const expectedRefund = Math.floor(1200000 * (total - Math.floor(total / 2) - 1) / total)
+  const expectedRefund = Math.floor(state.works[0].offer.contract_budget * (total - Math.floor(total / 2) - 1) / total)
   const result = ok('abort_work', { state, work_id: 'work_01' })
 
   assert.equal(result.report.penalty, 0)
@@ -1557,7 +1691,7 @@ test('DEC-PROJECT-001：超过 50% 按未完成进度退款且不收违约金', 
 })
 
 test('DEC-PROJECT-001：委员会中止只核销沉没成本并零增量关闭合作', () => {
-  let state = ok('initialize', { seed: 7 }).state
+  let state = funded(ok('initialize', { seed: 7 }).state)
   state = ok('start_work', {
     state, offer_id: 'offer_02', mode: 'committee', percent: 50,
     committee_partner_ids: ['partner_stream']
@@ -1582,8 +1716,13 @@ test('DEC-PROJECT-001：中止解绑临时员工、释放外包产能并保留�
   state = ok('start_work', { state, offer_id: 'offer_02', mode: 'contract' }).state
   const temporary = state.staff.find((member) => member.id === 'staff_ka')
   temporary.employment = 'temporary'
+  temporary.temporary_contract = { work_id: 'work_01', start_week: 0, end_week: 52 }
+  temporary.assignment_work_id = 'work_01'
   state = assign(state, 'staff_ka')
-  const item = allItems(state, 'work_01')[0]
+  const item = allItems(state, 'work_01').find((entry) =>
+    !entry.id.includes('.common.') && !entry.is_gate && entry.outsourceable)
+  const episode = state.works[0].episodes.find((entry) =>
+    entry.stages.some((stage) => stage.items.some((candidate) => candidate.id === item.id)))
   item.work_done = 1
   item.contributors.push('staff_ka')
   state.suppliers = [{
@@ -1591,7 +1730,7 @@ test('DEC-PROJECT-001：中止解绑临时员工、释放外包产能并保留�
     quality: 70, speed: 60, price_per_unit: 40, reliability: 80, unlocked_week: 0
   }]
   state.contracts.push({
-    id: 'outsource_abort', supplier_id: 'supplier_abort', work_id: 'work_01', episode_id: null, item_id: item.id,
+    id: 'outsource_abort', supplier_id: 'supplier_abort', work_id: 'work_01', episode_id: episode.id, item_id: item.id,
     ability: item.ability, mode: 'normal', work_total: 10, work_done: 0, weekly_cap: 5,
     fee_total: 1000, fee_paid: 0, signed_week: 0, due_week: 2, status: 'active'
   })
@@ -1611,7 +1750,7 @@ test('DEC-PROJECT-001：中止负余额复用破产关闭且保持原子结算',
   assert.equal(result.report.company_end_reason, 'bankrupt')
   assert.equal(result.state.company.status, 'ended')
   assert.equal(result.state.company.end_reason, 'bankrupt')
-  assert.equal(result.state.finance.balance, -180000)
+  assert.equal(result.state.finance.balance, -(state.works[0].offer.contract_budget * 150 / 1000))
   assert.equal(result.state.archive.works.length, 1)
 })
 
@@ -1652,7 +1791,7 @@ test('DEC-PROJECT-001：pending 与非法阶段中止原子拒绝', () => {
 
 test('DEC-BD-001/COMM-002：电视倍率按成员/购买分档，BD 公司所得为毛收入 50%', () => {
   const withMember = (() => {
-    let state = ok('initialize', { seed: 7 }).state
+    let state = funded(ok('initialize', { seed: 7 }).state)
     state = ok('start_work', {
       state, offer_id: 'offer_01', mode: 'committee', percent: 50,
       committee_partner_ids: ['partner_tv', 'partner_stream']
@@ -1666,7 +1805,7 @@ test('DEC-BD-001/COMM-002：电视倍率按成员/购买分档，BD 公司所得
   assert.equal(lineOf(withMember, 'bd_dvd').net, Math.floor(lineOf(withMember, 'bd_dvd').gross / 2))
 
   const withoutPurchase = (() => {
-    let state = ok('initialize', { seed: 7 }).state
+    let state = funded(ok('initialize', { seed: 7 }).state)
     state = ok('start_work', {
       state, offer_id: 'offer_02', mode: 'committee', percent: 50,
       committee_partner_ids: ['partner_stream', 'partner_pub']
@@ -1678,7 +1817,7 @@ test('DEC-BD-001/COMM-002：电视倍率按成员/购买分档，BD 公司所得
   assert.equal(lineOf(withoutPurchase, 'tv'), undefined)
 
   const withPurchase = (() => {
-    let state = ok('initialize', { seed: 7 }).state
+    let state = funded(ok('initialize', { seed: 7 }).state)
     state = ok('start_work', {
       state, offer_id: 'offer_02', mode: 'committee', percent: 50,
       committee_partner_ids: ['partner_stream', 'partner_pub']
@@ -1726,7 +1865,7 @@ function completedChannelHistory(id, windows) {
 
 test('DEC-COMM-001：外部代理按声望与同类渠道成功合作分档，低于门槛时关闭', () => {
   const deliverAt = (reputation, history = []) => {
-    let state = ok('initialize', { seed: 7 }).state
+    let state = funded(ok('initialize', { seed: 7 }).state)
     state.company.reputation = reputation
     state.archive.works = history
     state = ok('start_work', {
@@ -1745,7 +1884,7 @@ test('DEC-COMM-001：外部代理按声望与同类渠道成功合作分档，�
 })
 
 test('DEC-COMM-001：代理合作次数按渠道独立累计，不跨渠道合并', () => {
-  let state = ok('initialize', { seed: 7 }).state
+  let state = funded(ok('initialize', { seed: 7 }).state)
   state.market.slots.find((offer) => offer.id === 'offer_02').channels_baseline.push('overseas')
   state.archive.works = [
     ...Array.from({ length: 3 }, (_, index) => completedChannelHistory(`history_domestic_${index}`, ['domestic_streaming'])),
@@ -1765,7 +1904,7 @@ test('DEC-COMM-001：代理合作次数按渠道独立累计，不跨渠道合�
 })
 
 test('DEC-COMM-002：无电视台成员但外部代理播出开放时使用 115% 普通曝光', () => {
-  let state = ok('initialize', { seed: 7 }).state
+  let state = funded(ok('initialize', { seed: 7 }).state)
   state = ok('start_work', {
     state, offer_id: 'offer_01', mode: 'committee', percent: 50,
     committee_partner_ids: ['partner_stream']
@@ -1780,7 +1919,7 @@ test('DEC-COMM-002：无电视台成员但外部代理播出开放时使用 115%
 })
 
 test('DEC-COMM-003：非整除净池分配尚未冻结时原子拒绝，不静默舍入', () => {
-  let state = ok('initialize', { seed: 7 }).state
+  let state = funded(ok('initialize', { seed: 7 }).state)
   state.company.reputation = 100
   state = ok('start_work', {
     state, offer_id: 'offer_02', mode: 'committee', percent: 50,
@@ -1814,7 +1953,7 @@ test('DEC-COMM-003：非整除净池分配尚未冻结时原子拒绝，不静�
 })
 
 test('DEC-PLAN-001：原创草稿走独立准入，不复用普通企划声望/履历守卫', () => {
-  let state = ok('initialize', { seed: 7 }).state
+  let state = funded(ok('initialize', { seed: 7 }).state)
   const base = JSON.parse(JSON.stringify(state.market.slots[0]))
   state.market.custom_offer = {
     ...base,
@@ -1851,7 +1990,7 @@ test('DEC-PLAN-001：原创草稿走独立准入，不复用普通企划声望/�
 })
 
 test('M0 命令 12-14：原创草稿创建、提案采纳/拒绝', () => {
-  let state = ok('initialize', { seed: 7 }).state
+  let state = funded(ok('initialize', { seed: 7 }).state)
   const request = { state, name: '自制短篇', source: 'original', scale: 'tv', style: 'normal' }
   // 声望不足只挡草稿创建，不检查全部投资资金
   assert.equal(call('create_custom_offer', request).error.code, 'INVALID_INPUT')
@@ -1969,12 +2108,12 @@ test('M2 归档后新立项不复用已归档作品 id', () => {
 test('INV-22：交付冻结完整 WorkRecord，财务口径不重复扣罚', () => {
   let state = ok('initialize', { seed: 7 }).state
   state = ok('start_work', { state, offer_id: 'offer_02', mode: 'contract' }).state
-  state.works[0].deadline_week = 1
+  state.company.week = 51
+  state.works[0].deadline_week = 52
   for (const item of gatesOf(state, 'work_01')) item.work_done = Math.floor(item.work_total * 4 / 10)
   state = ok('advance_week', { state }).state
-  state.events.pending = []
-  state = ok('advance_week', { state }).state
   const record = state.archive.works[0]
+  assert.equal(record.end_week, 52)
   assert.deepEqual(Object.keys(record).sort(), [
     'aborted_week', 'bd_gross', 'bd_revenue', 'channel_breakdown', 'commercial_revenue', 'committee_pool',
     'company_received', 'end_reason', 'end_week', 'episodes', 'finance_summary', 'forced', 'gate_completion_permille',
@@ -2083,7 +2222,7 @@ function vendorFixture() {
   state.suppliers = [{
     id: 'supplier_shared',
     name: '共享协力供应商',
-    specialties: ['planning'],
+    specialties: ['animation'],
     capacity_per_week: 100,
     quality: 70,
     speed: 60,
@@ -2096,12 +2235,12 @@ function vendorFixture() {
 }
 
 function outsourceContract(state, id, workId, weeklyCap = 60, overrides = {}) {
-  const item = findItem(state, workId, 'common.series_comp')
+  const item = findItem(state, workId, 'ep01.inbetween')
   return {
     id,
     supplier_id: 'supplier_shared',
     work_id: workId,
-    episode_id: null,
+    episode_id: 'ep01',
     item_id: item.id,
     ability: item.ability,
     mode: 'normal',
@@ -2156,7 +2295,7 @@ test('INV-20：合同项目、单集容器、能力与累计交付边界一致',
   rejectVendorState(wrongWork, /INV-20/)
 
   const wrongEpisode = structuredClone(state)
-  const episodeItem = findItem(wrongEpisode, 'work_a', 'ep01.script')
+  const episodeItem = findItem(wrongEpisode, 'work_a', 'ep01.inbetween')
   Object.assign(wrongEpisode.contracts[0], {
     item_id: episodeItem.id,
     episode_id: 'ep02',
@@ -2181,7 +2320,128 @@ test('INV-20：合同项目、单集容器、能力与累计交付边界一致',
   const split = structuredClone(state)
   split.contracts[0].work_done = 60
   split.contracts.push(outsourceContract(split, 'contract_b', 'work_a', 40, { work_done: 40 }))
-  assert.ok(ok('advance_week', { state: split }).state)
+  assert.ok(ok('hash_state', { state: split }).hash)
+})
+
+function outsourceRoll(seed, week, contractId) {
+  return Math.floor(draw(seed, week, Stream.production, hashText(contractId), hashText('outsource_tick')) * 10000 / 2 ** 32)
+}
+
+function outsourceTickState(id, reliability = 80, overrides = {}) {
+  const state = setupTiny(42)
+  state.suppliers = [{
+    id: 'supplier_shared', name: '共享协力供应商', specialties: ['animation'],
+    capacity_per_week: 100, quality: 70, speed: 60, price_per_unit: 40,
+    reliability, unlocked_week: 0
+  }]
+  findItem(state, 'work_01', 'ep01.storyboard').work_done = 100
+  state.contracts = [outsourceContract(state, id, 'work_01', 60, overrides)]
+  return state
+}
+
+function contractIdForRoll(predicate, reliability = 80, start = 0) {
+  const threshold = 10000 - 20 * (100 - reliability)
+  for (let i = start; i < start + 10000; i++) {
+    const id = `contract_${i}`
+    const roll = outsourceRoll(42, 0, id)
+    if (predicate(roll, reliability * 100, threshold)) return id
+  }
+  throw new Error('找不到外包随机区间夹具')
+}
+
+test('外包周结算：坐标与 JS oracle 一致，正常/延误/返工区间和返工下限正确', () => {
+  const cases = [
+    { name: '正常', predicate: (roll, normal) => roll < normal, delivered: 60, itemDone: 60, reported: 50, status: 'delivered' },
+    { name: '延误', predicate: (roll, normal, rework) => roll >= normal && roll < rework, delivered: 10, itemDone: 10, reported: 0, status: 'active' },
+    { name: '返工', predicate: (roll, normal, rework) => roll >= rework, delivered: 5, itemDone: 5, reported: -15, status: 'active' }
+  ]
+  for (const fixture of cases) {
+    const id = contractIdForRoll(fixture.predicate)
+    const state = outsourceTickState(id, 80, { work_done: fixture.name === '返工' ? 20 : 10 })
+    findItem(state, 'work_01', 'ep01.inbetween').work_done = fixture.name === '返工' ? 20 : 10
+    const result = ok('advance_week', { state })
+    const advanced = result.state
+    assert.equal(advanced.contracts[0].work_done, fixture.delivered, fixture.name)
+    assert.equal(findItem(advanced, 'work_01', 'ep01.inbetween').work_done, fixture.itemDone, fixture.name)
+    assert.equal(advanced.contracts[0].status, fixture.status, fixture.name)
+    const reportItem = result.report.works[0].items.find((item) => item.item_id === 'work_01.ep01.inbetween')
+    assert.equal(reportItem?.points ?? 0, fixture.reported, `${fixture.name}外包净变化应进入周回执`)
+  }
+  const floorId = contractIdForRoll((roll, normal, rework) => roll >= rework)
+  const floorState = outsourceTickState(floorId, 80, { work_done: 2 })
+  findItem(floorState, 'work_01', 'ep01.inbetween').work_done = 2
+  const floorResult = ok('advance_week', { state: floorState })
+  const floored = floorResult.state
+  assert.equal(floored.contracts[0].work_done, 0)
+  assert.equal(findItem(floored, 'work_01', 'ep01.inbetween').work_done, 0)
+  assert.equal(floorResult.report.works[0].items.find((item) => item.item_id === 'work_01.ep01.inbetween').points, -2)
+})
+
+test('外包周结算：同项按剩余需求比例、最大余数及 weekly_cap 分配', () => {
+  const normal = (roll, threshold) => roll < threshold
+  const aId = contractIdForRoll(normal)
+  let bId = contractIdForRoll(normal, 80, 1)
+  const capped = outsourceTickState(aId, 80, { work_total: 60, work_done: 40, weekly_cap: 20 })
+  capped.contracts.push(outsourceContract(capped, bId, 'work_01', 40, { work_total: 40, work_done: 20 }))
+  findItem(capped, 'work_01', 'ep01.inbetween').work_done = 60
+  const cappedResult = ok('advance_week', { state: capped })
+  assert.deepEqual(cappedResult.state.contracts.map((contract) => contract.work_done), [60, 40])
+  assert.equal(findItem(cappedResult.state, 'work_01', 'ep01.inbetween').work_done, 100)
+  assert.deepEqual(cappedResult.state.contracts.map((contract) => contract.status), ['delivered', 'delivered'])
+  assert.equal(cappedResult.report.works[0].items.find((item) => item.item_id === 'work_01.ep01.inbetween').points, 40)
+
+  const remainder = outsourceTickState(aId, 80, { work_total: 20, weekly_cap: 20 })
+  remainder.contracts.push(outsourceContract(remainder, bId, 'work_01', 30, { work_total: 30, weekly_cap: 30 }))
+  findItem(remainder, 'work_01', 'ep01.inbetween').work_done = 96
+  const remainderResult = ok('advance_week', { state: remainder })
+  assert.deepEqual(remainderResult.state.contracts.map((contract) => contract.work_done), [2, 2])
+  assert.equal(findItem(remainderResult.state, 'work_01', 'ep01.inbetween').work_done, 100)
+  assert.equal(remainderResult.report.works[0].items.find((item) => item.item_id === 'work_01.ep01.inbetween').points, 4)
+})
+
+test('外包周结算：截止周正常交付优先，未完成转 failed 并释放产能', () => {
+  const normal = (roll, threshold) => roll < threshold
+  const doneId = contractIdForRoll(normal)
+  const done = outsourceTickState(doneId, 80, { due_week: 1, work_total: 10, weekly_cap: 10 })
+  const doneResult = ok('advance_week', { state: done }).state
+  assert.equal(doneResult.contracts[0].status, 'delivered')
+
+  const lateId = contractIdForRoll((roll, threshold, rework) => roll >= threshold && roll < rework)
+  const late = outsourceTickState(lateId, 80, { due_week: 1 })
+  const lateResult = ok('advance_week', { state: late }).state
+  assert.equal(lateResult.contracts[0].status, 'failed')
+  lateResult.contracts.push(outsourceContract(lateResult, 'replacement', 'work_01', 100))
+  assert.ok(ok('hash_state', { state: lateResult }).hash)
+
+  const notYet = outsourceTickState(lateId, 80, { due_week: 2 })
+  const pendingResult = ok('advance_week', { state: notYet }).state
+  assert.equal(pendingResult.contracts[0].status, 'active')
+})
+
+test('外包防篡改：公共项与 gate 即使标记可外包也拒绝，失败命令保持原子', () => {
+  for (const itemId of ['common.series_comp', 'ep01.master']) {
+    const state = outsourceTickState('contract_guard', 80)
+    const item = findItem(state, 'work_01', itemId)
+    item.outsourceable = true
+    state.contracts[0].item_id = item.id
+    state.contracts[0].ability = item.ability
+    state.suppliers[0].specialties = ['animation', item.ability]
+    state.contracts[0].episode_id = itemId.startsWith('ep01.') ? 'ep01' : null
+    const before = JSON.stringify(state)
+    const rejected = call('advance_week', { state })
+    assert.equal(rejected.error.code, 'INVALID_STATE')
+    assert.match(rejected.error.message, /只能承接可外包/)
+    assert.equal(JSON.stringify(state), before)
+    assert.equal('state' in rejected, false)
+  }
+})
+
+test('公司关闭预演：活动外包合同随原状态终态化，不留 active 容量', () => {
+  const state = outsourceTickState('contract_closing', 80)
+  const closed = ok('end_company', { state, reason: 'manual' }).state
+  assert.equal(closed.company.status, 'closing')
+  assert.equal(closed.contracts[0].status, 'failed')
+  assert.ok(ok('hash_state', { state: closed }).hash)
 })
 
 test('INV-19/20：供应商与合同严格载荷、引用、ID 和溢出检查', () => {
@@ -2225,7 +2485,7 @@ test('供应商、合同与专业数组顺序不影响规范化哈希', () => {
     outsourceContract(state, 'contract_a', 'work_a', 60),
     outsourceContract(state, 'contract_b', 'work_b', 40)
   ]
-  state.suppliers[0].specialties = ['planning', 'drawing']
+  state.suppliers[0].specialties = ['animation', 'drawing']
   const reordered = structuredClone(state)
   reordered.suppliers.reverse()
   reordered.contracts.reverse()
@@ -2235,7 +2495,7 @@ test('供应商、合同与专业数组顺序不影响规范化哈希', () => {
 
 function committeeFixture() {
   return ok('start_work', {
-    state: ok('initialize', { seed: 7 }).state,
+    state: funded(ok('initialize', { seed: 7 }).state),
     offer_id: 'offer_01',
     mode: 'committee',
     percent: 50,
@@ -2367,29 +2627,32 @@ function gatesOf(state, workId) {
 test('M2 到期强制交付：未达门槛在结算周自动交付，按完成度扣罚并归档 deadline', () => {
   let state = ok('initialize', { seed: 7 }).state
   state = ok('start_work', { state, offer_id: 'offer_02', mode: 'contract' }).state
-  state.works[0].deadline_week = 1
+  state.company.week = 51
+  state.works[0].deadline_week = 52
   for (const item of gatesOf(state, 'work_01')) item.work_done = Math.floor(item.work_total * 4 / 10)
 
-  state = ok('advance_week', { state }).state
-  state.events.pending = []
   const balanceBefore = state.finance.balance
   const result = ok('advance_week', { state })
 
+  assert.equal(result.state.company.week, 52)
   assert.equal(result.report.settlements.length, 1)
   const settlement = result.report.settlements[0]
   assert.equal(settlement.end_reason, 'deadline')
   assert.equal(settlement.forced, true)
   assert.ok(settlement.gate_completion_permille > 0 && settlement.gate_completion_permille < 1000)
-  // 90 万预算 × 缺口比例 × 30% 扣罚（逐层整数截断，与核心同序）
-  const expectedPenalty = Math.floor(Math.floor(900000 * (1000 - settlement.gate_completion_permille) / 1000) * 300 / 1000)
+  // 170M 预算 × 缺口比例 × 30% 扣罚（逐层整数截断，与核心同序）
+  const expectedPenalty = Math.floor(Math.floor(170000000 * (1000 - settlement.gate_completion_permille) / 1000) * 300 / 1000)
   assert.equal(settlement.penalty, expectedPenalty)
   assert.equal(result.report.funds.delta, result.state.finance.balance - balanceBefore)
   assert.equal(result.state.works.length, 0)
   const record = result.state.archive.works[0]
   assert.equal(record.end_reason, 'deadline')
+  assert.equal(record.end_week, 52)
   assert.equal(record.forced, true)
   assert.equal(record.gate_completion_permille, settlement.gate_completion_permille)
   assert.equal(record.finance_summary.penalty, expectedPenalty)
+  assert.equal(result.state.finance.entries.find((entry) => entry.category === 'penalty').week, 52)
+  assert.equal(result.state.company.reputation_log.at(-1).week, 52)
   assert.equal(result.state.company.status, 'running')
 })
 
@@ -2397,18 +2660,38 @@ test('M2 到期交付：门槛已达成按 completed 正常计价，不扣罚', 
   let state = ok('initialize', { seed: 7 }).state
   state = ok('start_work', { state, offer_id: 'offer_04', mode: 'contract' }).state
   state = completeWork(state, 'work_01', 70)
-  state.works[0].deadline_week = 1
+  state.company.week = 51
+  state.works[0].deadline_week = 52
 
-  state = ok('advance_week', { state }).state
-  state.events.pending = []
   const result = ok('advance_week', { state })
 
+  assert.equal(result.state.company.week, 52)
   const settlement = result.report.settlements[0]
   assert.equal(settlement.end_reason, 'completed')
   assert.equal(settlement.forced, false)
   assert.equal(settlement.gate_completion_permille, 1000)
   assert.equal(settlement.penalty, 0)
   assert.equal(result.state.archive.works[0].end_reason, 'completed')
+  assert.equal(result.state.archive.works[0].end_week, 52)
+})
+
+test('M2 截止周：最后一个允许生产周完成后同周结算并记录实际周', () => {
+  let state = startedContract('offer_01', 7)
+  for (const item of allItems(state, 'work_01')) item.work_done = item.work_total
+  findItem(state, 'work_01', 'ep01.delivery_master').work_done = 0
+  state.company.week = 51
+  state.works[0].deadline_week = 52
+  state = assign(state, 'staff_post', 'work_01')
+
+  const result = ok('advance_week', { state })
+  const masterReceipt = result.report.works[0].items.find((item) => item.item_id === 'work_01.ep01.delivery_master')
+  assert.equal(masterReceipt.points, 20)
+  assert.equal(result.state.company.week, 52)
+  assert.equal(result.state.works.length, 0)
+  assert.equal(result.report.settlements[0].end_reason, 'completed')
+  assert.equal(result.state.archive.works[0].end_week, 52)
+  assert.ok(result.state.finance.entries.filter((entry) => entry.work_id === 'work_01' && entry.week === 52).length > 0)
+  assert.equal(result.state.company.reputation_log.at(-1).week, 52)
 })
 
 test('M2 关闭路径：end_company 锁 closing，finalize_delivery 结清，finalize_company 只生成一次结局', () => {
@@ -2447,12 +2730,8 @@ test('M2 结清负余额：提交前原子拒绝，不写流水或 Archive', () 
   let state = ok('initialize', { seed: 7 }).state
   state = ok('start_work', { state, offer_id: 'offer_01', mode: 'contract' }).state
   state = ok('end_company', { state }).state
-  state.finance.entries.push({
-    id: 'fixture.production', week: 0, work_id: 'work_01', category: 'production',
-    amount: -3000000, counterparty: null, memo: 'fixture production cost'
-  })
-  state.finance.balance -= 3000000
-  assert.equal(state.finance.balance, 200000)
+  forceCash(state, 1000)
+  assert.equal(state.finance.balance, 1000)
 
   const beforeHash = ok('hash_state', { state }).hash
   const beforeBalance = state.finance.balance
@@ -2499,11 +2778,7 @@ test('重复查看事件也必须先校验输入状态', () => {
 test('M2 关闭预演：无法非负结清时拒绝进入不可逆 closing', () => {
   let state = ok('initialize', { seed: 7 }).state
   state = ok('start_work', { state, offer_id: 'offer_01', mode: 'contract' }).state
-  state.finance.entries.push({
-    id: 'fixture.production', week: 0, work_id: 'work_01', category: 'production',
-    amount: -3000000, counterparty: null, memo: 'fixture production cost'
-  })
-  state.finance.balance -= 3000000
+  forceCash(state, 1000)
   const beforeHash = ok('hash_state', { state }).hash
   const blocked = call('end_company', { state })
   assert.equal(blocked.error.code, 'INSUFFICIENT_FUNDS')
@@ -2603,6 +2878,34 @@ function startedContract(offerId = 'offer_01', seed = 7) {
 function supervisorOf(state, workId) {
   return state.works.find((work) => work.id === workId).supervisor_staff_id
 }
+
+test('INV-27 监督执行产能五折，与普通成员同条件产量精确为 1/2', () => {
+  const run = (mode) => {
+    let state = ok('initialize', { seed: 42 }).state
+    const member = state.staff.find((entry) => entry.id === 'staff_dir')
+    for (const ability of Object.keys(member.abilities)) member.abilities[ability] = 60
+    const blueprint = singleItemBlueprint(1000)
+    blueprint.common[0].ability = 'direction'
+    state = ok('instantiate_work', {
+      state, blueprint, work_id: 'work_01', duration_weeks: 26
+    }).state
+    if (mode !== 'supervising') {
+      state = addIdleSupervisor(state)
+      state = assign(state, 'staff_pm')
+      state.works[0].supervisor_staff_id = 'staff_pm'
+      if (mode === 'backup') state = assign(state, 'staff_dir', null)
+    }
+    if (mode !== 'backup') state = assign(state, 'staff_dir')
+    const advanced = ok('advance_week', { state })
+    const item = findItem(advanced.state, 'work_01', 'common.series_comp')
+    return advanced.report.works[0].items.find((row) => row.item_id === item.id).points
+  }
+  const supervising = run('supervising')
+  const backup = run('backup')
+  const ordinary = run('ordinary') - backup
+  assert.ok(supervising > 0)
+  assert.equal(ordinary, supervising * 2)
+})
 
 test('INV-27 开工即定岗：start_work 产出的在制项目自带合格监督', () => {
   const state = startedContract()
@@ -2787,7 +3090,7 @@ test('scout 成功：候选/保底/窗口/流水与 oracle 一致，同周第二
   const entry = result.state.finance.entries.find((item) => item.id === 'w0.operations.scout')
   assert.equal(entry.category, 'operations')
   assert.equal(entry.amount, -50000)
-  assert.equal(result.state.finance.balance, 2000000 - 50000)
+  assert.equal(result.state.finance.balance, state.finance.balance - 50000)
   assert.equal(call('scout', { state: result.state }).error.code, 'INVALID_PHASE')
 })
 
@@ -2829,9 +3132,184 @@ test('scout 跨周：保底计数推进与 oracle 一致', () => {
   assert.equal(second.state.recruitment.last_scout_week, 1)
 })
 
+test('hire_temporary：解包签约、项目合同、临时账目与延期联动', () => {
+  const started = ok('start_work', {
+    state: funded(ok('initialize', { seed: 42 }).state),
+    offer_id: 'offer_01',
+    mode: 'committee',
+    percent: 50,
+    committee_partner_ids: ['partner_tv', 'partner_stream']
+  })
+  const state = started.state
+  const candidate = addTemporaryCandidate(state)
+  const balanceBefore = state.finance.balance
+  const poolBefore = state.recruitment.pool.length
+  const hired = ok('hire_temporary', { state, work_id: started.work_id, candidate_id: candidate.id })
+  assert.equal(hired.staff_id, candidate.id)
+  assert.equal(hired.state.recruitment.pool.length, poolBefore - 1)
+  assert.ok(!hired.state.recruitment.pool.some((entry) => entry.staff.id === candidate.id))
+  const member = hired.state.staff.find((entry) => entry.id === candidate.id)
+  assert.equal(member.employment, 'temporary')
+  assert.equal(member.assignment_work_id, started.work_id)
+  assert.deepEqual(member.temporary_contract, { work_id: started.work_id, start_week: 0, end_week: 52 })
+  assert.equal('origin' in member, false)
+  assert.equal('expires_week' in member, false)
+  const signing = hired.state.finance.entries.find((entry) => entry.id === `w0.temporary.${candidate.id}.signing`)
+  assert.equal(signing.category, 'temporary')
+  assert.equal(signing.work_id, started.work_id)
+  assert.equal(signing.amount, -100000)
+  assert.equal(hired.state.finance.balance, balanceBefore - 100000)
+
+  const extended = ok('request_extension', { state: hired.state, work_id: started.work_id })
+  assert.equal(extended.state.staff.find((entry) => entry.id === candidate.id).temporary_contract.end_week, 56)
+  const experienceBefore = structuredClone(member.experience)
+  const advanced = ok('advance_week', { state: extended.state })
+  const salary = advanced.state.finance.entries.find((entry) => entry.id === `w0.temporary.${candidate.id}.salary`)
+  assert.equal(salary.category, 'temporary')
+  assert.equal(salary.work_id, started.work_id)
+  assert.equal(salary.amount, -50000)
+  assert.equal(advanced.report.funds.costs.salary, 836000)
+  assert.deepEqual(advanced.state.staff.find((entry) => entry.id === candidate.id).experience, experienceBefore)
+  assert.equal(advanced.state.finance.opening_funds + advanced.state.finance.entries.reduce((sum, entry) => sum + entry.amount, 0), advanced.state.finance.balance)
+})
+
+test('hire_temporary：声望 Tier 弹性工位上限按公司总人数计算', () => {
+  const cases = [
+    [99, 1], [100, 1], [249, 1], [250, 2], [599, 2], [600, 2], [1999, 2],
+    [2000, 3], [9999, 3], [10000, 3], [59999, 3], [60000, 4], [299999, 4], [300000, 4]
+  ]
+  for (const [reputation, capacity] of cases) {
+    let state = funded(setupTiny(42))
+    state.company.reputation = reputation
+    for (let index = 0; index < capacity; index++) {
+      const candidate = addTemporaryCandidate(state, `temp_${reputation}_${index}`)
+      state = ok('hire_temporary', { state, work_id: 'work_01', candidate_id: candidate.id }).state
+    }
+    const extra = addTemporaryCandidate(state, `temp_${reputation}_overflow`)
+    const before = ok('hash_state', { state }).hash
+    const result = call('hire_temporary', { state, work_id: 'work_01', candidate_id: extra.id })
+    assert.equal(result.error.code, 'CAPACITY_EXCEEDED', `声望 ${reputation} 的工位上限应为 ${capacity}`)
+    assert.equal('state' in result, false)
+    assert.equal(ok('hash_state', { state }).hash, before)
+  }
+})
+
+test('hire_temporary：工位上限不按项目分别计算', () => {
+  let state = funded(setupTiny(42))
+  state = addIdleSupervisor(state)
+  state = ok('instantiate_work', { state, blueprint: tiny, work_id: 'work_02', duration_weeks: 26 }).state
+  const first = addTemporaryCandidate(state, 'temp_work_01')
+  state = ok('hire_temporary', { state, work_id: 'work_01', candidate_id: first.id }).state
+  const second = addTemporaryCandidate(state, 'temp_work_02')
+  const before = ok('hash_state', { state }).hash
+  const result = call('hire_temporary', { state, work_id: 'work_02', candidate_id: second.id })
+  assert.equal(result.error.code, 'CAPACITY_EXCEEDED')
+  assert.equal('state' in result, false)
+  assert.equal(ok('hash_state', { state }).hash, before)
+})
+
+test('hire_temporary：错误守卫与资金不足失败原子', () => {
+  let state = funded(setupTiny(42))
+  const candidate = addTemporaryCandidate(state)
+  assert.equal(call('hire_temporary', { state }).error.code, 'INVALID_INPUT')
+  assert.equal(call('hire_temporary', { state, work_id: 'missing', candidate_id: candidate.id }).error.code, 'NOT_FOUND')
+  assert.equal(call('hire_temporary', { state, work_id: 'work_01', candidate_id: 'missing' }).error.code, 'NOT_FOUND')
+  const coreCandidate = state.recruitment.pool.find((entry) => entry.staff.employment === 'core')
+  assert.equal(call('hire_temporary', { state, work_id: 'work_01', candidate_id: coreCandidate.staff.id }).error.code, 'INVALID_INPUT')
+
+  const poor = setupTiny(42)
+  const poorCandidate = addTemporaryCandidate(poor)
+  poor.finance.entries.push({
+    id: 'manual.cash.drain', week: 0, work_id: null, category: 'production', amount: -poor.finance.balance, memo: 'fixture'
+  })
+  poor.finance.balance = 0
+  const before = ok('hash_state', { state: poor }).hash
+  const result = call('hire_temporary', { state: poor, work_id: 'work_01', candidate_id: poorCandidate.id })
+  assert.equal(result.error.code, 'INSUFFICIENT_FUNDS')
+  assert.equal('state' in result, false)
+  assert.equal(ok('hash_state', { state: poor }).hash, before)
+
+  const scouted = ok('scout', { state: funded(setupTiny(43)) }).state
+  const expiring = scouted.recruitment.pool.at(-1)
+  expiring.staff.employment = 'temporary'
+  expiring.staff.temporary_contract = null
+  scouted.company.week = expiring.expires_week
+  assert.equal(call('hire_temporary', { state: scouted, work_id: 'work_01', candidate_id: expiring.staff.id }).error.code, 'NOT_FOUND')
+
+  state = funded(setupTiny(44))
+  state.works[0].status = 'planning'
+  for (const member of state.staff) member.assignment_work_id = null
+  const settledCandidate = addTemporaryCandidate(state, 'temp_settled')
+  assert.equal(call('hire_temporary', { state, work_id: 'work_01', candidate_id: settledCandidate.id }).error.code, 'INVALID_PHASE')
+})
+
+test('hire_temporary：主动关闭保留合同至实际结清并写入团队快照', () => {
+  let state = funded(setupTiny(45))
+  const candidate = addTemporaryCandidate(state, 'temp_closing')
+  state = ok('hire_temporary', { state, work_id: 'work_01', candidate_id: candidate.id }).state
+  const item = allItems(state, 'work_01')[0]
+  item.work_done = 1
+  item.contributors.push(candidate.id)
+
+  const closing = ok('end_company', { state })
+  assert.equal(closing.state.company.status, 'closing')
+  assert.equal(closing.state.works[0].status, 'delivering')
+  const member = closing.state.staff.find((entry) => entry.id === candidate.id)
+  assert.equal(member.assignment_work_id, 'work_01')
+  assert.deepEqual(member.temporary_contract, { work_id: 'work_01', start_week: 0, end_week: 26 })
+  assert.ok(ok('hash_state', { state: closing.state }).hash)
+
+  const finalized = ok('finalize_delivery', { state: closing.state, work_id: 'work_01' })
+  assert.equal(finalized.company_status, 'ended')
+  assert.equal(finalized.state.staff.some((entry) => entry.id === candidate.id), false)
+  assert.ok(finalized.state.archive.works[0].team.some((entry) => entry.id === candidate.id))
+})
+
+test('hire_temporary：破产关闭同样保留合同并可原子结清', () => {
+  let state = funded(setupTiny(46))
+  const candidate = addTemporaryCandidate(state, 'temp_bankrupt')
+  state = ok('hire_temporary', { state, work_id: 'work_01', candidate_id: candidate.id }).state
+  state.finance.entries.push({
+    id: 'manual.cash.drain', week: 0, work_id: null, category: 'production', amount: -state.finance.balance, memo: 'fixture'
+  })
+  state.finance.balance = 0
+
+  const bankrupt = ok('advance_week', { state })
+  assert.equal(bankrupt.report.bankrupt, true)
+  assert.equal(bankrupt.state.company.status, 'closing')
+  assert.equal(bankrupt.state.works[0].status, 'delivering')
+  assert.equal(bankrupt.state.staff.find((entry) => entry.id === candidate.id).assignment_work_id, 'work_01')
+  assert.ok(ok('hash_state', { state: bankrupt.state }).hash)
+  const finalized = ok('finalize_delivery', { state: bankrupt.state, work_id: 'work_01' })
+  assert.equal(finalized.company_status, 'ended')
+  assert.equal(finalized.state.staff.some((entry) => entry.id === candidate.id), false)
+})
+
+test('hire_temporary：第 520 周终局保留合同至最终交付', () => {
+  let state = funded(ok('initialize', { seed: 47 }).state)
+  state.company.week = 519
+  state = ok('instantiate_work', { state, blueprint: tiny, work_id: 'work_01', duration_weeks: 26 }).state
+  state = ok('assign_staff', { state, staff_id: 'staff_dir', work_id: 'work_01' }).state
+  const candidate = addTemporaryCandidate(state, 'temp_time_limit')
+  state = ok('hire_temporary', { state, work_id: 'work_01', candidate_id: candidate.id }).state
+
+  const terminal = ok('advance_week', { state })
+  assert.equal(terminal.state.company.week, 520)
+  assert.equal(terminal.state.company.end_reason, 'time_limit')
+  assert.equal(terminal.state.company.status, 'closing')
+  assert.equal(terminal.state.works[0].status, 'delivering')
+  assert.equal(terminal.state.staff.find((entry) => entry.id === candidate.id).assignment_work_id, 'work_01')
+  assert.ok(ok('hash_state', { state: terminal.state }).hash)
+  const finalized = ok('finalize_delivery', { state: terminal.state, work_id: 'work_01' })
+  assert.equal(finalized.company_status, 'ended')
+  assert.equal(finalized.state.staff.some((entry) => entry.id === candidate.id), false)
+})
+
 test('hire_core：解包入册、包装字段不残留、签约费流水', () => {
-  const state = ok('initialize', { seed: 42 }).state
+  let state = ok('initialize', { seed: 42 }).state
+  state = ok('dismiss_staff', { state, staff_id: 'staff_post' }).state
   const candidate = state.recruitment.pool[0]
+  const before = state.finance.balance
   const result = ok('hire_core', { state, staff_id: candidate.staff.id })
   assert.equal(result.staff_id, candidate.staff.id)
   assert.equal(result.state.staff.length, 4)
@@ -2844,7 +3322,7 @@ test('hire_core：解包入册、包装字段不残留、签约费流水', () =>
   const entry = result.state.finance.entries.find((item) => item.id === `w0.salary.${candidate.staff.id}.signing`)
   assert.equal(entry.category, 'salary')
   assert.equal(entry.amount, -candidate.staff.signing_fee)
-  assert.equal(result.state.finance.balance, 2000000 - candidate.staff.signing_fee)
+  assert.equal(result.state.finance.balance, before - candidate.staff.signing_fee)
   assert.equal(call('hire_core', { state, staff_id: 'nobody' }).error.code, 'NOT_FOUND')
 })
 
@@ -2877,15 +3355,13 @@ test('hire_core：资金不足与开局正式编制上限 4', () => {
   poor.finance.balance = 0
   assert.equal(call('hire_core', { state: poor, staff_id: poor.recruitment.pool[0].staff.id }).error.code, 'INSUFFICIENT_FUNDS')
   let state = rich(ok('initialize', { seed: 42 }).state)
-  for (let i = state.staff.length; i < 4; i++) {
-    state = ok('hire_core', { state, staff_id: state.recruitment.pool[0].staff.id }).state
-  }
   assert.equal(state.staff.length, 4)
   assert.equal(call('hire_core', { state, staff_id: state.recruitment.pool[0].staff.id }).error.code, 'CAPACITY_EXCEEDED')
 })
 
 test('hire_core 新员工当周可分配（§14.4）', () => {
   let state = setupTiny(42)
+  state = ok('dismiss_staff', { state, staff_id: 'staff_post' }).state
   const candidate = state.recruitment.pool[0]
   state = ok('hire_core', { state, staff_id: candidate.staff.id }).state
   state = ok('assign_staff', { state, staff_id: candidate.staff.id, work_id: 'work_01' }).state
@@ -2893,14 +3369,12 @@ test('hire_core 新员工当周可分配（§14.4）', () => {
 })
 
 test('dismiss_staff：移出名册、不预付遣散费', () => {
-  let state = ok('initialize', { seed: 42 }).state
-  const candidate = state.recruitment.pool[0]
-  state = ok('hire_core', { state, staff_id: candidate.staff.id }).state
+  const state = ok('initialize', { seed: 42 }).state
   const entriesBefore = state.finance.entries.length
   const balanceBefore = state.finance.balance
-  const result = ok('dismiss_staff', { state, staff_id: candidate.staff.id })
+  const result = ok('dismiss_staff', { state, staff_id: 'staff_ka' })
   assert.equal(result.state.staff.length, 3)
-  assert.ok(!result.state.staff.some((member) => member.id === candidate.staff.id))
+  assert.ok(!result.state.staff.some((member) => member.id === 'staff_ka'))
   assert.equal(result.state.finance.entries.length, entriesBefore)
   assert.equal(result.state.finance.balance, balanceBefore)
   assert.equal(call('dismiss_staff', { state, staff_id: 'nobody' }).error.code, 'NOT_FOUND')
@@ -2910,6 +3384,7 @@ test('dismiss_staff：解雇后至少保留 1 名核心员工', () => {
   let state = ok('initialize', { seed: 42 }).state
   state = ok('dismiss_staff', { state, staff_id: 'staff_ka' }).state
   state = ok('dismiss_staff', { state, staff_id: 'staff_anim' }).state
+  state = ok('dismiss_staff', { state, staff_id: 'staff_post' }).state
   assert.equal(state.staff.length, 1)
   assert.equal(call('dismiss_staff', { state, staff_id: 'staff_dir' }).error.code, 'INVALID_PHASE')
 })
@@ -2926,28 +3401,26 @@ test('dismiss_staff：监督关键岗位锁定与原子替换', () => {
   assert.ok(!replaced.state.staff.some((member) => member.id === 'staff_dir'))
 })
 
-test('dismiss_staff：有制作参与记录者暂拒（INV-12 历史引用缺口）', () => {
+test('dismiss_staff：历史 contributors 不阻止解雇且保持不变', () => {
   let state = setupTiny(42)
   state = ok('assign_staff', { state, staff_id: 'staff_ka', work_id: 'work_01' }).state
   state = ok('advance_week', { state }).state
   assert.ok(allItems(state, 'work_01').some((item) => item.contributors.includes('staff_ka')))
-  const rejected = call('dismiss_staff', { state, staff_id: 'staff_ka' })
-  assert.equal(rejected.error.code, 'INVALID_PHASE')
-  assert.match(rejected.error.message, /参与记录/)
+  const dismissed = ok('dismiss_staff', { state, staff_id: 'staff_ka' })
+  assert.equal(dismissed.state.staff.some((member) => member.id === 'staff_ka'), false)
+  assert.ok(allItems(dismissed.state, 'work_01').some((item) => item.contributors.includes('staff_ka')))
 })
 
-test('dismiss_staff：已结项员工的 Archive 团队贡献同样阻止解雇', () => {
+test('dismiss_staff：Archive 团队历史不阻止解雇且快照保持不变', () => {
   let state = setupTiny(42)
   state = ok('assign_staff', { state, staff_id: 'staff_ka', work_id: 'work_01' }).state
   state = ok('advance_week', { state }).state
   state = completeWork(state, 'work_01', 80)
   state = ok('deliver_work', { state, work_id: 'work_01' }).state
   assert.ok(state.archive.works[0].team.some((member) => member.id === 'staff_ka'))
-  const before = ok('hash_state', { state }).hash
-  const rejected = call('dismiss_staff', { state, staff_id: 'staff_ka' })
-  assert.equal(rejected.error.code, 'INVALID_PHASE')
-  assert.match(rejected.error.message, /参与记录/)
-  assert.equal(ok('hash_state', { state }).hash, before)
+  const dismissed = ok('dismiss_staff', { state, staff_id: 'staff_ka' })
+  assert.equal(dismissed.state.staff.some((member) => member.id === 'staff_ka'), false)
+  assert.ok(dismissed.state.archive.works[0].team.some((member) => member.id === 'staff_ka'))
 })
 
 test('advance_week 招聘池周步骤：部分轮换与 oracle rotatePool 一致', () => {
@@ -3000,6 +3473,12 @@ test('initialize 市场：4 个 fixture 槽带齐生命周期字段', () => {
     assert.equal(offer.deposit_paid, 0)
     assert.equal(offer.offer_source_type, 'market')
     assert.equal(offer.deposit_basis, offer.contract_budget)
+    assert.equal(offer.contract_budget, 170000000)
+    assert.equal(offer.duration_weeks, 52)
+    assert.equal(offer.episode_count, 10)
+    assert.equal(offer.target_quality, 65)
+    assert.equal(offer.deposit_rate_permille, 55)
+    assert.equal(offer.deposit_amount, 9350000)
   }
 })
 
@@ -3010,7 +3489,12 @@ test('市场生成企划只使用已注册 TV 蓝图，可正常立项', () => {
         const offer = generateOffer(seed, week, index)
         assert.equal(offer.scale, 'tv')
         assert.equal(offer.blueprint_id, 'tv_standard')
-        assert.equal(offer.episode_count, 12)
+        assert.equal(offer.contract_budget, 170000000)
+        assert.equal(offer.duration_weeks, 52)
+        assert.equal(offer.target_quality, 65)
+        assert.equal(offer.episode_count, 10)
+        assert.equal(offer.deposit_rate_permille, 55)
+        assert.equal(offer.deposit_amount, 9350000)
       }
     }
   }
@@ -3054,13 +3538,14 @@ test('企划到期边界：expires_week 首个失效周，锁定期内受保护�
   assert.ok(!state.market.slots.some((o) => o.id === offer.id), 'locked_until 开局释放槽位')
 })
 
-test('lock_offer：定金 5%、locked_until=week+2、终身一次、Finance 唯一一笔', () => {
+test('lock_offer：TV 小定金 5.5%、locked_until=week+2、终身一次、Finance 唯一一笔', () => {
   let state = rich(ok('initialize', { seed: 42 }).state)
   const offer = state.market.slots[0]
   const before = state.finance.balance
   const receipt = ok('lock_offer', { state, offer_id: offer.id })
   assert.equal(receipt.offer_id, offer.id)
-  const deposit = Math.floor((offer.deposit_basis * 50) / 1000)
+  const deposit = depositAmount(offer)
+  assert.equal(deposit, 9350000)
   assert.equal(receipt.deposit_paid, deposit)
   const locked = receipt.state.market.slots.find((o) => o.id === offer.id)
   assert.equal(locked.locked_until, state.company.week + 2)
@@ -3079,6 +3564,8 @@ test('lock_offer 守卫：NOT_FOUND/INVALID_INPUT/INSUFFICIENT_FUNDS', () => {
   assert.equal(call('lock_offer', { state, offer_id: 'offer_nope' }).error.code, 'NOT_FOUND')
   assert.equal(call('lock_offer', { state, offer_id: 5 }).error.code, 'INVALID_INPUT')
   const expensive = generateOffer(42, 0, 0)
+  delete expensive.deposit_amount
+  delete expensive.deposit_rate_permille
   expensive.deposit_basis = 500_000_000
   const poor = withOffers(state, [expensive])
   const rejected = call('lock_offer', { state: poor, offer_id: expensive.id })
@@ -3097,6 +3584,7 @@ test('lock_offer：IP 上门企划定金 10%，档位由来源分类决定', () 
 test('lock_offer：大定金基数使用安全算术，不溢出', () => {
   const state = ok('initialize', { seed: 42 }).state
   const offer = generateOffer(42, 0, 0, { sourceType: 'ip_visit' })
+  delete offer.deposit_amount
   offer.deposit_basis = 92233720368547760
   const expectedDeposit = Math.floor(offer.deposit_basis / 1000) * 100 +
     Math.floor((offer.deposit_basis % 1000) * 100 / 1000)
@@ -3177,7 +3665,7 @@ test('定金基数生成时固定：后续预算调整不追溯改变定金', ()
 })
 
 test('start_work：锁定期内定金 100% 抵扣，投资流水按差额入账', () => {
-  let state = rich(ok('initialize', { seed: 42 }).state)
+  let state = funded(ok('initialize', { seed: 42 }).state)
   const offer = state.market.slots[0]
   state = ok('lock_offer', { state, offer_id: offer.id }).state
   const lockedOffer = state.market.slots.find((o) => o.id === offer.id)
@@ -3199,12 +3687,13 @@ test('start_work：锁定期内定金 100% 抵扣，投资流水按差额入账'
 })
 
 test('start_work：抵扣以应付款为上限，cash_due=0 不产生投资流水', () => {
-  let state = rich(ok('initialize', { seed: 42 }).state)
+  let state = funded(ok('initialize', { seed: 42 }).state)
   const offer = generateOffer(42, 0, 0)
   offer.scale = 'tv'
-  offer.episode_count = 12
+  offer.episode_count = 10
   offer.min_reputation = 0
   offer.contract_budget = 100000
+  delete offer.deposit_amount
   offer.deposit_basis = 50_000_000
   state = withOffers(state, [offer])
   state = ok('lock_offer', { state, offer_id: offer.id }).state
@@ -3316,4 +3805,353 @@ test('validate：槽位超 4 与生命周期快照篡改被拒绝', () => {
   const missing = generateOffer(seed, 0, 0)
   delete missing.expires_week
   assert.equal(call('advance_week', { state: withOffers(base, [missing]) }).error.code, 'INVALID_STATE')
+})
+
+const tvOutsourceSuppliers = [
+  { key: 'key_animation', ability: 'drawing', points: 220 },
+  { key: 'inbetween', ability: 'animation', points: 650 },
+  { key: 'background', ability: 'drawing', points: 300 },
+  { key: 'coloring', ability: 'drawing', points: 230 },
+  { key: 'editing', ability: 'direction', points: 20 },
+  { key: 'sound_control', ability: 'postproduction', points: 100 }
+]
+
+function itemDelivered(item) {
+  return item.work_done * 1000 >= item.deliver_at * item.work_total
+}
+
+function addTvOutsourceSuppliers(state) {
+  state.suppliers = tvOutsourceSuppliers.map(({ key, ability, points }) => ({
+    id: `supplier_${key}`,
+    name: `固定协力-${key}`,
+    specialties: [ability],
+    capacity_per_week: points * 10,
+    quality: 70,
+    speed: 10,
+    price_per_unit: 4000,
+    reliability: 100,
+    unlocked_week: 0
+  }))
+  state.contracts = []
+  return state
+}
+
+function signTvOutsourceContracts(state, work, signed, metrics) {
+  const items = allItems(state, work.id)
+  const byId = new Map(items.map((item) => [item.id, item]))
+  for (const item of items) {
+    if (!item.outsourceable || item.is_gate || signed.has(item.id)) continue
+    if (!item.deps.every((dep) => {
+      const dependency = byId.get(dep)
+      return dependency && itemDelivered(dependency)
+    })) continue
+    const remaining = item.work_total - item.work_done
+    if (remaining <= 0) continue
+    const key = item.id.split('.').at(-1)
+    const supplier = state.suppliers.find((entry) => entry.id === `supplier_${key}`)
+    const reserved = state.contracts
+      .filter((contract) => contract.supplier_id === supplier.id && contract.status === 'active')
+      .reduce((sum, contract) => sum + contract.weekly_cap, 0)
+    const baseCap = Math.max(1, Math.floor(supplier.capacity_per_week * supplier.speed / 100))
+    const weeklyCap = Math.min(supplier.capacity_per_week - reserved, remaining, baseCap)
+    const feeTotal = remaining * 4000
+    const contract = {
+      id: `outsource_${item.id}`,
+      supplier_id: supplier.id,
+      work_id: work.id,
+      episode_id: item.id.split('.')[1],
+      item_id: item.id,
+      ability: item.ability,
+      mode: 'normal',
+      work_total: remaining,
+      work_done: 0,
+      weekly_cap: weeklyCap,
+      fee_total: feeTotal,
+      fee_paid: feeTotal,
+      signed_week: state.company.week,
+      due_week: work.deadline_week,
+      status: 'active'
+    }
+    state.contracts.push(contract)
+    state.finance.entries.push({
+      id: `w${state.company.week}.outsourcing.${contract.id}`,
+      week: state.company.week,
+      work_id: work.id,
+      category: 'outsourcing',
+      amount: -feeTotal,
+      counterparty: supplier.id,
+      memo: '外包签约（固定 fixture）'
+    })
+    state.finance.balance -= feeTotal
+    metrics.outsourceSpend += feeTotal
+    signed.add(item.id)
+  }
+  ok('hash_state', { state })
+}
+
+function resolveTvEvents(state, metrics) {
+  for (const pending of [...state.events.pending]) {
+    if (!pending.viewed) {
+      state = ok('view_event', { state, work_id: pending.work_id, event_id: pending.event_id }).state
+    }
+    const current = state.events.pending.find((event) =>
+      event.work_id === pending.work_id && event.event_id === pending.event_id)
+    const option = [...current.options]
+      .filter((entry) => entry.cost <= state.finance.balance)
+      .sort((a, b) => a.cost - b.cost || a.id.localeCompare(b.id))[0]
+    state = ok('resolve_event', {
+      state,
+      work_id: pending.work_id,
+      event_id: pending.event_id,
+      option_id: option.id
+    }).state
+    metrics.events.push({ week: state.company.week, event_id: pending.event_id, option_id: option.id })
+  }
+  return state
+}
+
+function runTvTenEpisode(seed) {
+  let state = ok('initialize', { seed }).state
+  const offer = state.market.slots.find((entry) => entry.id === 'offer_01')
+  assert.equal(offer.contract_budget, 170000000)
+  assert.equal(offer.duration_weeks, 52)
+  assert.equal(offer.episode_count, 10)
+  assert.equal(offer.target_quality, 65)
+  assert.equal(offer.deposit_amount, 9350000)
+  assert.equal(state.recruitment.pool.length > 0, true)
+
+  const started = ok('start_work', { state, offer_id: offer.id, mode: 'contract' })
+  state = started.state
+  const workId = started.work_id
+  const initialHash = ok('hash_state', { state }).hash
+  const earlyDelivery = call('deliver_work', { state, work_id: workId })
+  assert.equal(earlyDelivery.error.code, 'GATE_UNMET')
+  assert.equal('state' in earlyDelivery, false)
+  assert.equal(ok('hash_state', { state }).hash, initialHash)
+
+  state = addTvOutsourceSuppliers(state)
+  for (const member of state.staff) {
+    state = ok('assign_staff', { state, staff_id: member.id, work_id: workId }).state
+  }
+  const metrics = {
+    inhousePoints: 0,
+    inhouseCorePoints: 0,
+    inhouseOutsourcePoints: 0,
+    outsourcePoints: 0,
+    outsourceSpend: 0,
+    externalByItem: {},
+    contractsBeforeDelivery: null,
+    contractsBeforeDeadlineSettlement: null,
+    settlementPath: null,
+    events: [],
+    weekly: [],
+    weeks: 0
+  }
+  const signed = new Set()
+  let finalWork = structuredClone(state.works[0])
+
+  while (state.works.some((work) => work.id === workId)) {
+    const work = state.works.find((entry) => entry.id === workId)
+    const nextEpisode = work.episodes.find((episode) =>
+      episode.stages.flatMap((stage) => stage.items.filter((item) => item.is_gate)).some((item) => !itemDelivered(item)))
+    if (nextEpisode && (work.plan.target?.kind !== 'episode' || work.plan.target.id !== nextEpisode.id)) {
+      state = ok('set_work_plan', {
+        state,
+        work_id: workId,
+        plan: { focus: 'schedule', target: { kind: 'episode', id: nextEpisode.id } }
+      }).state
+    }
+    state = resolveTvEvents(state, metrics)
+    signTvOutsourceContracts(state, work, signed, metrics)
+    finalWork = structuredClone(state.works.find((entry) => entry.id === workId))
+    const gates = finalWork.episodes.flatMap((episode) =>
+      episode.stages.flatMap((stage) => stage.items.filter((item) => item.is_gate)))
+    if (gates.every(itemDelivered)) {
+      metrics.contractsBeforeDelivery = structuredClone(state.contracts)
+      metrics.settlementPath = 'manual_delivery'
+      state = ok('deliver_work', { state, work_id: workId }).state
+      break
+    }
+    if (state.company.week >= work.deadline_week) break
+    if (state.company.week + 1 === work.deadline_week) {
+      metrics.contractsBeforeDeadlineSettlement = structuredClone(state.contracts)
+    }
+
+    const contractDone = new Map(state.contracts.map((contract) => [contract.id, contract.work_done]))
+    const advanced = ok('advance_week', { state })
+    metrics.weeks += 1
+    const staff = advanced.report.staff.map((member) => ({ ...member }))
+    metrics.inhousePoints += staff.reduce((sum, member) => sum + member.produced, 0)
+    const coreIds = new Set(allItems({ works: [finalWork] }, workId)
+      .filter((item) => !item.outsourceable).map((item) => item.id))
+    metrics.inhouseCorePoints += (advanced.report.works[0]?.items ?? []).reduce((sum, receipt) =>
+      sum + (coreIds.has(receipt.item_id) ? receipt.points : 0), 0)
+    state = advanced.state
+    const current = state.works.find((entry) => entry.id === workId)
+    if (current) {
+      finalWork = structuredClone(current)
+      for (const contract of state.contracts) {
+        const delta = contract.work_done - (contractDone.get(contract.id) ?? 0)
+        metrics.externalByItem[contract.item_id] = (metrics.externalByItem[contract.item_id] ?? 0) + delta
+      }
+    } else {
+      metrics.settlementPath = 'automatic_deadline'
+      // 固定供应商 reliability=100 且每项仅一份合同，可按截止周规则还原最后一批外部交付。
+      for (const contract of metrics.contractsBeforeDeadlineSettlement) {
+        const item = allItems({ works: [finalWork] }, workId).find((entry) => entry.id === contract.item_id)
+        const delivered = item ? Math.max(0, Math.min(
+          contract.work_total - contract.work_done,
+          contract.weekly_cap,
+          item.work_total - item.work_done
+        )) : 0
+        metrics.externalByItem[contract.item_id] = (metrics.externalByItem[contract.item_id] ?? 0) + delivered
+      }
+      for (const receipt of advanced.report.works[0]?.items ?? []) {
+        const item = allItems({ works: [finalWork] }, workId).find((entry) => entry.id === receipt.item_id)
+        if (item) item.work_done += receipt.points
+      }
+    }
+    metrics.outsourcePoints = Object.values(metrics.externalByItem).reduce((sum, points) => sum + points, 0)
+    const snapshotItems = allItems({ works: [finalWork] }, workId)
+    metrics.weekly.push({
+      week: state.company.week,
+      target: nextEpisode.id,
+      staff,
+      core_done: snapshotItems.filter((item) => !item.outsourceable).reduce((sum, item) => sum + item.work_done, 0),
+      outsourceable_done: snapshotItems.filter((item) => item.outsourceable).reduce((sum, item) => sum + item.work_done, 0),
+      unlocked_outsourceable: snapshotItems.filter((item) => item.outsourceable && !signed.has(item.id) &&
+        item.deps.every((dep) => snapshotItems.some((entry) => entry.id === dep && itemDelivered(entry)))).map((item) => item.id),
+      gates: snapshotItems.filter((item) => item.is_gate && itemDelivered(item)).length,
+      contracts: state.contracts.length
+    })
+  }
+
+  const items = allItems({ works: [finalWork] }, workId)
+  const core = items.filter((item) => !item.outsourceable)
+  const outsourceable = items.filter((item) => item.outsourceable)
+  const contractsBeforeDelivery = metrics.contractsBeforeDelivery
+  const contractsBeforeDeadlineSettlement = metrics.contractsBeforeDeadlineSettlement
+  const settlementContracts = contractsBeforeDelivery ?? contractsBeforeDeadlineSettlement ?? []
+  const manualDelivery = contractsBeforeDelivery !== null
+  metrics.inhouseOutsourcePoints = metrics.inhousePoints - metrics.inhouseCorePoints
+  const outsourceByItem = Object.fromEntries(outsourceable.map((item) => {
+    const external = metrics.externalByItem[item.id] ?? 0
+    return [item.id, { total: item.work_total, external, inhouse: item.work_done - external }]
+  }))
+  const diagnostics = {
+    week: state.company.week,
+    end_reason: state.archive.works[0]?.end_reason ?? null,
+    core_done: core.reduce((sum, item) => sum + item.work_done, 0),
+    core_total: core.reduce((sum, item) => sum + item.work_total, 0),
+    outsourceable_done: outsourceable.reduce((sum, item) => sum + item.work_done, 0),
+    outsourceable_total: outsourceable.reduce((sum, item) => sum + item.work_total, 0),
+    delivered_gates: finalWork.episodes.flatMap((episode) =>
+      episode.stages.flatMap((stage) => stage.items.filter((item) => item.is_gate && itemDelivered(item)))).length,
+    settlement_path: metrics.settlementPath,
+    contracts: settlementContracts.length,
+    contracts_before_delivery: contractsBeforeDelivery,
+    contracts_before_deadline_settlement: contractsBeforeDeadlineSettlement,
+    delivered_contracts: manualDelivery
+      ? settlementContracts.filter((contract) => contract.status === 'delivered').length
+      : null,
+    failed_contracts: settlementContracts.filter((contract) => contract.status === 'failed').length,
+    contract_work_total: settlementContracts.reduce((sum, contract) => sum + contract.work_total, 0),
+    contract_work_done: settlementContracts.reduce(
+      (sum, contract) => sum + (metrics.externalByItem[contract.item_id] ?? 0), 0),
+    external_by_item: metrics.externalByItem,
+    inhousePoints: metrics.inhousePoints,
+    inhouseCorePoints: metrics.inhouseCorePoints,
+    inhouseOutsourcePoints: metrics.inhouseOutsourcePoints,
+    outsourcePoints: metrics.outsourcePoints,
+    outsourceSpend: metrics.outsourceSpend,
+    outsource_by_item: Object.fromEntries(Object.entries(outsourceByItem).filter(([, value]) => value.inhouse > 0)),
+    events: metrics.events,
+    weekly: metrics.weekly,
+    weeks: metrics.weeks
+  }
+  return { state, diagnostics, hash: ok('hash_state', { state }).hash }
+}
+
+test('M2 v0.5：全外包经济情景使用独立成本口径', () => {
+  const state = ok('initialize', { seed: 20261127 }).state
+  const blueprint = JSON.parse(readFileSync('docs/blueprints/tv_standard.blueprint.json', 'utf8'))
+  const created = ok('instantiate_work', { state, blueprint, work_id: 'work_economy', duration_weeks: 52 })
+  const outsourceable = allItems(created.state, 'work_economy').filter((item) => item.outsourceable)
+  const outsourceablePoints = outsourceable.reduce((sum, item) => sum + item.work_total, 0)
+  const outsourceCost = outsourceablePoints * 4000
+  const salaryCost = state.staff.reduce((sum, member) => sum + member.weekly_salary, 0) * 52
+  // 200,000/周仅用于本经济情景，不改写当前周结算的运营占位值。
+  const fixedOperations = 200000 * 52
+  assert.equal(outsourceablePoints, 15200)
+  assert.equal(outsourceCost, 60800000)
+  assert.equal(salaryCost, 40872000)
+  assert.equal(fixedOperations, 10400000)
+  assert.equal(outsourceCost + salaryCost + fixedOperations, 112072000)
+})
+
+test('M2 v0.5：固定 seed 真实推进十集、事件、外包、交付、Finance 与 Archive', () => {
+  const first = runTvTenEpisode(20261127)
+  const detail = JSON.stringify(first.diagnostics)
+  assert.equal(first.state.archive.works.length, 1, detail)
+  assert.equal(first.state.archive.works[0].end_reason, 'completed', detail)
+  assert.equal(first.state.works.length, 0, detail)
+  assert.equal(first.diagnostics.core_done, 10600, detail)
+  assert.equal(first.diagnostics.core_total, 10600, detail)
+  assert.equal(first.diagnostics.outsourceable_done, 15200, detail)
+  assert.equal(first.diagnostics.outsourceable_total, 15200, detail)
+  assert.equal(first.diagnostics.delivered_gates, 10, detail)
+  assert.equal(first.diagnostics.settlement_path, 'automatic_deadline', detail)
+  assert.equal(first.diagnostics.failed_contracts, 0, detail)
+  assert.equal(first.diagnostics.contracts, 55, detail)
+  assert.equal(first.diagnostics.outsourcePoints, 13023, detail)
+  assert.equal(first.diagnostics.outsourceSpend, 52092000, detail)
+  assert.equal(first.diagnostics.inhousePoints, 12777, detail)
+  assert.equal(first.diagnostics.inhouseCorePoints, 10600, detail)
+  assert.equal(first.diagnostics.inhouseOutsourcePoints, 2177, detail)
+  assert.equal(first.diagnostics.delivered_contracts, null, detail)
+  assert.equal(first.diagnostics.contract_work_total, first.diagnostics.outsourcePoints, detail)
+  assert.equal(first.diagnostics.contract_work_done, first.diagnostics.outsourcePoints, detail)
+  assert.equal(first.diagnostics.inhousePoints,
+    first.diagnostics.inhouseCorePoints + first.diagnostics.inhouseOutsourcePoints, detail)
+  assert.equal(first.diagnostics.inhouseCorePoints, first.diagnostics.core_done, detail)
+  assert.equal(first.diagnostics.inhouseOutsourcePoints,
+    first.diagnostics.outsourceable_done - first.diagnostics.outsourcePoints, detail)
+  assert.equal(first.diagnostics.inhousePoints + first.diagnostics.outsourcePoints,
+    first.diagnostics.core_done + first.diagnostics.outsourceable_done, detail)
+  assert.ok(first.diagnostics.events.length > 0, detail)
+  assert.equal(first.diagnostics.week, 52, detail)
+  assert.equal(first.diagnostics.weeks, 52, detail)
+  assert.deepEqual(first.state.contracts, [])
+
+  const record = first.state.archive.works[0]
+  assert.equal(record.episodes.length, 10)
+  assert.equal(record.start_week, 0)
+  assert.equal(record.end_week, 52)
+  assert.equal(record.forced, false)
+  assert.equal(record.gate_completion_permille, 1000)
+  assert.deepEqual(record.team.map((member) => member.id), ['staff_anim', 'staff_dir', 'staff_ka', 'staff_post'])
+  assert.ok(first.state.staff.every((member) => member.assignment_work_id === null))
+  assert.equal(first.state.finance.opening_funds +
+    first.state.finance.entries.reduce((sum, entry) => sum + entry.amount, 0),
+  first.state.finance.balance)
+  const contracts = first.diagnostics.contracts_before_deadline_settlement
+  assert.ok(contracts.every((contract) => ['active', 'delivered'].includes(contract.status)))
+  assert.ok(contracts.every((contract) =>
+    first.diagnostics.external_by_item[contract.item_id] === contract.work_total))
+  const outsourceLedger = first.state.finance.entries.filter((entry) =>
+    entry.category === 'outsourcing' && entry.memo === '外包签约（固定 fixture）')
+  const expectedOutsourceSpend = contracts.reduce((sum, contract) => sum + contract.work_total * 4000, 0)
+  assert.equal(outsourceLedger.length, contracts.length)
+  assert.equal(-outsourceLedger.reduce((sum, entry) => sum + entry.amount, 0), expectedOutsourceSpend)
+  assert.equal(first.diagnostics.outsourceSpend, expectedOutsourceSpend)
+  assert.equal(record.finance_summary.costs.outsourcing, expectedOutsourceSpend)
+  assert.equal(record.finance_summary.costs.production,
+    first.state.finance.entries.filter((entry) => entry.work_id === record.id && entry.category === 'production')
+      .reduce((sum, entry) => sum - entry.amount, 0))
+  assert.equal(record.finance_summary.total_costs,
+    Object.values(record.finance_summary.costs).reduce((sum, amount) => sum + amount, 0))
+
+  const replay = runTvTenEpisode(20261127)
+  assert.deepEqual(replay.diagnostics, first.diagnostics)
+  assert.equal(replay.hash, first.hash)
 })

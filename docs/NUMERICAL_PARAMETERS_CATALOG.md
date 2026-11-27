@@ -413,7 +413,7 @@
 
 **已确认：** 锁定期 2 周；提前 1 周提醒；接单时定金 100% 抵扣对应立项保证金或前期费用；逾期不退；同一企划终身最多锁定一次，不允许续锁。
 
-**已冻结：** 普通企划定金 5%、IP 上门企划 10%；计算基数为企划生成时固定的基础立项费用，不随后续预算调整变化。
+**已冻结：** 普通企划定金 5%、IP 上门企划 10%；DEC-PROD-006 的 TV-小另按 5.5% 分档。计算基数为企划生成时固定的基础立项费用，不随后续预算调整变化。`deposit_rate_permille` 与 `deposit_amount` 是生成时冻结的快照，适用于按矩阵分档的定金，不以统一 5% 覆盖 TV-小。
 
 **决定前应查阅：** [DECISION_LOG.md](DECISION_LOG.md)、[M0 契约](M0_CONTRACT_FREEZE.md)、[DESIGN_BACKLOG](DESIGN_BACKLOG_2026-11-25.md)、[#59 市场](https://github.com/zhengmin486/anime-production-committee/issues/59)。
 
@@ -534,7 +534,9 @@
 
 **已确认边界：** 整集协力只覆盖单集第 2–5 阶段；第 1 阶段核心创作和第 6 阶段最终母版把关留在社内；整集打包必须完整预检、一次性成功或失败；质量封顶按实际外包覆盖程度判断，不得因拆单规避。
 
-**临时参考：** 外包覆盖比例 ≥70% 曾作为候选阈值，不是冻结值；分母与工作量口径仍待确定。
+**已确认覆盖率算法：** 对单集第 2–5 阶段内所有允许外包 WorkItem，分母为其 `work_total` 总和；分子为这些工作项上外部供应商实际有效交付点数总和（跨供应商累计）。公共制作与第 1/6 阶段不计入分母；未交付的签约量、合同金额和合同数量均不计入分子。覆盖率 = 外部实际有效交付点数 / 允许外包工作项总量。全部允许外包工作项均由外部完成时直接触发 B 级封顶。
+
+**临时参数：** ≥70% 作为 `[M7_TEMP]` 首版候选阈值使用；不是最终冻结值，交由 M7 统一校准。
 
 **决定前应查阅：** [DECISION_LOG.md](DECISION_LOG.md)、[DOMAIN_ARCHITECTURE](DOMAIN_ARCHITECTURE.md)、[M0_CONTRACT_FREEZE.md](M0_CONTRACT_FREEZE.md)、[#63 工期](https://github.com/zhengmin486/anime-production-committee/issues/63)、[#64 经济](https://github.com/zhengmin486/anime-production-committee/issues/64)。
 

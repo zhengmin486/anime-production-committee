@@ -28,6 +28,7 @@ std::string adopt_proposal(const std::string& input);     // M0 命令 13：{sta
 std::string reject_proposal(const std::string& input);    // M0 命令 14：{state}
 std::string assign_staff(const std::string& input);      // M0 命令 4：{state, staff_id, work_id|null}
 std::string hire_core(const std::string& input);         // M0 命令 5：{state, staff_id}（池中候选 id）
+std::string hire_temporary(const std::string& input);    // M0 命令 8：{state, work_id, candidate_id}
 std::string scout(const std::string& input);             // M0 命令 6：{state, role?, focus_ability?}
 std::string dismiss_staff(const std::string& input);     // M0 命令 7：{state, staff_id}
 std::string deliver_work(const std::string& input);      // M0 命令 10：{state, work_id}

@@ -8,7 +8,7 @@
 //
 // 约定：
 // - 全部字段 snake_case，与 M0_CONTRACT_FREEZE §3 对齐。
-// - 无浮点。金额为日元整数，工作量为整数"点"（1 点 = 1/100 人周）。
+// - 无浮点。金额为日元整数，工作量为整数"点"（当前 v0.5 runtime：1 人周 = 70 点）。
 // - 空值用 std::optional 表达，序列化为 null。
 
 #include <array>
@@ -99,6 +99,7 @@ struct WorkItem {
     int deliver_at = 1000;
     std::vector<std::string> deps;
     bool is_gate = false;
+    bool outsourceable = false;
     Quality quality;
     std::vector<std::string> contributors;
 

@@ -80,10 +80,10 @@ SaveRecord { version: 4, savedAt: ISO8601, rules_version: string, state: GameSta
 | `Project` | id, offer, mode, investment, channels, opened_week, deadline_week, extension, status, supervisor_staff_id, common, episodes, plan | ip_id, committee_id, tv_service, delivery | committee 模式才可有 committee_id；episodes 长度 = offer.episode_count |
 | `CommonProduction` | id, items | — | items 非空 |
 | `EpisodeProduction` | id, index, stages | — | stages 恰 6 个，顺序固定；实现为 6 元素数组，每元素带 `key`（非 JSON 对象键），见数据字典 §3.4 |
-| `WorkItem` | id, key, ability, work_total, work_done, deliver_at, deps, is_gate, quality, contributors | — | 0 ≤ work_done ≤ work_total；deliver_at ∈ [1,1000] |
+| `WorkItem` | id, key, ability, work_total, work_done, deliver_at, deps, is_gate, outsourceable, quality, contributors | — | 0 ≤ work_done ≤ work_total；deliver_at ∈ [1,1000]；outsourceable 为布尔值，公共制作与门槛项不得外包 |
 | `WorkPlan` | intensity, focus, outsourcing, overtime, target | — | target 至多一个，引用本项目单集/阶段 |
 | `Supplier` | id, name, specialties, capacity_per_week, quality, speed, price_per_unit, reliability, unlocked_week | — | 目录只增不改 |
-| `OutsourceContract` | id, supplier_id, work_id, episode_id, item_id, ability, mode, work_total, work_done, weekly_cap, fee_total, fee_paid, signed_week, due_week, status | episode_id（公共制作为 null） | item 属于同一 work；Σactive weekly_cap ≤ supplier 容量 |
+| `OutsourceContract` | id, supplier_id, work_id, episode_id, item_id, ability, mode, work_total, work_done, weekly_cap, fee_total, fee_paid, signed_week, due_week, status | — | item 属于同一 work，且只能是 `outsourceable=true` 的 episode 非 gate 项；Σactive weekly_cap ≤ supplier 容量 |
 | `Partner` | id, name, type, channels, prestige, relationship, history, status | — | 渠道唯一 |
 | `Committee` | id, work_id, members, formed_week, status | closed_week | 一成员一渠道，bd 不挂成员 |
 | `MarketState` | heat, slots, refresh_week, competitors | custom_offer, proposal, last_competition_round | `market.slots ≤ 4`；初始生成 4 个企划，每周只补空槽；自定/提案为独立槽；Offer 生命周期字段见 §14.13 |
@@ -111,7 +111,7 @@ SaveRecord { version: 4, savedAt: ISO8601, rules_version: string, state: GameSta
 | INV-09 | `assignment_work_id` 为 null 或指向 `producing` 项目 | INVALID_STATE |
 | INV-10 | 同一周一名员工只有一个归属；临时人员归属恒等于合同项目 | INVALID_STATE |
 | INV-11 | `last_participation.week` ∈ {`week-1`, null} | INVALID_STATE |
-| INV-12 | `contributors` 只增不删、无重复、只含参与过该工作项的员工 | INVALID_STATE |
+| INV-12 | `contributors` 只增不删、无重复、只含历史上实际参与过该工作项的员工；历史引用不要求其仍在当前 Staff 名册 | INVALID_STATE |
 | INV-13 | 委员会成员不重复、渠道不重复、`bd` 不挂成员 | INVALID_STATE |
 | INV-14 | contract ⇒ `investment.percent=0 ∧ paid=0 ∧ committee_id=null`；committee ⇒ percent ∈ {10..100} 且 committee_id≠null | INVALID_STATE |
 | INV-15 | `allowed_modes`：普通企划含 contract 与 committee；原创仅 committee | INVALID_STATE |
@@ -147,7 +147,7 @@ SaveRecord { version: 4, savedAt: ISO8601, rules_version: string, state: GameSta
 | 5 | `hire_core(staff_id)` | running ∧ 候选人存在 ∧ 现金 ≥ signing_fee ∧ 当前核心员工数 < 已解锁 core_staff_capacity | NOT_FOUND / INSUFFICIENT_FUNDS / CAPACITY_EXCEEDED | 从招聘池解包并加入核心名册，当周可分配；临时员工不占核心编制；signing_fee 通过 Finance 即时入账，首周周薪计入本周下一次周结算 |
 | 6 | `scout(role?, focus_ability?)` | running ∧ `events.pending[]` 为空 ∧ 现金 ≥ 本次费用 ∧ `recruitment.last_scout_week ≠ week`（每周至多一次）∧ role 与 focus_ability 至多传一个 | INVALID_INPUT / INVALID_PHASE / INSUFFICIENT_FUNDS | 池+保底计数+last_scout_week+Finance 费用流水；scout 候选带签约窗口（§14.13） |
 | 7 | `dismiss_staff(staff_id)` | running ∧ core 员工存在 ∧ 解雇后 core 数 ≥1 ∧ 若为监督须先原子替换；无同项目/空闲合格替补则关键岗位锁定 | NOT_FOUND / INVALID_INPUT / INVALID_PHASE | 移出名册+清空归属；不预付遣散费 |
-| 8 | `hire_temporary(work_id, candidate_id)` | running ∧ 项目 producing ∧ 候选人存在 ∧ 现金 ≥ signing_fee | NOT_FOUND / INSUFFICIENT_FUNDS | 临时合同+Finance signing_fee 即时入账；weekly_salary 从后续周结算计提；归属合同项目 |
+| 8 | `hire_temporary(work_id, candidate_id)` | running ∧ 项目 producing ∧ 候选人存在且 `employment=temporary` ∧ 现金 ≥ signing_fee ∧ 弹性工位有空位 | NOT_FOUND / INVALID_INPUT / INSUFFICIENT_FUNDS / CAPACITY_EXCEEDED | 解包临时候选并写入 `temporary_contract={work_id,start_week=week,end_week=project.deadline_week}`、`assignment_work_id=work_id`；Finance `temporary` 类别即时扣签约费；weekly_salary 从后续周结算计提；一次提交 |
 | 9 | `sign_outsourcing(work_id, item_id, supplier_id, work_total, mode)` | 工作项已解锁 ∧ 专业匹配 ∧ 产能余量 ∧ 现金 | DEPENDENCY_UNMET / CAPACITY_EXCEEDED / INSUFFICIENT_FUNDS | 合同+费用+占用 |
 | 10 | `deliver_work(work_id)` | 全部门槛项 delivered ∧ 未过截止 ∧ 项目 producing | GATE_UNMET / INVALID_PHASE | 当次完成交付结算（周数不变） |
 | 11 | `abort_work(work_id)` | running ∧ 项目 producing ∧ 未过截止 ∧ 本项目无 pending | NOT_FOUND / INVALID_PHASE / COMPANY_ENDED | 中止结算、退款/违约金入账、声望重罚、委员会关闭、Archive 履历、人员/外包释放；负余额复用破产关闭 |
@@ -155,7 +155,7 @@ SaveRecord { version: 4, savedAt: ISO8601, rules_version: string, state: GameSta
 | 13 | `adopt_proposal()` | 存在提案 ∧ running | NOT_FOUND | 提案→自定槽 |
 | 14 | `reject_proposal()` | 存在提案 | NOT_FOUND | 清空提案 |
 | 15 | `buy_tv_service(work_id)` | 委员会模式 ∧ 未购买 ∧ 现金 | MODE_NOT_ALLOWED / INSUFFICIENT_FUNDS | 渠道+发行费 |
-| 16 | `request_extension(work_id)` | 委员会模式 ∧ 未用过 ∧ 未过截止 ∧ 现金 | MODE_NOT_ALLOWED / INSUFFICIENT_FUNDS | 延期+费用 |
+| 16 | `request_extension(work_id)` | 委员会模式 ∧ 未用过 ∧ 未过截止 ∧ 现金 | MODE_NOT_ALLOWED / INSUFFICIENT_FUNDS | 延期+费用；在同一原子提交中同步更新该项目所有在聘临时员工 `temporary_contract.end_week` 为新的 `deadline_week` |
 | 17 | `advance_week()` | running ∧ 不存在 `viewed=false` 的 pending 事件 ∧ week<520 ∧ 非 closing | INVALID_PHASE | 八阶段原子周结算；刚性支出预检失败则回滚并直接破产终局 |
 | 18 | `resolve_event(work_id, event_id, option_id)` | 该 work 存在对应 pending 事件 ∧ 选项合法 ∧ 现金充足（若需付款） | NOT_FOUND / INVALID_INPUT / INSUFFICIENT_FUNDS | 效果分派；只移除 `(work_id,event_id)` 对应事件 |
 | 19 | `end_company()` | running | INVALID_PHASE | 锁 closing，未交付转 delivering |
@@ -299,22 +299,22 @@ PASS  HO-12  监督人员切换项目但当周无产出，不产生团队级损�
 - 校验：`npm run validate:blueprint`，检查结构、六阶段覆盖、门槛存在性、依赖可解析、无环、可达性、量级。
 
 ```text
-蓝图: tv_standard (常规 TV 季番（12 集）)
-规模: tv / 12 集
+蓝图: tv_standard (常规 TV 季番（10 集）)
+规模: tv / 10 集
 
-单集工作项: 14 个, 596 点 (5.96 人周)
-公共制作项: 6 个, 325 点 (3.25 人周)
-实例化后: 174 个工作项, 7477 点 (74.8 人周)
-公共制作占总量: 4.3%
-关键路径最重链: 574 点 (5.74 人周，单集内)
+单集工作项: 12 个, 2100 点 (30.00 人周)，核心 580 / 可外包 1520
+公共制作项: 5 个, 4800 点 (68.57 人周)，全部不可外包
+实例化后: 125 个工作项, 25800 点 (368.6 人周)
+公共制作占总量: 18.6%
+关键路径最重链: 1780 点 (25.43 人周，单集内)
 
 阶段分布:
-  content_design              2 项    60 点
-  storyboard_key_animation    3 项   198 点
-  animation                   2 项   112 点
-  art_visual                  2 项    82 点
-  photography_editing         2 项    76 点
-  sound_delivery              3 项    68 点
+  content_design              2 项   200 点
+  storyboard_key_animation    2 项   480 点
+  animation                   1 项   650 点
+  art_visual                  2 项   530 点
+  photography_editing         2 项   100 点
+  sound_delivery              3 项   140 点
 
 校验通过: 0 个错误, 0 个警告
 ```
@@ -325,11 +325,16 @@ PASS  HO-12  监督人员切换项目但当周无产出，不产生团队级损�
 
 ## 11. 校验执行记录
 
+下表首行是 M0 初始历史记录，保留原基线；当前样例以 v0.5 复核行为准，不用旧 12 集结果覆盖十集锚点。
+
 | 项 | 值 |
 | --- | --- |
-| 执行时间 | 2026-11-24 19:45（UTC+8） |
-| 基线提交 | `9bee444` |
-| `npm run validate:blueprint` | 通过，0 错误 0 警告；174 项 / 7477 点 |
+| M0 初始执行时间 | 2026-11-24 19:45（UTC+8） |
+| M0 初始基线提交 | `9bee444` |
+| M0 初始 `validate:blueprint` | 历史通过记录：0 错误 0 警告；174 项 / 7477 点 |
+| v0.5 复核 | 2026-11-27；`validate:blueprint` 通过，0 错误 0 警告；125 项 / 25,800 点 |
+| `npm run validate:handover` | M0 初始通过，12/12 |
+| 破坏用例（蓝图 5 类 / 磨合 1 类） | M0 初始全部被拒绝，见 §9、§10 |
 | `npm run validate:handover` | 通过，12/12 |
 | 破坏用例（蓝图 5 类 / 磨合 1 类） | 全部被拒绝，见 §9、§10 |
 
@@ -347,7 +352,7 @@ npm run validate:handover
 | 交付 | 状态 | 证据 |
 | --- | --- | --- |
 | 制作蓝图规范 | ✅ | `docs/BLUEPRINT_SPEC.md` |
-| 蓝图样例（12 集 / 174 项） | ✅ | `docs/blueprints/tv_standard.blueprint.json` |
+| 蓝图样例（10 集 / 125 项） | ✅ | `docs/blueprints/tv_standard.blueprint.json` |
 | 蓝图校验器 + 运行记录 | ✅ | `scripts/validate-blueprint.mjs`、§10 |
 | 工作项级磨合用例 + 运行记录 | ✅ | `docs/fixtures/handover_cases.json`、§9 |
 | 状态契约与不变式（29 条） | ✅ | §3、§4 |
@@ -460,7 +465,7 @@ v3 的单项目、五阶段、全局 phase、单事件槽、双份财务汇总�
 
 - **Q2 外派**：需要显式区分员工本社项目、外派、待命三种互斥周归属，并定义外派周结算的现金、工作类型经验、疲劳及红灯守卫。
 - **Q3 Scout**：需要表达每周使用次数限制、候选人限时签约窗口和招聘池部分轮换；Scout 每周最多一次。
-- **Q4 定金锁定**：需要锁定/到期/消费状态、同一企划终身仅锁定一次的历史记录、定金支付与正式接单抵扣的财务语义；定金比例与计算基数已由 DECISION_LOG 冻结为普通企划 5%、IP 上门企划 10%，统一按企划生成时固定的基础立项费用计算。
+- **Q4 定金锁定**：需要锁定/到期/消费状态、同一企划终身仅锁定一次的历史记录、定金支付与正式接单抵扣的财务语义；普通企划 5%、IP 上门企划 10%，DEC-PROD-006 的 TV-小按 5.5% 分档，统一按企划生成时固定的基础立项费用计算并冻结金额快照。
 - **Q10 整集协力打包**：需要应用层批量预检与全有或全无的事务边界；不得把多次独立签约伪装成原子批量操作。
 - **Q11 计划预览**：预览是非持久化派生读模型；周内修改只更新计划态。既有 HO-03 等磨合契约用例应覆盖“离开后重新接手曾参与工作项不重复扣损”，并补齐监督减免上限 50% 的边界用例。
 
@@ -538,7 +543,7 @@ v3 的单项目、五阶段、全局 phase、单事件槽、双份财务汇总�
 
 ### 14.13 Q3 招聘池与 Q4 定金锁定的字段契约（2026-11-25，依 #53 裁决）
 
-本节把 DECISION_LOG §17 Q3/Q4 已确认语义落成 v4 字段与命令契约。DEC-MARKET-001 确认企划市场固定 4 槽、初始生成 4 个、每周只补空槽、至少 2 个企划可立即承接；招聘市场另有固定 4 个候选人展示槽，两套槽位独立。Scout 每周至多一次、锁定两周、同一企划终身仅锁定一次、到期定金不退、正式签约 100% 抵扣均为已确认规则；定金比例与计算基数已冻结：普通企划 5%、IP 上门企划 10%，统一按企划生成时固定的基础立项费用计算。候选供给权重、轮换/补位参数、冷却重现概率与保底阈值等仍为 `[PLACEHOLDER]`，由 #59/#58/M7 标定。运行时已实现边界以 DATA_DICTIONARY §3.12 与契约形状审计为准；本节不授权未冻结字段或未实现命令，也不授权 `solvency.state="crisis"`、危机周推进或融资命令。
+本节把 DECISION_LOG §17 Q3/Q4 已确认语义落成 v4 字段与命令契约。DEC-MARKET-001 确认企划市场固定 4 槽、初始生成 4 个、每周只补空槽、至少 2 个企划可立即承接；招聘市场另有固定 4 个候选人展示槽，两套槽位独立。Scout 每周至多一次、锁定两周、同一企划终身仅锁定一次、到期定金不退、正式签约 100% 抵扣均为已确认规则；定金比例与计算基数已冻结：普通企划 5%、IP 上门企划 10%，DEC-PROD-006 的 TV-小按 5.5% 分档，统一按企划生成时固定的基础立项费用计算并冻结金额快照。候选供给权重、轮换/补位参数、冷却重现概率与保底阈值等仍为 `[PLACEHOLDER]`，由 #59/#58/M7 标定。运行时已实现边界以 DATA_DICTIONARY §3.12 与契约形状审计为准；本节不授权未冻结字段或未实现命令，也不授权 `solvency.state="crisis"`、危机周推进或融资命令。
 
 > **2026-11-27 规则收口：** #59 评论 7207555137 已撤销“3 个企划槽＋1 个短期外援槽”；DEC-MARKET-001 同时取代企划市场 cap10 与每周固定补 2 个的旧提案。IP 上门企划占企划槽，自定企划走独立入口；临时员工不进入招聘候选池。
 
@@ -576,9 +581,10 @@ PoolCandidate {
 | `locked_until` | uint \| null | 锁定失效周；`lock_offer` 成功时 = week+2。第 W 周锁定覆盖 W 与 W+1，W+2 周开局失效 |
 | `lock_used` | bool | 该企划 id 是否已用过定金锁定；**终身一次**，置 true 后永不复位 |
 | `deposit_paid` | uint | 已付定金快照，用于正式接单时 100% 抵扣展示与对账 |
-| `offer_source_type` / `deposit_basis` | source classification / uint | 保留企划来源分类及企划生成时固定的基础立项费用；普通企划按 5%、IP 上门企划按 10% 计算定金，后续预算调整不得改变基数 |
+| `deposit_rate_permille` / `deposit_amount` | uint / uint | Offer 生成时冻结的定金档位与金额快照；DEC-PROD-006 矩阵分档适用，普通企划 5%、IP 上门 10%、TV-小 5.5% |
+| `offer_source_type` / `deposit_basis` | source classification / uint | 保留企划来源分类及企划生成时固定的基础立项费用；缺金额快照时按来源规则推导，后续预算调整不得改变基数 |
 
-- **定金档位与基数**：普通企划按 `deposit_basis × 5%`，IP 上门企划按 `deposit_basis × 10%`；`offer_source_type` 与 `deposit_basis` 必须随 Offer 快照保存，来源类型决定档位，不允许玩家自行选择或切换。
+- **定金档位与基数**：普通企划按 `deposit_basis × 5%`，IP 上门企划按 `deposit_basis × 10%`；DEC-PROD-006 矩阵中的 TV-小按 `deposit_basis × 5.5%`。生成时同时冻结 `deposit_rate_permille` 与 `deposit_amount`，已支付定金优先使用金额快照，不随后续档位、来源或预算字段改变。`offer_source_type` 与 `deposit_basis` 必须随 Offer 快照保存，不允许玩家自行选择或切换档位。
 - **现金权威唯一**：定金的实际扣款、签约抵扣只发生在 `Finance.entries` 流水；`deposit_paid` 是企划侧快照/对账字段，不得作为第二本账。`lock_used=true` 必须唯一对应规范流水 `w{week}.production.{offer_id}.deposit`，其周、项目归因、类目、金额、交易对手和备注须与快照一致；缺失、重复或篡改均判 `INVALID_STATE`。INV-16/17 照常约束。
 - 签约抵扣：锁定期内 `start_work` 该市场槽企划时，定金 100% 抵扣对应立项保证金或前期费用（经济语义等同返还预付款，但不是额外成本）；现金守卫按“全部应付款 − 已对账定金”计算，已对账定金从规范 Finance 流水推导，不直接信任 `deposit_paid` 快照。Finance 保留 `investment_paid`（若委员会）与 `contract_received`（合同预算）两笔账，定金已付部分从对应本次现金金额中抵扣，不得把定金再次计为支出，也不新增重复退款/收入流水。
 - 锁定保护：锁定期间（`week < locked_until`）该企划不受市场补充与自然过期影响（STATUS-49/51）；`expires_week` 的自然过期在锁定期内不生效。
@@ -648,7 +654,6 @@ v3 的单项目、五阶段、全局 phase、单事件槽、双份财务汇总�
 - 本规则取代企划市场旧10槽位/每周补充2个方案。企划市场与人才市场不得合并计数。
 
 
-
 #### 14.16 2026-11-27 员工有效能力、产能倍率与质量闭环（DEC-STAFF-008）
 
 **工作项能力映射与质量权重**
@@ -714,7 +719,7 @@ v3 的单项目、五阶段、全局 phase、单事件槽、双份财务汇总�
 - normal 模式速度/价格倍率均100%；emergency 模式速度135%、价格140%。签约时按 `weekly_cap=min(avail_cap, work_total, max(1, floor(base_contract_cap*mode_speed_mult/100)))` 计算并冻结；`avail_cap=capacity_per_week-sum(active.weekly_cap)`。
 - 签约预检、预留与合同创建原子提交；active 合同预留总量不得超过供应商总池。跨项目按各自 weekly_cap 独立推进；同一工作项内合同争用 item_room 时按剩余需求比例分配并使用最大余数法。不设工序独立产能限制。
 - 每周按 `(week, contract.id, "outsource_tick")` 生成确定性 roll。roll<reliability 正常交付；`r<=roll<1-0.2*(1-r)` 为当周0交付的常规延误；其余为质量返工，当周0交付并将 work_done 倒扣 `max(1,weekly_cap//4)`，结果不得低于0。
-- 签约即付清；延误、返工、失败均无退款或额外扣款。每周先处理随机结果和 work_done，再检查完成；若 `week>=due_week` 且仍未完成，转 failed 并释放 weekly_cap。剩余缺口由玩家内部补齐或重新签约。
+- 签约即付清；延误、返工、失败均无退款或额外扣款。每周先处理随机结果和 work_done，再检查完成；若本周结算后的已结算周 `week >= due_week` 且仍未完成，转 failed 并释放 weekly_cap。剩余缺口由玩家内部补齐或重新签约。
 
 #### 14.15.2 六渠道收入模型与成本口径
 
@@ -732,7 +737,6 @@ v3 的单项目、五阶段、全局 phase、单事件槽、双份财务汇总�
 - 设施核心编制阶梯、升级费与维护费以 DECISION_LOG §22.6 为准。弹性工位按 T0–T7 为1/1/2/2/3/3/4/4，不收费；设施升级无声望限制，扣款后即时生效，不影响在制项目，维护费从下一次周结算起计提。超编员工不强制解雇，未降至上限以下前禁止新增招聘。
 
 本节记录目标契约与数值基线，不代表相关运行时命令、财务映射、Archive或完整回归已实现。
-
 
 #### 14.17 质量验收、特殊商业机会与项目临时员工补充契约
 
@@ -755,9 +759,11 @@ v3 的单项目、五阶段、全局 phase、单事件槽、双份财务汇总�
 
 **项目临时员工（DEC-STAFF-009）**
 - 能力档：T0–T1为42–52，T2–T4为56–65，T5–T7为66–74；不参与长期成长，exp=0。
-- 周薪为同能力正式员工标准周薪1.20倍，周结算扣除；签约费为周薪2倍，签约时立即扣除。
+- 周薪为同能力正式员工标准周薪1.20倍，周结算扣除；签约费为周薪2倍，签约时立即扣除。两类支出均走 Finance `temporary` 类目并通过 `work_id` 归因合同项目，不复用核心员工 `salary` 类目。
 - 合同跟随绑定项目，直到交付或中止，不采用固定13周一期。
-- 主动解约或项目中止时，签约费与已发周薪不退；下周起停发周薪并退出项目，不另收违约金。
+- `temporary_contract={work_id,start_week,end_week}`；签约时 `start_week=company.week`，`end_week=project.deadline_week`。`end_week` 是名义预计结束周快照，仅用于展示/审计，不触发自动解约。
+- `request_extension` 成功时，必须在同一原子命令中把该项目全部在聘临时员工合同的 `end_week` 更新为新的 `deadline_week`；延期失败不得改动任何合同。
+- 实际退出仍只由项目交付或中止触发。主动解约或项目中止时，签约费与已发周薪不退；下周起停发周薪并退出项目，不另收违约金。
 - 临时员工不占核心编制，仍受公司弹性工位总人数上限约束。
 
 
@@ -765,3 +771,20 @@ v3 的单项目、五阶段、全局 phase、单事件槽、双份财务汇总�
 - 员工六维字段只允许使用冻结枚举：planning、direction、drawing、animation、management、postproduction。
 - script、art、post 等不是 Schema 字段，不得进入数据结构、接口、运行时或正式能力映射表。
 - 既有工作项能力映射中的别名必须逐项按负责人确认的正式映射修正；未取得正式映射前不得自行猜测替换，也不得改变既有数值结果。
+### 14.18 单集外包覆盖率与 B 级封顶口径（Q10，2026-11-27）
+
+- 统计粒度为单集，不含项目级公共制作。
+- 分母为该单集第 2–5 阶段中所有允许外包 `WorkItem.work_total` 的总和；第 1/6 阶段工作项不计入。
+- 分子为上述允许外包工作项上，所有外部供应商实际有效交付点数之和，跨供应商累计。只统计实际有效交付；合同金额、合同数、签约工作量和计划外包量均不计入。
+- `R_ext = external_delivered_points / eligible_work_total`。全部允许外包工作项均由外部完成时直接触发 B 级封顶。
+- 覆盖率阈值 ≥70% 仅为 `[M7_TEMP]` 首版临时参数，不是最终冻结值；M7 统一校准。拆单、一键打包及供应商数量不得改变同一实际覆盖率结果。
+
+### 14.19 2026-11-27 v0.5 M2 实现锚点
+
+- 开局现金 14,000,000，核心编制 4；四人周薪依次为 238,000 / 208,000 / 170,000 / 170,000，合计 786,000。对应能力锚点 S=75/70/60/60，但 S→六维 abilities 的映射尚未冻结，运行时六维 fixture 不得解释为正式映射。
+- 在任监督执行产能乘 0.5，绑定 `Project.supervisor_staff_id`，不修改 Staff.role；监督换项目的团队级系数另行叠乘。
+- `tv_standard` 固定 10 集：公共制作 4,800 点且不可外包；每集 2,100 点，其中不可外包 580、可外包 1,520；全集 25,800 点，不可外包 10,600、可外包 15,200。
+- TV-小市场基线为制作费 170,000,000、工期 52 周、目标质量 65、定金率 55‰、定金 9,350,000；该金额在 Offer 生成时冻结。
+- 外包候选标准价为 4,000/点，仅对应 #64 的 0.40 万元/点用途；DEC-MARKET-003 保底利润公式中的 0.46 万元/点是另一候选成本输入，不得合并成单一报价。
+- 开局四人 52 周有效核心产能以 #63 最新评论的 11,045.6–11,281.3 点为验收区间；旧模型 11,324.9 点仅保留为历史推导。
+- 以上是当前实现验收锚点，不授权未冻结的供应商目录、`due_week` 推导、招聘冷却随机方式或 Archive 扩展字段。

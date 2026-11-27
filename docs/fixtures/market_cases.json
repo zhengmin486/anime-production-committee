@@ -1,5 +1,5 @@
 {
-  "description": "v4 市场契约用例（M0_CONTRACT_FREEZE §14.13.2 / DECISION_LOG DEC-MARKET-001 / DATA_DICTIONARY_V4 §3.12）。oracle: scripts/lib/market-oracle.mjs。生成参数为 [PLACEHOLDER] 测试参数；固定四槽、每周只补空槽、至少两个可承接、定金档位 5%/10%、锁定两周为已冻结语义。",
+  "description": "v4 市场契约用例（M0_CONTRACT_FREEZE §14.13.2 / DECISION_LOG DEC-MARKET-001 / DATA_DICTIONARY_V4 §3.12）。oracle: scripts/lib/market-oracle.mjs。生成参数为 [PLACEHOLDER] 测试参数；固定四槽、每周只补空槽、至少两个可承接、普通 5%/IP 上门 10%/TV-小 5.5%、锁定两周为已冻结语义。",
   "cases": [
     {
       "id": "MC-01",
@@ -187,6 +187,20 @@
       "op": "deposit",
       "input": { "offer": { "id": "o", "offer_source_type": "market", "deposit_basis": 10000000, "contract_budget": 20000000 } },
       "expect": { "deposit": 500000 }
+    },
+    {
+      "id": "MC-20",
+      "desc": "DEC-PROD-006：TV-小定金快照为 170M × 5.5% = 9.35M",
+      "op": "deposit",
+      "input": { "offer": { "id": "tv_small", "offer_source_type": "market", "deposit_basis": 170000000, "contract_budget": 170000000, "deposit_rate_permille": 55, "deposit_amount": 9350000 } },
+      "expect": { "deposit": 9350000 }
+    },
+    {
+      "id": "MC-21",
+      "desc": "定金金额快照优先于后续档位或预算篡改",
+      "op": "deposit",
+      "input": { "offer": { "id": "tv_small", "offer_source_type": "ip_visit", "deposit_basis": 340000000, "contract_budget": 340000000, "deposit_rate_permille": 100, "deposit_amount": 9350000 } },
+      "expect": { "deposit": 9350000 }
     }
   ]
 }

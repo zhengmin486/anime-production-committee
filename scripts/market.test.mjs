@@ -15,9 +15,13 @@ test('企划形状符合架构 §7.4 + §14.13 生命周期字段', () => {
   assert.ok(SCALES.includes(offer.scale))
   assert.equal(offer.scale, 'tv', '非 TV 蓝图未注册，生成器暂只产出 TV')
   assert.equal(offer.blueprint_id, 'tv_standard')
-  assert.equal(offer.episode_count, 12)
+  assert.equal(offer.episode_count, 10)
   assert.ok(offer.episode_count > 0)
-  assert.ok(offer.contract_budget > 0)
+  assert.equal(offer.contract_budget, 170000000)
+  assert.equal(offer.duration_weeks, 52)
+  assert.equal(offer.target_quality, 65)
+  assert.equal(offer.deposit_rate_permille, 55)
+  assert.equal(offer.deposit_amount, 9350000)
   assert.deepEqual(offer.allowed_modes, ['contract', 'committee'])
   assert.ok(offer.expires_week >= 3 + DEFAULT_PARAMS.expiry_min && offer.expires_week <= 3 + DEFAULT_PARAMS.expiry_max)
   assert.equal(offer.locked_until, null)
@@ -130,13 +134,16 @@ test('已过期企划不可锁定（expires_week 开局即不存在）', () => {
   assert.equal(lockOffer(offer('o', 8), 7, 100).error, null)
 })
 
-test('定金档位已冻结：普通 5%、IP 上门 10%，按生成时固定的 deposit_basis', () => {
+test('定金档位已冻结：TV-小 5.5%，旧普通企划 5%，IP 上门 10%', () => {
   const o = generateOffer(42, 3, 0)
   assert.equal(depositBase(o), o.deposit_basis)
-  assert.equal(depositAmount(o), Math.floor(o.deposit_basis * 50 / 1000))
+  assert.equal(depositAmount(o), 9350000)
   const ip = generateOffer(42, 3, 0, { sourceType: 'ip_visit' })
   assert.equal(ip.offer_source_type, 'ip_visit')
-  assert.equal(depositAmount(ip), Math.floor(ip.deposit_basis * 100 / 1000))
+  assert.equal(ip.deposit_rate_permille, 100)
+  assert.equal(depositAmount(ip), 17000000)
+  const regular = { ...o, deposit_rate_permille: undefined, deposit_amount: undefined }
+  assert.equal(depositAmount(regular), Math.floor(o.deposit_basis * 50 / 1000))
   const inflated = { ...o, contract_budget: o.contract_budget * 2 }
   assert.equal(depositAmount(inflated), depositAmount(o), '后续预算调整不追溯改变定金')
 })

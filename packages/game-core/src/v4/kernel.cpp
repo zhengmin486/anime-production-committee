@@ -6,17 +6,8 @@
 namespace apc::v4::kernel {
 namespace {
 
-// ---- 平衡参数（全部 [PLACEHOLDER]，由模拟标定；此处数值只用于 M1 可测性）----
-constexpr int kBaseCapacity = 1000;          // 千分比，1.00 人周
-constexpr int kAbilityBase = 500;            // 能力 0 → 0.50
-constexpr int kAbilityPerPoint = 5;          // 能力 100 → 1.00
-constexpr int kMoraleBase = 600;
-constexpr int kMoralePerPoint = 4;           // 士气 0 → 0.60，100 → 1.00
-constexpr int kFatigueBase = 1000;
-constexpr int kFatiguePerPoint = 4;          // 疲劳 0 → 1.00，100 → 0.60
-constexpr int kFitMatch = 1000;
-constexpr int kFitMismatch = 800;
-constexpr int kPointsPerStaffWeek = 100;     // 1 人周 = 100 工作点
+// ---- 平衡参数（M1 可测性基线；员工产能按 DEC-STAFF-008）----
+constexpr int kPointsPerStaffWeek = 70;        // 1 人周 = 70 工作点
 constexpr int kHandoverLoss = 250;           // 接手磨合：该员工在该项产出扣 25%
 constexpr int kSupervisorSwitchLoss = 100;   // 监督换项目：团队级扣 10%
 constexpr int kQualityApproach = 300;        // 质量评级向本周样本靠拢 30%
@@ -128,21 +119,18 @@ std::string staff_specialty(const Staff& staff) {
 }
 
 int fit_permille(const Staff& staff, const std::string& ability) {
-    return staff_specialty(staff) == ability ? kFitMatch : kFitMismatch;
+    return staff_specialty(staff) == ability ? 1000 : 800;
 }
 
 int capacity_permille(const Staff& staff, const std::string& ability) {
-    const int ability_q = kAbilityBase + ability_value(staff, ability) * kAbilityPerPoint;
-    const int morale_q = kMoraleBase + clamp(staff.morale, 0, 100) * kMoralePerPoint;
-    const int fatigue_q = kFatigueBase - clamp(staff.fatigue, 0, 100) * kFatiguePerPoint;
-    const int fit_q = fit_permille(staff, ability);
-
-    int capacity = kBaseCapacity;
-    capacity = capacity * ability_q / 1000;
-    capacity = capacity * morale_q / 1000;
-    capacity = capacity * fatigue_q / 1000;
-    capacity = capacity * fit_q / 1000;
-    return capacity;
+    const int primary = ability_value(staff, ability);
+    int other_sum = 0;
+    for (int i = 0; i < kAbilityCount; ++i) {
+        if (kAbilities[static_cast<std::size_t>(i)] != ability) other_sum += staff.abilities[static_cast<std::size_t>(i)];
+    }
+    const int effective = (85 * primary + 3 * other_sum) / 100;
+    if (effective <= 60) return 650 + (effective - 30) * 350 / 30;
+    return 1000 + (effective - 60) * 300 / 40;
 }
 
 int points_from_capacity(int capacity_permille_value) {
@@ -237,19 +225,21 @@ std::vector<ItemAssignment> allocate(const Project& work, const std::vector<cons
     for (const auto& candidate : candidates) remaining[candidate.item_id] = candidate.remaining;
 
     for (const Staff* member : ordered) {
-        // 周产能按主专业计算（fit=1000），跨专业时在逐项投入上打折，避免双重折扣。
+        // 保留既有周预算与稳定顺序；每项投入再受该工序 S_eff 周产能上限约束。
         int budget = points_from_capacity(capacity_permille(*member, staff_specialty(*member)));
         budget = budget * team_permille / 1000;
+        if (work.supervisor_staff_id && *work.supervisor_staff_id == member->id) {
+            budget = budget / 2;
+        }
         for (const auto& candidate : candidates) {
             if (budget <= 0) break;
             const int available = remaining[candidate.item_id];
             if (available <= 0) continue;
-            const int take = std::min(budget, available);
+            const int weekly_cap = points_from_capacity(capacity_permille(*member, candidate.ability));
+            const int take = std::min({budget, available, weekly_cap});
             if (take <= 0) continue;
-            // 四舍五入而非截断：否则剩余量很小的项会算出 0 点，一周投入凭空消失。
-            const int scaled = (take * fit_permille(*member, candidate.ability) + 500) / 1000;
             assignments.push_back(ItemAssignment{work.id, candidate.item_id, candidate.episode_id, candidate.stage_key,
-                                                 member->id, candidate.ability, scaled});
+                                                 member->id, candidate.ability, take});
             remaining[candidate.item_id] -= take;
             budget -= take;
         }

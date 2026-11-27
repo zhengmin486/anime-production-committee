@@ -20,6 +20,7 @@ EMSCRIPTEN_BINDINGS(apc_v4) {
     emscripten::function("reject_proposal", &apc::v4::reject_proposal);
     emscripten::function("assign_staff", &apc::v4::assign_staff);
     emscripten::function("hire_core", &apc::v4::hire_core);
+    emscripten::function("hire_temporary", &apc::v4::hire_temporary);
     emscripten::function("scout", &apc::v4::scout);
     emscripten::function("dismiss_staff", &apc::v4::dismiss_staff);
     emscripten::function("deliver_work", &apc::v4::deliver_work);

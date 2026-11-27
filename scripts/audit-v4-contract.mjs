@@ -29,7 +29,7 @@ const tinyBlueprint = {
   episode: [
     { key: 'script', stage: 'content_design', name: '脚本', ability: 'planning', work_total: 100, deliver_at: 1000, deps: [] },
     { key: 'storyboard', stage: 'storyboard_key_animation', name: '分镜', ability: 'direction', work_total: 100, deliver_at: 1000, deps: ['script'] },
-    { key: 'inbetween', stage: 'animation', name: '动画', ability: 'animation', work_total: 100, deliver_at: 1000, deps: ['storyboard'] },
+    { key: 'inbetween', stage: 'animation', name: '动画', ability: 'animation', work_total: 100, deliver_at: 1000, deps: ['storyboard'], outsourceable: true },
     { key: 'background', stage: 'art_visual', name: '背景', ability: 'drawing', work_total: 100, deliver_at: 1000, deps: ['storyboard'] },
     { key: 'composite', stage: 'photography_editing', name: '摄影', ability: 'postproduction', work_total: 100, deliver_at: 1000, deps: ['inbetween', 'background'] },
     { key: 'master', stage: 'sound_delivery', name: '母版', ability: 'postproduction', work_total: 100, deliver_at: 1000, is_gate: true, deps: ['composite'] }
@@ -44,14 +44,25 @@ const assigned = unwrap('assign_staff', {
 })
 const vendorState = structuredClone(assigned.state)
 vendorState.suppliers = [{
-  id: 'supplier_audit', name: '审计协力商', specialties: ['planning'], capacity_per_week: 100,
-  quality: 70, speed: 60, price_per_unit: 40, reliability: 80, unlocked_week: 0
+  id: 'supplier_audit', name: '审计协力商', specialties: ['animation'], capacity_per_week: 100,
+  quality: 70, speed: 60, price_per_unit: 40, reliability: 100, unlocked_week: 0
 }]
 vendorState.contracts = [{
-  id: 'contract_audit', supplier_id: 'supplier_audit', work_id: 'work_audit', episode_id: null,
-  item_id: 'work_audit.common.series_comp', ability: 'planning', mode: 'normal', work_total: 60,
+  id: 'contract_audit', supplier_id: 'supplier_audit', work_id: 'work_audit', episode_id: 'ep01',
+  item_id: 'work_audit.ep01.inbetween', ability: 'animation', mode: 'normal', work_total: 60,
   work_done: 0, weekly_cap: 60, fee_total: 2400, fee_paid: 0, signed_week: 0, due_week: 26, status: 'active'
 }]
+const vendorValidated = call('hash_state', { state: vendorState })
+if (vendorValidated.error) fail(`Vendor 合法夹具未通过 INV-19/20：${vendorValidated.error.message}`)
+const storyboard = vendorState.works[0].episodes[0].stages
+  .flatMap((stage) => stage.items).find((item) => item.key === 'storyboard')
+storyboard.work_done = storyboard.work_total
+const vendorAdvanced = unwrap('advance_week', { state: vendorState })
+if (vendorAdvanced.state.contracts[0].status !== 'delivered' || vendorAdvanced.state.contracts[0].work_done !== 60) {
+  fail('Vendor 周交付未按 reliability=100 正常交付 60 点')
+}
+const vendorDelivery = vendorAdvanced.report.works[0].items.find((item) => item.item_id === 'work_audit.ep01.inbetween')
+if (!vendorDelivery || vendorDelivery.points < 60) fail('Vendor 周交付未进入工作项与周回执')
 let state = assigned.state
 // 形状审计要跑满"触发 → 查看 → 处理（带支出）"闭环，不能被周固定成本在第 9 周上下把现金烧穿；
 // 同时保持 INV-16 恒等式（balance = opening_funds + Σentries），所以期初与余额同额抬升。
@@ -253,8 +264,8 @@ function completeGates(state, workId) {
 
 function fundedInitialize() {
   const result = unwrap('initialize_game', { seed: 20261127 }).state
-  result.finance.opening_funds += 50_000_000
-  result.finance.balance += 50_000_000
+  result.finance.opening_funds += 400_000_000
+  result.finance.balance += 400_000_000
   return result
 }
 
@@ -380,15 +391,41 @@ collect(adoptReceipt.state, 'state', observed)
 rejectReceipt = unwrap('reject_proposal', { state: proposalBase })
 collect(rejectReceipt.state, 'state', observed)
 
-// 招聘闭环（M0 命令 5/6/7）：独立状态走 scout → hire_core → dismiss_staff，
-// 不污染主审计状态（第 7 节断言主状态名册 signing_fee 恒为 0）。
-const recruitBase = fundedInitialize()
+// 招聘闭环（M0 命令 5/6/7/8）：独立状态先释放一个开局编制，再走 scout → hire_core → dismiss_staff；
+// 临时员工另用 producing 项目验证合同解包与项目成本归因，不污染主审计状态。
+const recruitBase = unwrap('dismiss_staff', { state: fundedInitialize(), staff_id: 'staff_post' }).state
 const scoutReceipt = unwrap('scout', { state: recruitBase })
 collect(scoutReceipt.state, 'state', observed)
 const hireReceipt = unwrap('hire_core', { state: scoutReceipt.state, staff_id: scoutReceipt.added_ids[0] })
 collect(hireReceipt.state, 'state', observed)
 const dismissReceipt = unwrap('dismiss_staff', { state: hireReceipt.state, staff_id: hireReceipt.staff_id })
 collect(dismissReceipt.state, 'state', observed)
+const temporaryStart = unwrap('start_work', { state: fundedInitialize(), offer_id: 'offer_01', mode: 'contract' })
+const temporaryCandidate = structuredClone(temporaryStart.state.recruitment.pool[0].staff)
+temporaryCandidate.id = 'temp_audit'
+temporaryCandidate.name = '审计临时候选'
+temporaryCandidate.employment = 'temporary'
+temporaryCandidate.weekly_salary = 50000
+temporaryCandidate.signing_fee = 100000
+temporaryCandidate.assignment_work_id = null
+temporaryCandidate.temporary_contract = null
+temporaryStart.state.recruitment.pool[temporaryStart.state.recruitment.pool.length - 1] = {
+  staff: temporaryCandidate, origin: 'regular', expires_week: null
+}
+const temporaryReceipt = unwrap('hire_temporary', {
+  state: temporaryStart.state, work_id: temporaryStart.work_id, candidate_id: temporaryCandidate.id
+})
+collect(temporaryReceipt.state, 'state', observed)
+const temporaryMember = temporaryReceipt.state.staff.find((member) => member.id === temporaryCandidate.id)
+const temporarySigning = temporaryReceipt.state.finance.entries.find((entry) => entry.id === `w0.temporary.${temporaryCandidate.id}.signing`)
+if (temporaryMember?.assignment_work_id !== temporaryStart.work_id ||
+    temporaryMember?.temporary_contract?.work_id !== temporaryStart.work_id ||
+    temporaryMember?.temporary_contract?.start_week !== 0 ||
+    temporaryMember?.temporary_contract?.end_week !== temporaryStart.state.works[0].deadline_week ||
+    temporarySigning?.category !== 'temporary' || temporarySigning?.work_id !== temporaryStart.work_id ||
+    temporarySigning?.amount !== -temporaryCandidate.signing_fee) {
+  fail('hire_temporary 未按 D-07 建立三字段合同或未将签约费归入项目 temporary 账目')
+}
 
 // 市场闭环（M0 命令 23/2）：独立状态走 lock_offer → start_work（锁定期内定金抵扣），
 // 再对未锁定状态 advance_week 一次，观察坐标生成企划与周补充形状。
@@ -532,6 +569,7 @@ const receipts = {
   reject_proposal: Object.keys(rejectReceipt).filter((key) => key !== 'error'),
   scout: Object.keys(scoutReceipt).filter((key) => key !== 'error'),
   hire_core: Object.keys(hireReceipt).filter((key) => key !== 'error'),
+  hire_temporary: Object.keys(temporaryReceipt).filter((key) => key !== 'error'),
   dismiss_staff: Object.keys(dismissReceipt).filter((key) => key !== 'error'),
   lock_offer: Object.keys(lockReceipt).filter((key) => key !== 'error'),
   hash_state: Object.keys(unwrap('hash_state', { state })).filter((key) => key !== 'error')
@@ -686,14 +724,17 @@ for (const path of ['state.suppliers[]', 'state.contracts[]']) {
   }
 }
 if (!shape.vendor_contract.status_validation_implemented || shape.vendor_contract.sign_outsourcing_implemented ||
-    shape.vendor_contract.weekly_delivery_implemented || shape.vendor_contract.fee_settlement_implemented ||
-    shape.vendor_contract.reliability_failure_implemented) {
-  fail('Vendor 当前仅实现状态校验，不得宣称签约、周交付、费用或可靠性失败已实现')
+    !shape.vendor_contract.weekly_delivery_implemented || shape.vendor_contract.fee_settlement_implemented ||
+    !shape.vendor_contract.reliability_failure_implemented) {
+  fail('Vendor 必须登记已实现的状态校验、周交付与可靠性失败；签约与费用结算仍未实现')
+}
+if (vendorValidated.error || vendorAdvanced.state.contracts[0].work_done !== 60) {
+  fail('Vendor 形状声明与实际周交付不一致')
 }
 const vendorProbes = [
   ['供应商 active 产能超卖', (probe) => { probe.contracts.push({ ...probe.contracts[0], id: 'contract_overflow', weekly_cap: 41 }) }, 'INV-19'],
   ['合同工作项错引', (probe) => { probe.contracts[0].item_id = 'work_audit.missing' }, 'INV-20'],
-  ['合同公共项 episode 错引', (probe) => { probe.contracts[0].episode_id = 'ep01' }, 'INV-20'],
+  ['合同单集项 episode 错引', (probe) => { probe.contracts[0].episode_id = null }, 'INV-20'],
   ['同项累计交付超限', (probe) => {
     probe.contracts[0].work_done = 60
     probe.contracts.push({ ...probe.contracts[0], id: 'contract_extra', weekly_cap: 40, work_done: 41 })
@@ -788,7 +829,7 @@ if (!shape.current_behavior.normal_balance_nonnegative || !shape.current_behavio
 }
 
 // ---- 8. 账本约定 ----
-const categories = new Set(state.finance.entries.map((entry) => entry.category))
+const categories = new Set([...state.finance.entries, ...temporaryReceipt.state.finance.entries].map((entry) => entry.category))
 for (const category of shape.ledger.categories_produced) {
   if (!categories.has(category)) fail(`账本类目未出现：${category}（本次运行产出 ${[...categories].sort().join(', ')}）`)
 }
@@ -796,7 +837,7 @@ for (const category of categories) {
   if (!shape.ledger.categories_frozen.includes(category)) fail(`未冻结的账本类目：${category}`)
 }
 const badIds = state.finance.entries.filter(
-  (entry) => !/^w\d+\.(salary\.|operations(?:\.|$)|production\.|event\.|refund\.)/.test(entry.id)
+  (entry) => !/^w\d+\.(salary\.|temporary\.|operations(?:\.|$)|production\.|event\.|refund\.)/.test(entry.id)
 )
 if (badIds.length) fail(`账本 id 不符合约定前缀：${badIds.slice(0, 3).map((entry) => entry.id).join(', ')}`)
 const ids = state.finance.entries.map((entry) => entry.id)

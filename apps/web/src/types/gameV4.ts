@@ -1,6 +1,8 @@
 export const V4_DIMENSIONS = ['story', 'direction', 'drawing', 'animation', 'art', 'sound'] as const
 export const V4_WINDOWS = ['domestic_streaming', 'overseas', 'merchandise', 'music', 'tv', 'bd_dvd'] as const
 export const V4_WORK_COST_CATEGORIES = ['salary', 'production', 'temporary', 'outsourcing', 'events', 'extension', 'distribution', 'penalty', 'development'] as const
+export const V4_STAFF_ROLES = ['director', 'scriptwriter', 'animation_director', 'key_animator', 'animator', 'production_manager', 'postproduction',
+  '作画', '演出', '脚本', '摄影', '监督', '音乐', '声优', '美术'] as const
 
 export type V4Dimension = typeof V4_DIMENSIONS[number]
 export type V4Window = typeof V4_WINDOWS[number]
@@ -11,7 +13,7 @@ export type V4DeliveryReason = 'completed' | 'deadline' | 'company_closed' | 'ab
 export type V4WorkSource = 'publisher' | 'studio' | 'manga' | 'light_novel' | 'game' | 'original'
 export type V4Scale = 'ova' | 'short' | 'tv' | 'movie'
 export type V4CooperationMode = 'contract' | 'committee'
-export type V4StaffRole = 'director' | 'scriptwriter' | 'animation_director' | 'key_animator' | 'animator' | 'production_manager' | 'postproduction'
+export type V4StaffRole = typeof V4_STAFF_ROLES[number]
 
 export interface V4Quality {
   dims: Record<V4Dimension, number>
@@ -164,7 +166,7 @@ const isV4FinanceSummary = (value: unknown): value is V4FinanceSummary => exactF
 
 const isV4EpisodeRecord = (value: unknown): value is V4EpisodeRecord => exactFields(value, ['id', 'quality']) && isText(value.id) && isV4Quality(value.quality)
 const isV4TeamMember = (value: unknown): value is V4TeamMember => exactFields(value, ['id', 'name', 'role'])
-  && isText(value.id) && isText(value.name) && choice(value.role, ['director', 'scriptwriter', 'animation_director', 'key_animator', 'animator', 'production_manager', 'postproduction'])
+  && isText(value.id) && isText(value.name) && choice(value.role, V4_STAFF_ROLES)
 
 export const isV4WorkRecord = (value: unknown): value is V4WorkRecord => {
   if (!exactFields(value, ['id', 'ip_id', 'offer_id', 'name', 'source', 'genre', 'scale', 'mode', 'investment_percent',

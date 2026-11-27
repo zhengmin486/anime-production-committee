@@ -1,5 +1,5 @@
 import { describe, expect, expectTypeOf, it } from 'vitest'
-import { isCompanyResult, isV4Archive, isV4CompanyResult, isV4WorkRecord, isWorkRecord } from './gameV4'
+import { isCompanyResult, isV4Archive, isV4CompanyResult, isV4WorkRecord, isWorkRecord, V4_STAFF_ROLES } from './gameV4'
 import type { V4Archive, V4CompanyResult, V4WorkRecord } from './gameV4'
 import { isCompanyResult as isV3CompanyResult, isWorkRecord as isV3WorkRecord } from './gameV3'
 
@@ -130,6 +130,13 @@ describe('v4 完整 WorkRecord 契约', () => {
     expect(isV4WorkRecord({ ...work(), team: [...work().team, ...work().team] })).toBe(false)
     expect(isV4WorkRecord(changed(work(), 'end_week', 521))).toBe(false)
     expect(isV4WorkRecord(changed(work(), 'start_week', 27))).toBe(false)
+  })
+
+  it('接受基础职业与八职业团队快照，拒绝未知角色', () => {
+    for (const role of V4_STAFF_ROLES) {
+      expect(isV4WorkRecord(changed(work(), 'team.0.role', role)), role).toBe(true)
+    }
+    expect(isV4WorkRecord(changed(work(), 'team.0.role', 'producer'))).toBe(false)
   })
 
   it('频道、公司所得与财务汇总精确对账', () => {

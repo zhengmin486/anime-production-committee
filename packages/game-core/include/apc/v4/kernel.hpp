@@ -31,13 +31,13 @@ std::uint32_t draw_below(std::uint32_t seed, int week, Stream stream, std::uint3
 std::uint32_t hash_text(const std::string& text);
 
 // ---- 产能 ----
-// 员工某能力方向上的周产能，单位千分比（1000 = 1 人周）。
+// 工序有效能力 S_eff 对应的周产能倍率，单位千分比。
 int capacity_permille(const Staff& staff, const std::string& ability);
-// 产能换算为工作点：1 人周 = 100 点。
+// 产能换算为工作点：1 人周 = 70 点。
 int points_from_capacity(int capacity_permille_value);
 // 员工主专业（由岗位推导，未知岗位按最高能力兜底）
 std::string staff_specialty(const Staff& staff);
-// 专业匹配系数：匹配 1000，不匹配 800
+// 职业适配系数：匹配 1000，不匹配 800；不参与 DEC-STAFF-008 产能计算。
 int fit_permille(const Staff& staff, const std::string& ability);
 
 // ---- 分派 ----
@@ -48,7 +48,7 @@ struct ItemAssignment {
     std::string stage_key;       // 公共制作填空串
     std::string staff_id;
     std::string ability;         // 该工作项驱动能力
-    int points = 0;              // 本周投入该工作项的点数（已按专业匹配缩放）
+    int points = 0;              // 本周投入该工作项的点数（已受工序周产能上限约束）
 };
 
 struct ItemCandidate {
