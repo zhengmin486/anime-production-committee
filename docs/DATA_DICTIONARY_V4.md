@@ -109,7 +109,7 @@ GameState {
 | `project_fee` | int | — | `historical_fields` | 仅 v3 历史字段；M0 §3/§14.6 已由 `signing_fee + weekly_salary` 取代，V4 Schema 禁止出现 |
 | `assignment_work_id` | string\|null | 是 | `实现` | INV-09；INV-10 尚无完整检查 |
 | `last_participation` | `{work_id,item_id,week}\|null` | 是 | `实现` | INV-11 |
-| `temporary_contract` | Json\|null | 是 | `实现`（透传） | 临时员工不积累长期经验；结项后按项目契约退出名册，团队快照保留其贡献 |
+| `temporary_contract` | `{work_id,start_week,end_week}\|null` | 是 | `形状已冻结；命令8待实现` | `end_week` 签约时快照项目 `deadline_week`；成功延期时同步更新；仅作预计结束周，不触发自动解约 |
 | `forced_rest`（休养期） | — | — | `待实现` | §14.10 / INV-28 / DEC-STAFF-009 的前置数据 |
 | 监督岗位 | `Project.supervisor_staff_id` | string\|null | `实现`（基础职业资格） | 项目内岗位，不修改 `Staff.role`；INV-27 校验唯一性、资格与 `assignment_work_id` 归属 |
 
@@ -258,7 +258,7 @@ v4 固定九字段：`reason/weeks/final_funds/net_cash_change/total_projects/be
 
 ### 3.11 未冻结的形状
 
-`WorkRecord` 当前 31 字段载荷已于 §3.9 冻结；`episode_count/occurrence_issues/commercial_rank/episode_summary/committee_snapshot/major_events` 等未来扩展字段尚未实现，不得提前写入当前载荷。`Facility`、`temporary_contract` 内部字段按 D-07/D-10 跟踪。`Project.investment{percent,total,paid}`、`Project.extension`、`Project.delivery` 已由当前命令写入并实际使用，但其完整长期契约仍随对应批次收敛，不再标记为“命令未实现”。
+`WorkRecord` 当前 31 字段载荷已于 §3.9 冻结；`episode_count/occurrence_issues/commercial_rank/episode_summary/committee_snapshot/major_events` 等未来扩展字段尚未实现，不得提前写入当前载荷。`Facility` 内部字段仍按对应批次跟踪；`temporary_contract` 三字段形状及 `end_week` 快照/延期同步语义已由 2026-11-27 决策冻结，命令 8 与延期联动仍待运行时实现。`Project.investment{percent,total,paid}`、`Project.extension`、`Project.delivery` 已由当前命令写入并实际使用，但其完整长期契约仍随对应批次收敛，不再标记为“命令未实现”。
 
 ### 3.12 Q3/Q4 契约落地状态
 
@@ -279,7 +279,7 @@ PoolCandidate { staff: Staff, expires_week: uint | null, origin: "regular" | "sc
 - 生成逻辑与随机坐标逐位镜像 `scripts/lib/recruit-oracle.mjs`（规则样本）；池容量、轮换数、窗口周数、概率与费用全部 `[PLACEHOLDER]`，由 #59/#58 标定。职业→主能力映射沿用 DEC-STAFF-006 提案（DISC-11 细化前不改）。
 - 2026-11-27 招聘市场设计归档要求通用随机简历按声望 Tier 生成，周薪由同能力全职工资公式乘 1.20 得出；当前 §14.13 的稀有度/保底生成与 `salary_base + primary × salary_per_primary` 仍是 #99 的 `[PLACEHOLDER]`。两套口径的衔接、档位随机分布与取整尚未裁决；在 #7/#53 收口前不得把当前占位生成误称为已实现最新设计。
 - 员工报酬统一 `signing_fee + weekly_salary`，不再使用 `project_fee`；签约费走 Finance `salary` 流水（`w{week}.salary.{staff_id}.signing`），scout 费用走 `operations`（`w{week}.operations.scout`），见 §3.7。
-- `dismiss_staff` 现行 INV-12 校验要求 contributors 引用在籍员工，冻结文本只要求"参与过"；有制作参与记录（含已结项 Archive 团队快照）的员工暂拒解雇（`INVALID_PHASE`），离职历史引用语义待 #53 裁决（缺口登记 #7），不删改 contributors、不放宽校验。
+- `dismiss_staff` 历史贡献者解雇语义已按 2026-11-27 负责人裁决收口：INV-12 的 contributors 是历史事实引用，不要求员工仍在当前 Staff 名册；允许满足命令 7 其他守卫的历史参与者解雇，历史 contributors 与 Archive 团队快照保持不变。实现/validator 回归仍待完成。
 - `hire_core` 只接受 `employment=core` 且 `temporary_contract=null` 的池候选；scout 候选在 `week >= expires_week` 后即使仍留在输入状态中也返回 `NOT_FOUND`，不得签约。
 
 **Offer 生命周期（M0 §14.13.2，市场槽已实现）**：
@@ -313,7 +313,7 @@ M0 §5 冻结 **23 条命令**。核心实际导出 **27 个绑定入口**：21 
 | 4 | `assign_staff(staff_id, work_id\|null)` | ✅ | `state, staff_id, work_id` | `NOT_FOUND/INVALID_PHASE/INVALID_STATE` | `{state}` | `实现`；监督原子 Swap/Replace |
 | 5 | `hire_core(staff_id)` | ✅ | `state, staff_id`（池中候选 id） | `NOT_FOUND/INVALID_PHASE/INSUFFICIENT_FUNDS/CAPACITY_EXCEEDED` | `{state, staff_id}` | `实现`；从 Recruitment 解包，当周可分配（§14.4）；编制 [PLACEHOLDER] |
 | 6 | `scout(role?, focus_ability?)` | ✅ | `state`；`role/focus_ability` 至多一个 | `INVALID_INPUT/INVALID_PHASE/INSUFFICIENT_FUNDS` | `{state, added_ids}` | `实现`；每周至多一次；窗口/费用 [PLACEHOLDER] |
-| 7 | `dismiss_staff(staff_id)` | ✅ | `state, staff_id` | `NOT_FOUND/INVALID_INPUT/INVALID_PHASE` | `{state}` | `实现`；监督原子替换；有制作参与记录者暂拒（§3.12 INV-12 缺口） |
+| 7 | `dismiss_staff(staff_id)` | ✅ | `state, staff_id` | `NOT_FOUND/INVALID_INPUT/INVALID_PHASE` | `{state}` | `实现`；监督原子替换；历史 contributors 不阻止解雇，validator 回归待完成 |
 | 8 | `hire_temporary(work_id, candidate_id)` | ❌ | — | — | — | `待实现` |
 | 9 | `sign_outsourcing(work_id, item_id, supplier_id, work_total, mode)` | ❌ | — | — | — | `待实现` |
 | 10 | `deliver_work(work_id)` | ✅ | `state, work_id` | `NOT_FOUND/INVALID_PHASE/GATE_UNMET/INVALID_STATE` | `{state, report}` | `实现`；pending 守卫拒绝交付 |
