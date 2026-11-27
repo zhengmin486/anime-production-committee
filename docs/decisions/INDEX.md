@@ -3,7 +3,7 @@ title: 决定索引
 kind: index
 status: active
 owner: design
-updated: 2026-11-26
+updated: 2026-11-28
 canonical_for: decisions-map
 supersedes: []
 superseded_by: []
@@ -30,16 +30,17 @@ superseded_by: []
 | --- | --- | --- |
 | [ADR-0001](ADR-0001-decision-record-process.md) | 决定记录与文档改动流程 | accepted |
 | [ADR-0004](ADR-0004-agent-decision-authority-and-local-blocking.md) | 未冻结细节的默认决策权与局部阻塞 | accepted |
+| [ADR-0005](ADR-0005-document-conflict-resolution.md) | 文档权威、口径冲突与冲刺期决策闭环 | accepted |
 
 ## 新增决定的做法
 
-1. 复制 [ADR 模板](../templates/ADR_TEMPLATE.md)，编号递增，文件名用 `ADR-0004-kebab-topic.md`。
+1. 复制 [ADR 模板](../templates/ADR_TEMPLATE.md)，编号递增，文件名用 `ADR-0005-kebab-topic.md`。
 2. 写清背景、决定、后果、被否决方案和来源；状态从 `proposed` 开始。
 3. 负责人确认后改为 `accepted`，正文冻结；需要变更时新建 ADR，并用 `supersedes` 指向旧文件。
 4. 在本文清单加一行，并运行 `npm run check:docs`。
 
 ## 与决定登记册的分工
 
-- 玩法数值、经济口径、制作流程等内容仍写进 `DECISION_LOG.md`，作为唯一的规则基线。
+- 玩法数值、经济口径、制作流程等内容仍写入 `DECISION_LOG.md`，作为唯一的规则基线。
 - ADR 只记录“为什么要这样组织、这样改流程、这样定契约”，不重复抄写规则正文。
 - 两者冲突时，规则内容以 `DECISION_LOG.md` 为准；流程与治理以 ADR 为准。
