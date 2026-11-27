@@ -98,7 +98,7 @@
 - `abort_work` 已按 DEC-PROJECT-001 / DEC-REP-001 实现：承制 50% 边界违约金或超额退款、委员会沉没核销、顶格声望重罚、ABORTED WorkRecord、Finance 退款/违约金、系列豁免、临时员工与外包释放均已接通。
 - 中止导致负余额时不封顶、不豁免；先按稳定顺序结清其他项目 pending 的默认保守分支，再复用 M2.5 破产关闭路径。破产/第 520 周 pending 也已实现默认分支终局。
 - WorkRecord 统一为 31 字段，TypeScript v4、数据字典、M0 契约、机器形状与审计探针同步；aborted 利润公式包含 `contract_refund`。
-- 本机真实 WASM `npm run test:v4` 为 **124/124**；`npm run audit:v4`、`npm run typecheck`、前端 `npm run test:unit`（**275/275**）与 `npm run check:docs` 通过。该结果证明已覆盖实现与契约，不等于 M2/M3/M4 已通过整体里程碑验收。
+- 本机真实 WASM `npm run test:v4` 为 **144/144**；`npm run audit:v4`、`npm run typecheck`、前端 `npm run test:unit`（**275/275**）与 `npm run check:docs` 通过。该结果证明已覆盖实现与契约，不等于 M2/M3/M4 已通过整体里程碑验收。
 - DEC-EVENT-002 已冻结，事件升级代码由独立工作树处理；供应商玩法、市场刷新、12 集完整人工试玩和 520 周平衡仍未完成。
 
 ## M2 当前实施状态（2026-11-26）

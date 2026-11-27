@@ -114,7 +114,7 @@ BD 公司所得 = BD 毛收入 × 50%；另 50% 为综合成本，不进入池�
 
 ## 7. 测试
 
-`scripts/v4.test.mjs` 共 124 条；本轮与项目闭环相关的关键用例：
+`scripts/v4.test.mjs` 共 144 条；本轮与项目闭环相关的关键用例：
 
 1. 到期强制交付：未达门槛在结算周自动交付，`deadline`、按完成度扣罚、归档并移除项目；
 2. 到期交付：门槛达成按 `completed` 正常计价，不扣罚；
@@ -140,7 +140,7 @@ BD 公司所得 = BD 毛收入 × 50%；另 50% 为综合成本，不进入池�
 22. 中止破产与 pending：先结清其他项目 pending，再复用 closing/bankrupt → finalize_delivery → finalize_company；ABORTED 记录不进入 series。
 23. 契约审计：真实 `abort_work` 场景与 aborted Archive 破坏探针验证退款、违约金、利润公式、系列豁免与 WorkRecord 载荷。
 
-本机 `.tools/emsdk` 可执行真实 WASM 构建；`npm run test:v4` 结果 **124/124**，`npm run audit:v4` 通过。
+本机 `.tools/emsdk` 可执行真实 WASM 构建；`npm run test:v4` 结果 **144/144**，`npm run audit:v4` 通过。
 
 ## 8. 里程碑判定（如实）
 
