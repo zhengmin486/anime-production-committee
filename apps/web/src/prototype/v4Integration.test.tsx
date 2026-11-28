@@ -7,7 +7,7 @@ import { adaptReceipt, adaptV4State } from './v4Adapter'
 import { FinanceArchive } from './FinanceArchive'
 import { ReleaseStatus } from './MarketBusiness'
 import { WeeklyReceiptPreview, producingProjectCount } from './WeeklyOperations'
-import type { V4GameState, V4Quality, V4WeekReport } from './v4Types'
+import type { V4GameState, V4Quality, V4VendorReceipt, V4WeekReport } from './v4Types'
 
 const mocks = vi.hoisted(() => ({ initializeGameV4: vi.fn() }))
 
@@ -19,7 +19,7 @@ vi.mock('../services/gameV4', async (importOriginal) => {
 const require = createRequire(import.meta.url)
 const createV4 = require('../../../../build/v4/v4.mjs').default as (options?: Record<string, unknown>) => Promise<Record<string, (input: string) => string>>
 const core = await createV4()
-const invoke = (method: string, input: unknown) => JSON.parse(core[method](JSON.stringify(input))) as { state: V4GameState; report?: V4WeekReport; error?: { code: string; message: string } }
+const invoke = (method: string, input: unknown) => JSON.parse(core[method](JSON.stringify(input))) as { state: V4GameState; report?: V4WeekReport; vendor?: V4VendorReceipt; fee_total?: number; error?: { code: string; message: string } }
 const initialState = invoke('initialize_game', { seed: 20261127 }).state
 const projectState = (() => {
   const response = invoke('start_work', { state: initialState, offer_id: initialState.market.slots[0].id, mode: 'contract' })
@@ -179,12 +179,50 @@ describe('v4Adapter 核心事实映射', () => {
     expect(display.commonItems.find((item) => item.key === downstream.key)?.state).toBe('blocked')
   })
 
+  it('供应商与外包合同来自核心状态，事件保留应急外包请求', () => {
+    const state = structuredClone(projectState)
+    const items = [...state.works[0].common.items, ...state.works[0].episodes.flatMap((episode) => episode.stages.flatMap((stage) => stage.items))]
+    const item = items.find((entry) => entry.work_done < entry.work_total && entry.deps.every((id) => {
+      const dependency = items.find((candidate) => candidate.id === id)
+      return dependency && dependency.work_done * 1000 >= dependency.deliver_at * dependency.work_total
+    }) && state.suppliers.some((supplier) => supplier.unlocked_week <= state.company.week && supplier.specialties.includes(entry.ability)))
+    const supplier = state.suppliers.find((entry) => entry.unlocked_week <= state.company.week && entry.specialties.includes(item!.ability))!
+    const response = invoke('sign_outsourcing', { state, work_id: state.works[0].id, item_id: item!.id, supplier_id: supplier.id, work_total: 1, mode: 'normal' })
+    if (response.error) throw new Error(response.error.message)
+    expect(response.fee_total).toBeGreaterThan(0)
+    const display = adaptV4State(response.state)
+    expect(display.suppliers).toHaveLength(response.state.suppliers.length)
+    expect(display.outsourcing[0]).toMatchObject({ projectId: state.works[0].id, supplierId: supplier.id, workTotal: 1, workDone: 0 })
+
+    response.state.events.pending.push({
+      event_id: 'vendor_emergency', name: '应急外包', work_id: state.works[0].id, triggered_week: 0,
+      expires_week: null, cooldown_weeks: 0, once_per_project: false, viewed: false,
+      options: [{ id: 'accept', label: '外包', kind: 'accept', risk_hint: '', cost: 0, effects: [], vendor_request: { item_id: item!.id, supplier_id: supplier.id, work_total: 1 } }],
+      timeout_option_id: '', escalated: false, escalation: null,
+    })
+    expect(adaptV4State(response.state).pendingEvents[0].options[0].gain).toContain('应急外包 1 工作点')
+  })
+
+  it('招聘、签约与解雇走真实核心命令', () => {
+    const scouted = invoke('scout', { state: structuredClone(initialState) })
+    if (scouted.error) throw new Error(scouted.error.message)
+    expect(scouted.state.recruitment.pool).toHaveLength(initialState.recruitment.pool.length + 1)
+    const candidateId = scouted.state.recruitment.pool.at(-1)!.staff.id
+    const hired = invoke('hire_core', { state: scouted.state, staff_id: candidateId })
+    if (hired.error) throw new Error(hired.error.message)
+    expect(hired.state.staff).toHaveLength(initialState.staff.length + 1)
+    const dismissed = invoke('dismiss_staff', { state: hired.state, staff_id: candidateId })
+    if (dismissed.error) throw new Error(dismissed.error.message)
+    expect(dismissed.state.staff).toHaveLength(initialState.staff.length)
+  })
+
   it('无期限事件保留 null，不把冷却时间伪装成截止周', () => {
     const state = structuredClone(projectState)
     state.events.pending.push({
       event_id: 'station_visit', name: '电视台探班', work_id: state.works[0].id, triggered_week: 6,
       expires_week: null, cooldown_weeks: 12, once_per_project: false, viewed: false,
-      options: [{ id: 'decline', label: '婉拒', kind: 'decline', risk_hint: '', cost: 0, effects: [] }],
+      options: [{ id: 'decline', label: '婉拒', kind: 'decline', risk_hint: '', cost: 0, effects: [], vendor_request: null }],
+      timeout_option_id: '', escalated: false, escalation: null,
     })
     expect(adaptV4State(state).pendingEvents[0].deadlineWeek).toBeNull()
   })

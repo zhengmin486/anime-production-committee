@@ -1,6 +1,6 @@
 import { EPISODE_STAGES, sumWork } from './model'
 import type { Ability, CompanyClosing, EpisodeStage, Facility, LedgerCategory, LedgerEntry, MarketOffer, Mode, PartnerRelationship, Project, ProjectWeekLine, PrototypeData, RiskLevel, RiskSignal, StaffWeekLine, WeeklyReceipt, WorkItem, WorkRecord, WorkState } from './model'
-import type { V4GameState, V4PendingEvent, V4Project, V4WeekReport, V4WorkItem, V4WorkPlan } from './v4Types'
+import type { V4GameState, V4OutsourcingContract, V4PendingEvent, V4Project, V4WeekReport, V4WorkItem, V4WorkPlan } from './v4Types'
 
 const itemNames: Record<string, string> = {
   series_composition: '系列构成', character_design: '角色设定', art_setting: '美术设定', color_design: '色彩设计', music: '音乐', op_ed: 'OP/ED',
@@ -109,7 +109,7 @@ function adaptEvent(event: V4PendingEvent) {
     signals: event.options.map((option) => option.risk_hint).filter(Boolean),
     options: event.options.map((option) => ({
       id: option.id, label: option.label, cost: option.cost,
-      gain: option.effects.map((effect) => `${effect.target} ${effect.value >= 0 ? '+' : ''}${effect.value}`).join('、') || '无额外数值效果',
+      gain: [option.effects.map((effect) => `${effect.target} ${effect.value >= 0 ? '+' : ''}${effect.value}`).join('、'), option.vendor_request ? `应急外包 ${option.vendor_request.work_total} 工作点` : ''].filter(Boolean).join('、') || '无额外数值效果',
       risk: (/高|重大|high/i.test(option.risk_hint) ? 'high' : /中|medium/i.test(option.risk_hint) ? 'medium' : 'low') as RiskLevel,
       riskNote: option.risk_hint || '核心未提供额外风险说明', fits: option.kind,
     })),
@@ -173,6 +173,23 @@ function adaptReceipt(state: V4GameState, report?: V4WeekReport): WeeklyReceipt 
   }
 }
 
+function adaptOutsourcing(state: V4GameState): PrototypeData['outsourcing'] {
+  return state.contracts.map((contract: V4OutsourcingContract) => {
+    const project = state.works.find((work) => work.id === contract.work_id)
+    const episode = project?.episodes.find((entry) => entry.id === contract.episode_id)
+    const stage = episode?.stages.find((entry) => entry.items.some((item) => item.id === contract.item_id))
+    const item = project ? allProjectItems(project).find((entry) => entry.id === contract.item_id) : undefined
+    return {
+      id: contract.id, supplierId: contract.supplier_id, projectId: contract.work_id,
+      episodeIndex: episode?.index ?? null, stage: stage?.key ?? null,
+      itemKey: item?.key ?? contract.item_id, ability: contract.ability,
+      workTotal: contract.work_total, workDone: contract.work_done,
+      rush: contract.mode === 'emergency', feePaid: contract.fee_paid, dueWeek: contract.due_week,
+      status: contract.status === 'delivered' ? 'delivered' : 'active',
+    }
+  })
+}
+
 export function adaptV4State(state: V4GameState, receipts: WeeklyReceipt[] = []): PrototypeData {
   const facilities: Facility[] = [
     { id: 'workspace', name: '制作工位', kind: 'workspace', status: 'available', statusLabel: '场景入口', detail: '查看公共制作、单集与六阶段', note: '设施不新增经营规则。', actionLabel: '查看制作现场' },
@@ -210,7 +227,14 @@ export function adaptV4State(state: V4GameState, receipts: WeeklyReceipt[] = [])
       departureWarning: staff.departure_warning, statusNote: staff.last_participation ? `最近于第 ${staff.last_participation.week} 周参与 ${staff.last_participation.item_id}` : '尚无制作参与记录',
     })),
     allocations: state.staff.map((staff) => ({ staffId: staff.id, projectId: staff.assignment_work_id, previousProjectId: staff.last_participation?.work_id ?? null, focus: Object.entries(staff.abilities).sort((a, b) => b[1] - a[1])[0][0] as Ability })),
-    suppliers: [], outsourcing: [], projects: state.works.map((work) => adaptProject(work, state)),
+    suppliers: state.suppliers.map((supplier) => ({
+      id: supplier.id, name: supplier.name, specialty: supplier.specialties[0],
+      weeklyCapacity: supplier.capacity_per_week,
+      reserved: state.contracts.filter((contract) => contract.supplier_id === supplier.id && contract.status === 'active').reduce((sum, contract) => sum + contract.weekly_cap, 0),
+      unitPrice: supplier.price_per_unit, reliability: supplier.reliability,
+      note: `速度 ${supplier.speed} · 质量 ${supplier.quality} · 第 ${supplier.unlocked_week} 周解锁`,
+    })),
+    outsourcing: adaptOutsourcing(state), projects: state.works.map((work) => adaptProject(work, state)),
     receipts: receipts.length > 0 ? receipts : [adaptReceipt(state)], ledger, marketOffers,
     relationships: state.partners.map((partner) => ({
       id: partner.id, name: partner.name, kind: partner.channels[0] as PartnerRelationship['kind'], since: partner.history.at(-1)?.week ?? 0,

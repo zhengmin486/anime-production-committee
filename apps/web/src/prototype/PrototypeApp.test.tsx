@@ -28,6 +28,10 @@ vi.mock('../services/gameV4', async (importOriginal) => {
     startWorkV4: (state: V4GameState, offerId: string, mode: 'contract' | 'committee', percent = 0, committeePartnerIds: string[] = []) => invoke('start_work', { state, offer_id: offerId, mode, ...(mode === 'committee' ? { percent, committee_partner_ids: committeePartnerIds } : {}) }),
     lockOfferV4: (state: V4GameState, offerId: string) => invoke('lock_offer', { state, offer_id: offerId }),
     assignStaffV4: (state: V4GameState, staffId: string, workId: string | null) => invoke('assign_staff', { state, staff_id: staffId, work_id: workId }),
+    scoutV4: (state: V4GameState) => invoke('scout', { state }),
+    hireCoreV4: (state: V4GameState, staffId: string) => invoke('hire_core', { state, staff_id: staffId }),
+    dismissStaffV4: (state: V4GameState, staffId: string) => invoke('dismiss_staff', { state, staff_id: staffId }),
+    signOutsourcingV4: (state: V4GameState, input: { workId: string; itemId: string; supplierId: string; workTotal: number; mode: 'normal' | 'emergency' }) => invoke('sign_outsourcing', { state, work_id: input.workId, item_id: input.itemId, supplier_id: input.supplierId, work_total: input.workTotal, mode: input.mode }),
     setWorkPlanV4: (state: V4GameState, workId: string, plan: Record<string, unknown>) => invoke('set_work_plan', { state, work_id: workId, plan }),
     advanceWeekV4: (state: V4GameState) => invoke('advance_week', { state }),
     viewEventV4: (state: V4GameState, workId: string, eventId: string) => invoke('view_event', { state, work_id: workId, event_id: eventId }),
@@ -173,6 +177,55 @@ describe('v4 四场景接入', () => {
     await user.selectOptions(assignment, workId)
     await waitFor(() => expect(assignment).toHaveValue(workId))
     expect(within(drawer).getByText('核心预检')).toBeVisible()
+  })
+
+  it('招募、签约和解雇经核心确认后更新名册与现金', async () => {
+    const user = userEvent.setup()
+    await renderApp()
+    await openScene(user, '办公室')
+    await user.click(within(actionPanel()).getByRole('button', { name: /查看员工与设施/ }))
+    let drawer = screen.getByRole('dialog', { name: '公司详情' })
+    const beforeCash = screen.getByRole('button', { name: '查看公司现金' }).textContent
+    const beforeCandidates = within(drawer).getAllByRole('button', { name: '签约核心' }).length
+    await user.click(within(drawer).getByRole('button', { name: '本周招募' }))
+    await waitFor(() => expect(within(drawer).getAllByRole('button', { name: '签约核心' })).toHaveLength(beforeCandidates + 1))
+    expect(within(drawer).getByRole('button', { name: '本周招募' })).toBeDisabled()
+    await user.click(within(drawer).getAllByRole('button', { name: '签约核心' })[0])
+    await waitFor(() => expect(within(drawer).getAllByRole('button', { name: '签约核心' })).toHaveLength(beforeCandidates))
+    const hired = within(drawer).getAllByRole('button', { name: /查看员工/ }).at(-1)!
+    const hiredName = hired.getAttribute('aria-label')!.replace('查看员工 ', '')
+    expect(screen.getByRole('button', { name: '查看公司现金' })).not.toHaveTextContent(beforeCash!)
+    await user.click(hired)
+    const dismiss = within(drawer).getByRole('button', { name: '解雇核心员工' })
+    await user.click(dismiss)
+    expect(screen.getByRole('button', { name: '查看经营周' })).toHaveTextContent('0')
+    await user.click(within(drawer).getByRole('button', { name: '再次点击确认解雇' }))
+    await waitFor(() => expect(within(drawer).queryByRole('button', { name: `查看员工 ${hiredName}` })).not.toBeInTheDocument())
+  })
+
+  it('作品资源区签约外包后读取核心合同与预付流水', async () => {
+    const user = userEvent.setup()
+    await renderApp()
+    await startFirstProject(user)
+    await openScene(user, '制作现场')
+    await user.click(within(actionPanel()).getByRole('button', { name: /打开作品详情/ }))
+    const drawer = screen.getByRole('dialog', { name: '作品详情' })
+    const itemSelect = within(drawer).getByRole<HTMLSelectElement>('combobox', { name: '外包工作项' })
+    const supplierSelect = within(drawer).getByRole<HTMLSelectElement>('combobox', { name: '外包供应商' })
+    const supplierOptions = Array.from(supplierSelect.options)
+    const supplierId = supplierOptions.find((option) => option.value)?.value
+    if (!supplierId) {
+      expect(within(drawer).getByRole('button', { name: '签约并预付' })).toBeDisabled()
+      expect(within(drawer).getByText(/当前没有匹配且已解锁的供应商/)).toBeVisible()
+      return
+    }
+    await user.selectOptions(supplierSelect, supplierId)
+    const selectedItem = itemSelect.value
+    const beforeCash = screen.getByRole('button', { name: '查看公司现金' }).textContent
+    await user.click(within(drawer).getByRole('button', { name: '签约并预付' }))
+    await waitFor(() => expect(within(drawer).getAllByRole('row').some((row) => row.textContent?.includes(supplierSelect.selectedOptions[0].textContent?.split(' · ')[0]))).toBe(true))
+    expect(selectedItem).not.toBe('')
+    expect(screen.getByRole('button', { name: '查看公司现金' })).not.toHaveTextContent(beforeCash!)
   })
 
   it('周推进由核心原子结算并生成真实周报', async () => {

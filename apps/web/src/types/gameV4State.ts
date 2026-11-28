@@ -209,6 +209,12 @@ export interface V4EventEffect {
   value: number
 }
 
+export interface V4VendorRequest {
+  item_id: string
+  supplier_id: string
+  work_total: number
+}
+
 export interface V4EventOption {
   id: string
   label: string
@@ -216,6 +222,7 @@ export interface V4EventOption {
   risk_hint: string
   cost: number
   effects: V4EventEffect[]
+  vendor_request: V4VendorRequest | null
 }
 
 export interface V4EventEscalation {
@@ -419,10 +426,14 @@ const isV4Finance = (value: unknown): value is V4Finance => exactFields(value, [
 const isV4EventEffect = (value: unknown): value is V4EventEffect => exactFields(value, ['scope', 'target', 'stage', 'value'])
   && isText(value.scope) && isText(value.target) && typeof value.stage === 'string' && signed(value.value)
 
+const isV4VendorRequest = (value: unknown): value is V4VendorRequest => exactFields(value, ['item_id', 'supplier_id', 'work_total'])
+  && isText(value.item_id) && isText(value.supplier_id) && integer(value.work_total, 1)
+
 const isV4EventOption = (value: unknown): value is V4EventOption => exactFields(value,
-  ['id', 'label', 'kind', 'risk_hint', 'cost', 'effects'])
-  && isText(value.id) && isText(value.label) && isText(value.kind) && isText(value.risk_hint)
+  ['id', 'label', 'kind', 'risk_hint', 'cost', 'effects', 'vendor_request'])
+  && isText(value.id) && isText(value.label) && isText(value.kind) && typeof value.risk_hint === 'string'
   && signed(value.cost) && arrayOf(value.effects, isV4EventEffect)
+  && (value.vendor_request === null || isV4VendorRequest(value.vendor_request))
 
 const isV4EventEscalation = (value: unknown): value is V4EventEscalation => exactFields(value,
   ['description', 'expires_weeks', 'triggered_week', 'options', 'timeout_option_id'])
@@ -523,9 +534,17 @@ export const isV4GameState = (value: unknown): value is V4GameState => {
     if (work.committee_id !== null && !committeeIds.has(work.committee_id)) return false
   }
 
+  const validVendorOptions = (options: V4GameState['events']['pending'][number]['options'], work: V4Project | undefined): boolean => {
+    if (!work) return false
+    const itemIds = new Set([...work.common.items, ...work.episodes.flatMap((episode) => episode.stages.flatMap((stage) => stage.items))].map((item) => item.id))
+    return options.every((option) => option.vendor_request === null
+      || (supplierIds.has(option.vendor_request.supplier_id) && itemIds.has(option.vendor_request.item_id)))
+  }
   const pendingWorks = new Set<string>()
   for (const event of state.events.pending) {
-    if (!workIds.has(event.work_id) || pendingWorks.has(event.work_id)) return false
+    const work = worksById.get(event.work_id)
+    if (!work || pendingWorks.has(event.work_id) || !validVendorOptions(event.options, work)
+      || (event.escalation !== null && !validVendorOptions(event.escalation.options, work))) return false
     pendingWorks.add(event.work_id)
   }
   for (const entry of state.finance.entries) {

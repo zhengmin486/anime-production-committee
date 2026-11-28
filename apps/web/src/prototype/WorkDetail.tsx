@@ -4,7 +4,7 @@ import { abilityNames, channelNames, episodeStageNames, episodeStatusNames, EPIS
 import type { Episode, Project, PrototypeData, WorkState } from './model'
 import { Bar, Panel, RiskTag, signedYuan, Stat, yuan } from './bits'
 import type { V4GameState } from './v4Types'
-import { setWorkPlanV4, workActionV4 } from '../services/gameV4'
+import { setWorkPlanV4, signOutsourcingV4, workActionV4 } from '../services/gameV4'
 
 const projectStatusNames = { producing: '制作中', ready_to_deliver: '待交付', wrapping: '收尾中' } as const
 const outsourceStatusNames = { active: '在制', delivered: '已交付', at_risk: '排期风险' } as const
@@ -29,6 +29,10 @@ export function WorkDetail({ project, data, state, busy, execute, onBack, focus,
   const { company, staff, allocations, suppliers, outsourcing, ledger } = data
   const [expandedItems, setExpandedItems] = useState<string[]>([])
   const [confirmAbort, setConfirmAbort] = useState(false)
+  const [outsourceItemId, setOutsourceItemId] = useState('')
+  const [outsourceSupplierId, setOutsourceSupplierId] = useState('')
+  const [outsourceAmount, setOutsourceAmount] = useState(1)
+  const [outsourceMode, setOutsourceMode] = useState<'normal' | 'emergency'>('normal')
   const episode: Episode = project.episodes.find((item) => item.index === episodeIndex) ?? project.episodes[0]
   const allItems = [...project.commonItems, ...project.episodes.flatMap((item) => item.workItems)]
   const itemOf = (key: string) => allItems.find((item) => item.key === key)
@@ -37,8 +41,21 @@ export function WorkDetail({ project, data, state, busy, execute, onBack, focus,
   const entries = ledger.filter((entry) => entry.projectId === project.id)
   const weeksLeft = project.deadlineWeek - company.week
   const coreProject = state.works.find((work) => work.id === project.id)!
+  const coreItems = [...coreProject.common.items, ...coreProject.episodes.flatMap((episode) => episode.stages.flatMap((stage) => stage.items))]
+  const outsourceItems = coreItems.filter((item) => item.work_done < item.work_total)
+  const outsourceItem = outsourceItems.find((item) => item.id === outsourceItemId) ?? outsourceItems[0]
+  const outsourceSuppliers = state.suppliers.filter((supplier) => supplier.unlocked_week <= company.week && supplier.specialties.includes(outsourceItem?.ability ?? 'planning'))
+  const outsourceSupplier = outsourceSuppliers.find((supplier) => supplier.id === outsourceSupplierId) ?? outsourceSuppliers[0]
+  const outsourceRemaining = outsourceItem ? outsourceItem.work_total - outsourceItem.work_done : 0
   const deliverable = [...coreProject.common.items, ...coreProject.episodes.flatMap((episode) => episode.stages.flatMap((stage) => stage.items))].filter((item) => item.is_gate).every((item) => BigInt(item.work_done) * 1000n >= BigInt(item.deliver_at) * BigInt(item.work_total))
   const gateItems = episode.workItems.filter((item) => item.isGate)
+
+  useEffect(() => {
+    setOutsourceItemId('')
+    setOutsourceSupplierId('')
+    setOutsourceAmount(1)
+    setOutsourceMode('normal')
+  }, [project.id])
 
   useEffect(() => {
     const target = document.querySelector<HTMLElement>(`[data-work-focus="${focus}"]`)
@@ -182,7 +199,18 @@ export function WorkDetail({ project, data, state, busy, execute, onBack, focus,
               </tr>
             })}</tbody>
           </table>
-          <p className="proto-footnote">核心员工每周严格归属一个项目；调配请在办公室员工详情中明确操作。本页尚未接入外包签约命令，计划中的外包策略当前只由核心保存。</p>
+          <form className="proto-outsource-form" onSubmit={async (event) => {
+            event.preventDefault()
+            if (!outsourceItem || !outsourceSupplier) return
+            if (await execute(() => signOutsourcingV4(state, { workId: project.id, itemId: outsourceItem.id, supplierId: outsourceSupplier.id, workTotal: outsourceAmount, mode: outsourceMode }))) setOutsourceAmount(1)
+          }}>
+            <label>工作项<select aria-label="外包工作项" value={outsourceItem?.id ?? ''} onChange={(event) => { setOutsourceItemId(event.target.value); setOutsourceSupplierId('') }}>{outsourceItems.map((item) => <option key={item.id} value={item.id}>{itemOf(item.key)?.name ?? item.key} · 剩余 {item.work_total - item.work_done}</option>)}</select></label>
+            <label>供应商<select aria-label="外包供应商" value={outsourceSupplier?.id ?? ''} onChange={(event) => setOutsourceSupplierId(event.target.value)}>{outsourceSuppliers.map((supplier) => <option key={supplier.id} value={supplier.id}>{supplier.name} · 周产能 {supplier.capacity_per_week}</option>)}</select></label>
+            <label>工作量<input aria-label="外包工作量" type="number" min={1} max={Math.max(1, outsourceRemaining)} value={outsourceAmount} onChange={(event) => setOutsourceAmount(Number(event.target.value))} /></label>
+            <label>模式<select aria-label="外包模式" value={outsourceMode} onChange={(event) => setOutsourceMode(event.target.value as 'normal' | 'emergency')}><option value="normal">正常</option><option value="emergency">应急加急</option></select></label>
+            <button className="button primary" disabled={busy || !outsourceItem || !outsourceSupplier || !Number.isInteger(outsourceAmount) || outsourceAmount < 1 || outsourceAmount > outsourceRemaining || coreProject.status !== 'producing' || state.company.status !== 'running'}>签约并预付</button>
+          </form>
+          <p className="proto-footnote">{outsourceItems.length === 0 ? '没有未完成工作项可外包。' : outsourceSuppliers.length === 0 ? '当前没有匹配且已解锁的供应商。' : '依赖解锁、剩余可外包量、共享产能、报价与全额预付均由核心校验；失败不会写入合同或扣款。'}计划中的外包策略当前仍只由核心保存。</p>
         </Panel>
       </section>
     </div>

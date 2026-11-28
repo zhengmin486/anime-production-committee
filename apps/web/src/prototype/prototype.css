@@ -612,6 +612,15 @@ kbd { min-width: 20px; padding: 2px 5px; border: 1px solid var(--site-border); b
 .decision-record { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 12px; color: var(--site-muted); font-size: 10.5px; }
 .decision-record .button { flex: none; }
 .disabled-reason { margin: 8px 0 0; color: var(--site-accent); font-size: 11px; }
+.candidate-list { display: grid; gap: 10px; margin: 14px 0 0; padding: 0; list-style: none; }
+.candidate-list li { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px; border: 1px solid var(--site-border); border-radius: var(--site-radius); background: var(--site-surface); }
+.candidate-list li > div { min-width: 0; }
+.candidate-list strong,.candidate-list span,.candidate-list small { display: block; }
+.candidate-list span,.candidate-list small { margin-top: 4px; color: var(--site-muted); font-size: 10px; }
+.candidate-list .button { flex: none; }
+.proto-outsource-form { display: grid; grid-template-columns: 1.4fr 1.2fr .65fr .8fr auto; gap: 10px; align-items: end; margin-top: 18px; padding-top: 16px; border-top: 1px dashed var(--site-border); }
+.proto-outsource-form label { display: grid; gap: 6px; min-width: 0; color: var(--site-muted); font-size: 10px; }
+.proto-outsource-form select,.proto-outsource-form input { width: 100%; min-width: 0; }
 .state-rejected { border-left-color: var(--site-accent); background: color-mix(in srgb, var(--site-accent) 6%, var(--site-surface)); }
 .transaction-state.state-settlement_rejected { color: var(--site-accent); background: rgb(164 60 45 / 10%); }
 .transaction-detail { grid-column: 1 / -1; padding-top: 14px; border-top: 1px dashed var(--site-border); }
@@ -625,6 +634,9 @@ kbd { min-width: 20px; padding: 2px 5px; border: 1px solid var(--site-border); b
   .prototype-company-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .prototype-company-stats > button:nth-child(3) { padding-left: 0; border-left: 0; }
   .decision-record,.receipt-preview { align-items: flex-start; flex-direction: column; }
+  .proto-outsource-form { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .proto-outsource-form .button { align-self: end; }
+  .candidate-list li { align-items: flex-start; flex-direction: column; }
 }
 @media (prefers-reduced-motion: no-preference) {
   .scene-nav button { transition: background 150ms ease, color 150ms ease; }

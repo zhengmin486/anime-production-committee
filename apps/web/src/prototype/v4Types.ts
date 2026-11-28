@@ -115,6 +115,9 @@ export interface V4Staff {
   employment: 'core' | 'temporary'
   abilities: Record<V4Ability, number>
   experience: Record<V4Ability, number>
+  potential: Record<V4Ability, number>
+  revealed_potential: Record<V4Ability, boolean>
+  talent_type: string
   weekly_salary: number
   signing_fee: number
   fatigue: number
@@ -122,6 +125,7 @@ export interface V4Staff {
   departure_warning: boolean
   assignment_work_id: string | null
   last_participation: { work_id: string; item_id: string; week: number } | null
+  temporary_contract: { work_id: string; start_week: number; end_week: number } | null
 }
 
 export interface V4LedgerEntry {
@@ -141,6 +145,12 @@ export interface V4Effect {
   value: number
 }
 
+export interface V4VendorRequest {
+  item_id: string
+  supplier_id: string
+  work_total: number
+}
+
 export interface V4EventOption {
   id: string
   label: string
@@ -148,6 +158,15 @@ export interface V4EventOption {
   risk_hint: string
   cost: number
   effects: V4Effect[]
+  vendor_request: V4VendorRequest | null
+}
+
+export interface V4EventEscalation {
+  description: string
+  expires_weeks: number
+  triggered_week: number
+  options: V4EventOption[]
+  timeout_option_id: string
 }
 
 export interface V4PendingEvent {
@@ -160,6 +179,9 @@ export interface V4PendingEvent {
   once_per_project: boolean
   viewed: boolean
   options: V4EventOption[]
+  timeout_option_id: string
+  escalated: boolean
+  escalation: V4EventEscalation | null
 }
 
 export interface V4Partner {
@@ -201,6 +223,46 @@ export interface V4WorkRecord {
   finance_summary: V4FinanceSummary
 }
 
+export interface V4Supplier {
+  id: string
+  name: string
+  specialties: V4Ability[]
+  capacity_per_week: number
+  quality: number
+  speed: number
+  price_per_unit: number
+  reliability: number
+  unlocked_week: number
+}
+
+export interface V4OutsourcingContract {
+  id: string
+  supplier_id: string
+  work_id: string
+  episode_id: string | null
+  item_id: string
+  ability: V4Ability
+  mode: 'normal' | 'emergency'
+  work_total: number
+  work_done: number
+  weekly_cap: number
+  fee_total: number
+  fee_paid: number
+  signed_week: number
+  due_week: number
+  status: 'active' | 'delivered'
+}
+
+export interface V4VendorReceipt {
+  contract_id: string
+  work_id: string
+  item_id: string
+  fee_total: number
+  weekly_cap: number
+  due_week: number
+  finance: { category: 'outsourcing'; work_id: string; entry_id: string }
+}
+
 export interface V4GameState {
   version: 4
   seed: number
@@ -215,9 +277,10 @@ export interface V4GameState {
     reputation_log: { week: number; reason: string; delta: number; after: number }[]
   }
   staff: V4Staff[]
+  recruitment: { pool: { staff: V4Staff; expires_week: number | null; origin: string }[]; pity: { since_sr: number; since_ssr: number }; last_scout_week: number | null }
   works: V4Project[]
-  suppliers: unknown[]
-  contracts: unknown[]
+  suppliers: V4Supplier[]
+  contracts: V4OutsourcingContract[]
   partners: V4Partner[]
   committees: V4Committee[]
   market: { heat: Record<string, { level: string; changed_week: number }>; slots: V4Offer[]; custom_offer: V4Offer | null; proposal: V4Offer | null; refresh_week: number; [key: string]: unknown }
@@ -251,7 +314,7 @@ export interface V4WorkActionResponse extends V4StateResponse { report?: Record<
 
 export const V4_METHODS = [
   'initialize_game', 'start_work', 'create_custom_offer', 'adopt_proposal', 'reject_proposal',
-  'assign_staff', 'set_work_plan', 'deliver_work', 'abort_work', 'buy_tv_service', 'request_extension',
+  'assign_staff', 'scout', 'hire_core', 'dismiss_staff', 'sign_outsourcing', 'set_work_plan', 'deliver_work', 'abort_work', 'buy_tv_service', 'request_extension',
   'advance_week', 'view_event', 'resolve_event', 'lock_offer', 'end_company', 'finalize_delivery', 'finalize_company',
 ] as const
 export type V4Method = typeof V4_METHODS[number]
@@ -262,8 +325,10 @@ const stringArray = (value: unknown): value is string[] => Array.isArray(value) 
 export function isV4State(value: unknown): value is V4GameState {
   if (!record(value) || value.version !== 4 || typeof value.seed !== 'number' || !record(value.company) ||
     typeof value.company.week !== 'number' || typeof value.company.name !== 'string' || !Array.isArray(value.staff) ||
-    !Array.isArray(value.works) || !record(value.finance) || typeof value.finance.balance !== 'number' ||
-    !Array.isArray(value.finance.entries) || !record(value.market) || !Array.isArray(value.market.slots) ||
+    !Array.isArray(value.works) || !record(value.recruitment) || !Array.isArray(value.recruitment.pool)
+    || !record(value.finance) || typeof value.finance.balance !== 'number' ||
+    !Array.isArray(value.finance.entries) || !Array.isArray(value.suppliers) || !Array.isArray(value.contracts)
+    || !record(value.market) || !Array.isArray(value.market.slots) ||
     !record(value.events) || !Array.isArray(value.events.pending) || !Array.isArray(value.partners) ||
     !Array.isArray(value.committees) || !record(value.archive) || !Array.isArray(value.archive.works)) return false
   return value.staff.every((staff) => record(staff) && typeof staff.id === 'string' && typeof staff.name === 'string' && record(staff.abilities)) &&

@@ -1,11 +1,11 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { abilityNames, channelNames, heatNames, markNames, modeNames, offerOriginNames, roleNames, scaleNames, sourceNames } from './model'
 import type { Facility, PrototypeData, RiskLevel, Staff } from './model'
 import type { MainScene } from './AssetScenes'
 import { Bar, Panel, RiskTag, Stat, yuan } from './bits'
 import { FinanceArchive } from './FinanceArchive'
 import type { V4GameState } from './v4Types'
-import { assignStaffV4 } from '../services/gameV4'
+import { assignStaffV4, dismissStaffV4, hireCoreV4, scoutV4 } from '../services/gameV4'
 
 const riskOrder: Record<RiskLevel, number> = { high: 0, medium: 1, low: 2 }
 
@@ -24,6 +24,9 @@ export function CompanyOverview({ data, state, busy, execute, onOpen, selection,
   onNavigate: (scene: MainScene) => void
 }) {
   const { company, projects, staff, allocations, marketOffers, relationships } = data
+  const [confirmDismiss, setConfirmDismiss] = useState(false)
+  const coreStaffCount = state.staff.filter((person) => person.employment === 'core').length
+  const scoutBlocked = state.recruitment.last_scout_week === company.week ? '本周已招募' : state.events.pending.length > 0 ? '请先处理待议事件' : null
   const allocationOf = (staffId: string) => allocations.find((item) => item.staffId === staffId)
   const titleOf = (projectId: string | null) => projectId ? projects.find((project) => project.id === projectId)?.title ?? data.history.find((work) => work.id === projectId)?.title ?? '核心作品归因' : '本周未分配'
   const risks = projects.flatMap((project) => project.risks.map((risk) => ({ ...risk, project: project.title }))).sort((a, b) => riskOrder[a.level] - riskOrder[b.level])
@@ -33,6 +36,10 @@ export function CompanyOverview({ data, state, busy, execute, onOpen, selection,
   })
   const selectedStaff: Staff | undefined = selection?.kind === 'staff' ? staff.find((person) => person.id === selection.id) : undefined
   const selectedFacility: Facility | undefined = selection?.kind === 'facility' ? data.facilities.find((facility) => facility.id === selection.id) : undefined
+
+  useEffect(() => {
+    setConfirmDismiss(false)
+  }, [selection?.kind, selection?.id])
 
   useEffect(() => {
     const target = document.querySelector<HTMLElement>(`[data-company-focus="${focus}"]`)
@@ -110,6 +117,13 @@ export function CompanyOverview({ data, state, busy, execute, onOpen, selection,
           </dl>
           <p>{selectedStaff.statusNote}</p>
           <p className="proto-footnote">调配调用核心 assign_staff；调走监督时核心会原子要求合格替补，失败保留原归属。</p>
+          {selectedStaff.employment === 'core' && <div className="closing-actions">
+            <button className="text-button" disabled={busy || coreStaffCount <= 1 || state.company.status !== 'running'} onClick={async () => {
+              if (!confirmDismiss) { setConfirmDismiss(true); return }
+              if (await execute(() => dismissStaffV4(state, selectedStaff.id))) onSelect(null)
+            }}>{confirmDismiss ? '再次点击确认解雇' : '解雇核心员工'}</button>
+            <span>{coreStaffCount <= 1 ? '不可用：核心至少保留 1 人。' : confirmDismiss ? '解雇不可逆；在任监督须由核心当场完成合格替补。' : '解雇不预付遣散费，成功后立即移出名册。'}</span>
+          </div>}
         </div>}
         <p className="proto-footnote">没有在制项目时可保持空闲；立项后由核心自动指定监督，其他人员由玩家明确分配。</p>
       </Panel>
@@ -124,11 +138,26 @@ export function CompanyOverview({ data, state, busy, execute, onOpen, selection,
           </li>)}</ul>
         </Panel>
 
+        <Panel eyebrow="RECRUITMENT / 核心招聘" title="招募与候选池" marks={['confirmed']}
+          aside={<button className="button secondary" disabled={busy || scoutBlocked !== null || state.company.status !== 'running'} onClick={() => execute(() => scoutV4(state))}>{busy ? '核心处理中…' : '本周招募'}</button>}
+          note="招募费用、候选生成与有效期由核心执行；每周至多一次，有待议事件时不可招募。">
+          <p className="proto-footnote">{scoutBlocked ? `不可用：${scoutBlocked}。` : '费用从公司现金统一扣除，实际金额以核心流水为准。'}</p>
+          {state.recruitment.pool.length === 0 ? <p className="proto-inline-note">候选池为空。</p> : <ul className="candidate-list">{state.recruitment.pool.map((candidate) => {
+            const expired = candidate.expires_week !== null && company.week >= candidate.expires_week
+            const bestAbility = Object.entries(candidate.staff.abilities).sort((a, b) => b[1] - a[1])[0]
+            return <li key={candidate.staff.id}>
+              <div><strong>{candidate.staff.name}</strong><span>{candidate.staff.role} · 主能力 {bestAbility ? abilityNames[bestAbility[0] as keyof typeof abilityNames] : '—'} {bestAbility?.[1] ?? 0}</span><small>签约费 {yuan(candidate.staff.signing_fee)}{candidate.expires_week === null ? '' : ` · 第 ${candidate.expires_week} 周到期`}</small></div>
+              <button className="button secondary" disabled={busy || expired || state.company.status !== 'running'} onClick={() => execute(() => hireCoreV4(state, candidate.staff.id))}>签约核心</button>
+              {expired && <span className="disabled-reason">已到期</span>}
+            </li>
+          })}</ul>}
+        </Panel>
+
         <Panel eyebrow="CAPACITY / 共享产能" title="并行经营的真实约束" marks={['confirmed']}>
           <dl className="proto-stats proto-stats-tight">
             <Stat label="在制作品 / 单集" value={`${projects.length} 部 · ${projects.reduce((sum, project) => sum + project.episodeCount, 0)} 集`} hint="不设固定项目槽位与数量上限" />
             <Stat label="已发生项目切换" value={`${switched.length} 人已切换`} hint="核心按上周参与记录识别；调配由玩家明确操作" />
-            <Stat label="供应商与外包" value="本页未接入" hint="核心已有外包签约命令；当前四场景页面只展示计划字段，不伪造合同或费用" />
+            <Stat label="供应商与外包" value={`${data.suppliers.length} 家 · ${data.outsourcing.filter((task) => task.status === 'active').length} 份进行中`} hint="供应商与合同来自核心状态；签约入口在制作现场作品详情的资源区。" />
           </dl>
           <ul className="conflict-list">{projects.flatMap((project) => project.conflicts.map((text) => <li key={`${project.id}-${text}`}><span>{project.title}</span>{text}</li>))}</ul>
           <p className="proto-footnote">并行经营的约束来自核心人员归属、资金、工作项依赖与期限；界面不额外编制管理负荷或供应商产能。</p>

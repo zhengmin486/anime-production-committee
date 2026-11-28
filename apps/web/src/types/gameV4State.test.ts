@@ -110,6 +110,24 @@ describe('v4 GameState 关键不变式', () => {
     expect(isV4GameState(JSON.parse(JSON.stringify(state())))).toBe(true)
   })
 
+  it('接受事件选项的应急外包请求并拒绝不完整载荷', () => {
+    const value = withProject()
+    value.suppliers.push({ id: 'supplier_draw' })
+    value.events.pending.push({
+      event_id: 'vendor_emergency', name: '应急外包', work_id: 'work_01', triggered_week: 0,
+      expires_week: null, cooldown_weeks: 0, once_per_project: false, viewed: false,
+      options: [{
+        id: 'accept', label: '签约', kind: 'accept', risk_hint: '', cost: 0, effects: [],
+        vendor_request: { item_id: 'work_01.common.series_comp', supplier_id: 'supplier_draw', work_total: 10 },
+      }],
+      timeout_option_id: '', escalated: false, escalation: null,
+    })
+    expect(isV4GameState(value)).toBe(true)
+
+    value.events.pending[0].options[0].vendor_request!.work_total = 0
+    expect(isV4GameState(value)).toBe(false)
+  })
+
   it('拒绝期初资金、流水与余额不一致的存档', () => {
     const value = state()
     value.finance.balance = 901
@@ -239,7 +257,7 @@ describe('v4 GameState 关键不变式', () => {
     const value = withProject()
     const option = {
       id: 'accept', label: '按现状推进', kind: 'abandon', risk_hint: '质量缺口留到成片', cost: 0,
-      effects: [{ scope: 'instant', target: 'morale', stage: '', value: -3 }],
+      effects: [{ scope: 'instant', target: 'morale', stage: '', value: -3 }], vendor_request: null,
     }
     value.events.pending.push({
       event_id: 'key_cut_rework', name: '关键镜头返修', work_id: 'work_01', triggered_week: 1,

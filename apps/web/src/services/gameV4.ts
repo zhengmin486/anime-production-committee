@@ -1,8 +1,8 @@
 import { isV4State, isV4WeekResponse, V4_METHODS } from '../prototype/v4Types'
-import type { V4GameState, V4Method, V4StateResponse, V4WeekResponse, V4WorkActionResponse } from '../prototype/v4Types'
+import type { V4GameState, V4Method, V4StateResponse, V4VendorReceipt, V4WeekResponse, V4WorkActionResponse } from '../prototype/v4Types'
 
 export type V4Module = Record<V4Method, (input: string) => string> & { hash_state: (input: string) => string }
-export type V4ServiceErrorCode = 'LOAD_FAILED' | 'CALL_FAILED' | 'INVALID_RESPONSE' | 'INVALID_STATE' | 'INVALID_INPUT' | 'NOT_FOUND' | 'INVALID_PHASE' | 'INSUFFICIENT_FUNDS' | 'CAPACITY_EXCEEDED' | 'COMPANY_ENDED' | 'MODE_NOT_ALLOWED' | 'GATE_UNMET' | 'NOT_IMPLEMENTED' | 'INTERNAL_ERROR'
+export type V4ServiceErrorCode = 'LOAD_FAILED' | 'CALL_FAILED' | 'INVALID_RESPONSE' | 'INVALID_STATE' | 'INVALID_INPUT' | 'NOT_FOUND' | 'INVALID_PHASE' | 'INSUFFICIENT_FUNDS' | 'CAPACITY_EXCEEDED' | 'DEPENDENCY_UNMET' | 'COMPANY_ENDED' | 'MODE_NOT_ALLOWED' | 'GATE_UNMET' | 'NOT_IMPLEMENTED' | 'INTERNAL_ERROR'
 
 export class GameV4Error extends Error {
   constructor(public readonly code: V4ServiceErrorCode, message: string, options?: ErrorOptions) {
@@ -58,7 +58,7 @@ async function call(method: V4Method | 'hash_state', input: unknown): Promise<Re
     if (typeof error !== 'object' || error === null || !('code' in error) || typeof error.code !== 'string' || !('message' in error) || typeof error.message !== 'string') {
       throw new GameV4Error('INVALID_RESPONSE', '规则核心返回的错误结构无效。')
     }
-    const allowed: V4ServiceErrorCode[] = ['INVALID_STATE', 'INVALID_INPUT', 'NOT_FOUND', 'INVALID_PHASE', 'INSUFFICIENT_FUNDS', 'CAPACITY_EXCEEDED', 'COMPANY_ENDED', 'MODE_NOT_ALLOWED', 'GATE_UNMET', 'NOT_IMPLEMENTED', 'INTERNAL_ERROR']
+    const allowed: V4ServiceErrorCode[] = ['INVALID_STATE', 'INVALID_INPUT', 'NOT_FOUND', 'INVALID_PHASE', 'INSUFFICIENT_FUNDS', 'CAPACITY_EXCEEDED', 'DEPENDENCY_UNMET', 'COMPANY_ENDED', 'MODE_NOT_ALLOWED', 'GATE_UNMET', 'NOT_IMPLEMENTED', 'INTERNAL_ERROR']
     if (!allowed.includes(error.code as V4ServiceErrorCode)) throw new GameV4Error('INVALID_RESPONSE', '规则核心返回了未知错误码。')
     throw new GameV4Error(error.code as V4ServiceErrorCode, error.message)
   }
@@ -87,6 +87,27 @@ export function assignStaffV4(state: V4GameState, staffId: string, workId: strin
   return stateResponse('assign_staff', { state, staff_id: staffId, work_id: workId })
 }
 
+export function scoutV4(state: V4GameState): Promise<V4StateResponse & { added_ids?: string[] }> {
+  return stateResponse('scout', { state })
+}
+
+export function hireCoreV4(state: V4GameState, staffId: string): Promise<V4StateResponse> {
+  return stateResponse('hire_core', { state, staff_id: staffId })
+}
+
+export function dismissStaffV4(state: V4GameState, staffId: string): Promise<V4StateResponse> {
+  return stateResponse('dismiss_staff', { state, staff_id: staffId })
+}
+
+export async function signOutsourcingV4(state: V4GameState, input: { workId: string; itemId: string; supplierId: string; workTotal: number; mode: 'normal' | 'emergency' }): Promise<V4StateResponse & V4VendorReceipt & { message?: string }> {
+  const result = await stateResponse('sign_outsourcing', {
+    state, work_id: input.workId, item_id: input.itemId, supplier_id: input.supplierId,
+    work_total: input.workTotal, mode: input.mode,
+  }) as V4StateResponse & V4VendorReceipt & { message?: string }
+  result.message = `核心外包签约成功：合同 ${result.contract_id}，预付 ¥${result.fee_total.toLocaleString('zh-CN')}，周产能 ${result.weekly_cap}。`
+  return result
+}
+
 export function setWorkPlanV4(state: V4GameState, workId: string, plan: Record<string, unknown>): Promise<V4StateResponse> {
   return stateResponse('set_work_plan', { state, work_id: workId, plan })
 }
@@ -101,8 +122,11 @@ export function viewEventV4(state: V4GameState, workId: string, eventId: string)
   return stateResponse('view_event', { state, work_id: workId, event_id: eventId })
 }
 
-export function resolveEventV4(state: V4GameState, workId: string, eventId: string, optionId: string): Promise<V4StateResponse & { message?: string }> {
-  return stateResponse('resolve_event', { state, work_id: workId, event_id: eventId, option_id: optionId })
+export async function resolveEventV4(state: V4GameState, workId: string, eventId: string, optionId: string): Promise<V4StateResponse & { message?: string; vendor?: V4VendorReceipt }> {
+  const result = await stateResponse('resolve_event', { state, work_id: workId, event_id: eventId, option_id: optionId }) as V4StateResponse & { message?: string; vendor?: V4VendorReceipt }
+  const vendor = result.vendor
+  if (vendor) result.message = `核心已完成应急外包：合同 ${vendor.contract_id}，全额预付 ¥${vendor.fee_total.toLocaleString('zh-CN')}，周产能 ${vendor.weekly_cap}。`
+  return result
 }
 
 export function createCustomOfferV4(state: V4GameState, name: string, source: 'manga' | 'light_novel' | 'game' | 'original', scale: 'ova' | 'short' | 'tv' | 'movie', style: 'normal' | 'meme' | 'ai'): Promise<V4StateResponse> {
