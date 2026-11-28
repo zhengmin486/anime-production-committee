@@ -100,6 +100,7 @@
 - 复验 `http://127.0.0.1:4175/wasm/v4.mjs` 与 `v4.wasm` 均返回 200；WASM 二进制通过 `WebAssembly.compile`。
 - 新鲜会话重新加载后核心初始化成功，并真实执行 `advance_week`：第 0→1 周、现金 `¥2,000,000 → ¥1,850,000`，返回“规则核心已成功提交”。
 - 浏览器控制台：未发现 `error` 或 `warn`。
+- `scripts/browser.test.mjs` 已移除旧 Mock 热点与样本事件假设，改为真实 v4 四场景验收：WASM 二进制、侧栏场景切换、招聘、锁定/承接、6 周推进、事件查看/确认、失败恢复、Archive/业绩只读面板与 375px 布局；本机 Edge 14 / 14 通过。
 - 最终页面网络请求：市场场景 SVG `200`；此前完整加载中文档、JS/CSS、`v4.mjs`、`v4.wasm` 和四场景素材均成功，未发现 4xx/5xx。
 - 本轮截图操作返回 `NATIVE_BROWSER_VIEWPORT_UNAVAILABLE`：内嵌浏览器当时 `visible=false`。因此本轮不声称已保存新截图；上述数值、事件和 Archive 均来自实际生产页面快照与核心账本。
 - 既有截图仍保留在 `docs/evidence/wp10-prototype/`，仅作为此前版本证据，不作为本轮新改动的截图证明。
@@ -111,6 +112,7 @@
 | `npm run typecheck` | 通过 |
 | `npm run test:unit` | 通过，14 个文件、322 个测试 |
 | `npm run build` | 通过；v4 WEB WASM、v3 WASM、Vite 生产构建成功 |
+| 浏览器契约测试（当前生产 dist） | 通过；14 / 14，含真实 v4 四场景、WASM 失败恢复与 v3 回归 |
 | `git diff --check` | 通过 |
 | v4 核心测试（集成阶段） | 165 / 165 |
 | 市场校验（集成阶段） | 21 / 21 |
