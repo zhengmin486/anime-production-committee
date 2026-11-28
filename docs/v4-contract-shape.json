@@ -225,6 +225,8 @@
     ]
   },
   "dynamic_key_maps": [
+    "report.staff[].growth.ability_gain",
+    "report.staff[].growth.experience_gain",
     "state.archive.works[].finance_summary.costs",
     "state.events.per_work",
     "state.events.per_work.*.cooldowns"
@@ -674,6 +676,7 @@
       "end_reason",
       "forced",
       "gate_completion_permille",
+      "growth",
       "investor_share",
       "net_received",
       "penalty",
@@ -702,15 +705,105 @@
       "window"
     ],
     "state.archive.company_result": [
+      "best_work",
       "best_work_id",
+      "commercial",
+      "evaluations",
       "final_funds",
       "highlights",
       "negatives",
       "net_cash_change",
+      "overall",
       "rating",
       "reason",
+      "reputation",
+      "team",
       "total_projects",
       "weeks"
+    ],
+    "state.archive.company_result.best_work": [
+      "id",
+      "name",
+      "quality_score",
+      "rating",
+      "team"
+    ],
+    "state.archive.company_result.best_work.team[]": [
+      "id",
+      "name",
+      "role"
+    ],
+    "state.archive.company_result.commercial": [
+      "company_revenue",
+      "completed_projects",
+      "gross_revenue",
+      "project_profit",
+      "unfinished_projects"
+    ],
+    "state.archive.company_result.evaluations[]": [
+      "code",
+      "label",
+      "polarity"
+    ],
+    "state.archive.company_result.overall": [
+      "achievement_promotions",
+      "base_ending",
+      "ending",
+      "evaluation_model",
+      "finance",
+      "influence",
+      "max_score",
+      "quality",
+      "score",
+      "team"
+    ],
+    "state.archive.company_result.overall.evaluation_model": [
+      "id",
+      "status"
+    ],
+    "state.archive.company_result.team": [
+      "average_ability",
+      "core_members",
+      "core_staff_count",
+      "current_experience",
+      "maxed_dimensions",
+      "revealed_potential_dimensions",
+      "temporary_staff_count"
+    ],
+    "state.archive.company_result.team.core_members[]": [
+      "abilities",
+      "experience",
+      "id",
+      "maxed_dimensions",
+      "name",
+      "representative_work_id",
+      "revealed_potential",
+      "role",
+      "works"
+    ],
+    "state.archive.company_result.team.core_members[].abilities": [
+      "animation",
+      "direction",
+      "drawing",
+      "management",
+      "planning",
+      "postproduction"
+    ],
+    "state.archive.company_result.team.core_members[].experience": [
+      "animation",
+      "direction",
+      "drawing",
+      "management",
+      "planning",
+      "postproduction"
+    ],
+    "state.archive.company_result.team.core_members[].revealed_potential": [
+      "animation",
+      "direction",
+      "drawing",
+      "management",
+      "planning",
+      "postproduction"
     ],
     "state.archive.series[]": [
       "ip_id",
@@ -946,15 +1039,105 @@
       "purchased"
     ],
     "result": [
+      "best_work",
       "best_work_id",
+      "commercial",
+      "evaluations",
       "final_funds",
       "highlights",
       "negatives",
       "net_cash_change",
+      "overall",
       "rating",
       "reason",
+      "reputation",
+      "team",
       "total_projects",
       "weeks"
+    ],
+    "result.best_work": [
+      "id",
+      "name",
+      "quality_score",
+      "rating",
+      "team"
+    ],
+    "result.best_work.team[]": [
+      "id",
+      "name",
+      "role"
+    ],
+    "result.commercial": [
+      "company_revenue",
+      "completed_projects",
+      "gross_revenue",
+      "project_profit",
+      "unfinished_projects"
+    ],
+    "result.evaluations[]": [
+      "code",
+      "label",
+      "polarity"
+    ],
+    "result.overall": [
+      "achievement_promotions",
+      "base_ending",
+      "ending",
+      "evaluation_model",
+      "finance",
+      "influence",
+      "max_score",
+      "quality",
+      "score",
+      "team"
+    ],
+    "result.overall.evaluation_model": [
+      "id",
+      "status"
+    ],
+    "result.team": [
+      "average_ability",
+      "core_members",
+      "core_staff_count",
+      "current_experience",
+      "maxed_dimensions",
+      "revealed_potential_dimensions",
+      "temporary_staff_count"
+    ],
+    "result.team.core_members[]": [
+      "abilities",
+      "experience",
+      "id",
+      "maxed_dimensions",
+      "name",
+      "representative_work_id",
+      "revealed_potential",
+      "role",
+      "works"
+    ],
+    "result.team.core_members[].abilities": [
+      "animation",
+      "direction",
+      "drawing",
+      "management",
+      "planning",
+      "postproduction"
+    ],
+    "result.team.core_members[].experience": [
+      "animation",
+      "direction",
+      "drawing",
+      "management",
+      "planning",
+      "postproduction"
+    ],
+    "result.team.core_members[].revealed_potential": [
+      "animation",
+      "direction",
+      "drawing",
+      "management",
+      "planning",
+      "postproduction"
     ]
   },
   "paths": {
@@ -997,8 +1180,21 @@
     ],
     "report.staff[]": [
       "fatigue",
+      "growth",
       "morale",
       "produced",
+      "staff_id"
+    ],
+    "report.staff[].growth": [
+      "ability_gain",
+      "experience_gain",
+      "potential_revealed"
+    ],
+    "report.settlements[].growth": [
+      "potential_revealed"
+    ],
+    "report.settlements[].growth.potential_revealed[]": [
+      "potential_revealed",
       "staff_id"
     ],
     "report.works[]": [

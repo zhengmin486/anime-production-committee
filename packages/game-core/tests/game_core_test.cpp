@@ -1,9 +1,14 @@
 #include "game_core.hpp"
 #include "game_rules.hpp"
 #include "game_validation.hpp"
+#include "apc/v4/kernel.hpp"
+#include "apc/v4/model.hpp"
+#include "apc/v4/runtime.hpp"
 
+#include <array>
 #include <cstdint>
 #include <functional>
+#include <limits>
 #include <string>
 #include <vector>
 #include <gtest/gtest.h>
@@ -1761,4 +1766,297 @@ TEST(ValidatorCompatibility, ContractDeadlineMatchesItsOfferDuration) {
     short_project["project"]["deadline_week"] = 2;
     short_project["project"]["offer"]["duration_weeks"] = 2;
     expect_validation(short_project, true);
+}
+
+namespace {
+apc::v4::Staff growth_staff() {
+    apc::v4::Staff member;
+    member.id = "staff_growth";
+    member.name = "Growth fixture";
+    member.role = "director";
+    member.abilities.fill(30);
+    member.potential.fill(60);
+    member.experience.fill(0);
+    member.revealed_potential.fill(false);
+    return member;
+}
+
+template <typename Method>
+Json v4_call(Method method, const Json& request) {
+    return Json::parse(method(request.dump()));
+}
+
+Json v4_empty_ended() {
+    const auto initialized = v4_call(apc::v4::initialize, Json{{"seed", 7}}).at("state");
+    return v4_call(apc::v4::end_company, Json{{"state", initialized}}).at("state");
+}
+}
+
+TEST(V4StaffGrowth, ParticipationUsesPrimaryAndAssistCoefficients) {
+    EXPECT_EQ(apc::v4::kernel::experience_for_participation(true), 10);
+    EXPECT_EQ(apc::v4::kernel::experience_for_participation(false), 6);
+}
+
+TEST(V4StaffGrowth, AppliesThresholdsAcrossMultipleLevelsAndKeepsRemainder) {
+    auto member = growth_staff();
+    member.experience[0] = 25;
+    std::array<int, apc::v4::kAbilityCount> gains{};
+    gains[0] = 10;
+    const auto result = apc::v4::kernel::apply_growth(member, gains);
+    EXPECT_EQ(member.abilities[0], 33);
+    EXPECT_EQ(member.experience[0], 5);
+    EXPECT_EQ(result.experience_gain[0], 10);
+    EXPECT_EQ(result.ability_gain[0], 3);
+    for (std::size_t i = 1; i < result.ability_gain.size(); ++i) EXPECT_EQ(result.ability_gain[i], 0);
+}
+
+TEST(V4StaffGrowth, RevealsNearCapAndStopsOnlyTheMaxedDimension) {
+    auto member = growth_staff();
+    member.abilities[0] = 60;
+    member.experience[0] = 7;
+    member.abilities[1] = 55;
+    std::array<int, apc::v4::kAbilityCount> gains{};
+    gains[0] = 100;
+    gains[1] = 10;
+    const auto result = apc::v4::kernel::apply_growth(member, gains);
+    EXPECT_EQ(member.experience[0], 7);
+    EXPECT_EQ(result.experience_gain[0], 0);
+    EXPECT_TRUE(result.potential_revealed[0]);
+    EXPECT_EQ(member.experience[1], 10);
+    EXPECT_TRUE(result.potential_revealed[1]);
+    EXPECT_TRUE(member.revealed_potential[1]);
+}
+
+TEST(V4StaffGrowth, UsesCandidateCurveThresholdBoundaries) {
+    const std::array<int, 9> abilities{29, 30, 59, 60, 74, 75, 89, 90, 99};
+    const std::array<int, 9> thresholds{10, 10, 16, 35, 65, 100, 200, 250, 450};
+    for (std::size_t i = 0; i < abilities.size(); ++i) {
+        auto member = growth_staff();
+        member.abilities[0] = abilities[i];
+        member.potential[0] = 100;
+        member.experience[0] = thresholds[i] - 1;
+        std::array<int, apc::v4::kAbilityCount> gains{};
+        gains[0] = 1;
+        apc::v4::kernel::apply_growth(member, gains);
+        EXPECT_EQ(member.abilities[0], abilities[i] + 1) << "ability=" << abilities[i];
+        EXPECT_EQ(member.experience[0], 0) << "ability=" << abilities[i];
+    }
+}
+
+TEST(V4StaffGrowth, HandlesExperienceAtIntegerLimitWithoutOverflow) {
+    auto member = growth_staff();
+    member.potential[0] = 31;
+    member.experience[0] = std::numeric_limits<int>::max();
+    std::array<int, apc::v4::kAbilityCount> gains{};
+    gains[0] = 10;
+    const auto result = apc::v4::kernel::apply_growth(member, gains);
+    EXPECT_EQ(member.abilities[0], 31);
+    EXPECT_EQ(member.experience[0], std::numeric_limits<int>::max());
+    EXPECT_EQ(result.experience_gain[0], 10);
+    EXPECT_EQ(result.ability_gain[0], 1);
+}
+
+TEST(V4StaffGrowth, DeliveryRevealsOneDimensionInArrayOrder) {
+    auto member = growth_staff();
+    member.potential[0] = 40;
+    member.potential[1] = 50;
+    EXPECT_TRUE(apc::v4::kernel::reveal_next_potential(member));
+    EXPECT_TRUE(member.revealed_potential[0]);
+    EXPECT_FALSE(member.revealed_potential[1]);
+    EXPECT_TRUE(apc::v4::kernel::reveal_next_potential(member));
+    EXPECT_TRUE(member.revealed_potential[1]);
+    for (std::size_t i = 2; i < member.revealed_potential.size(); ++i) member.revealed_potential[i] = true;
+    EXPECT_FALSE(apc::v4::kernel::reveal_next_potential(member));
+}
+
+TEST(V4CompanyEnding, EmptyArchiveKeepsQualityRatingAndBuildsCandidateSummary) {
+    const auto outcome = v4_call(apc::v4::finalize_company, Json{{"state", v4_empty_ended()}});
+    ASSERT_FALSE(outcome.contains("error")) << outcome.dump();
+    const auto& result = outcome.at("result");
+    EXPECT_EQ(result.at("total_projects"), 0);
+    EXPECT_EQ(result.at("rating"), "D");
+    EXPECT_TRUE(result.at("best_work").is_null());
+    EXPECT_EQ(result.at("overall").at("evaluation_model").at("status"), "candidate");
+    EXPECT_EQ(result.at("overall").at("score"), result.at("overall").at("quality").get<int>()
+        + result.at("overall").at("finance").get<int>() + result.at("overall").at("influence").get<int>()
+        + result.at("overall").at("team").get<int>());
+}
+
+TEST(V4CompanyEnding, TeamScoreCapsAbilityAndMaturityAtFifteenPoints) {
+    auto state = v4_empty_ended();
+    for (auto& member : state["staff"]) {
+        if (member.at("employment") != "core") continue;
+        for (auto& ability : member["abilities"].items()) ability.value() = 100;
+        for (auto& potential : member["potential"].items()) potential.value() = 100;
+        for (auto& revealed : member["revealed_potential"].items()) revealed.value() = true;
+        for (auto& experience : member["experience"].items()) experience.value() = 1000;
+    }
+    const auto outcome = v4_call(apc::v4::finalize_company, Json{{"state", state}});
+    ASSERT_FALSE(outcome.contains("error")) << outcome.dump();
+    EXPECT_EQ(outcome.at("result").at("overall").at("team"), 15);
+    EXPECT_LE(outcome.at("result").at("overall").at("score").get<int>(), 70);
+}
+
+TEST(V4CompanyEnding, BankruptcyOverridesAchievementsButKeepsBothPolarities) {
+    auto state = v4_empty_ended();
+    state["company"]["end_reason"] = "bankrupt";
+    state["staff"][0]["experience"]["planning"] = 1;
+    state["finance"]["entries"].push_back({{"id", "fixture_native_bankrupt"}, {"week", 0}, {"work_id", nullptr},
+        {"category", "penalty"}, {"amount", -2000001}, {"counterparty", nullptr}, {"memo", "fixture"}});
+    state["finance"]["balance"] = -1;
+    const auto outcome = v4_call(apc::v4::finalize_company, Json{{"state", state}});
+    ASSERT_FALSE(outcome.contains("error")) << outcome.dump();
+    const auto& result = outcome.at("result");
+    EXPECT_EQ(result.at("overall").at("base_ending"), "D");
+    EXPECT_EQ(result.at("overall").at("ending"), "D");
+    bool positive = false;
+    bool negative = false;
+    for (const auto& evaluation : result.at("evaluations")) {
+        positive = positive || evaluation.at("polarity") == "positive";
+        negative = negative || evaluation.at("polarity") == "negative";
+    }
+    EXPECT_TRUE(positive);
+    EXPECT_TRUE(negative);
+}
+
+TEST(V4CompanyEnding, CashRatioHandlesInt64BoundariesWithoutOverflow) {
+    const auto maximum = std::numeric_limits<std::int64_t>::max();
+    auto loss = v4_empty_ended();
+    loss["finance"]["opening_funds"] = maximum;
+    loss["finance"]["balance"] = 0;
+    loss["finance"]["entries"] = Json::array({{{"id", "fixture_native_loss"}, {"week", 0}, {"work_id", nullptr},
+        {"category", "penalty"}, {"amount", -maximum}, {"counterparty", nullptr}, {"memo", "fixture"}}});
+    const auto loss_result = v4_call(apc::v4::finalize_company, Json{{"state", loss}});
+    ASSERT_FALSE(loss_result.contains("error")) << loss_result.dump();
+    EXPECT_EQ(loss_result.at("result").at("net_cash_change"), -maximum);
+    EXPECT_EQ(loss_result.at("result").at("overall").at("finance"), 0);
+
+    auto gain = v4_empty_ended();
+    gain["finance"]["opening_funds"] = 1;
+    gain["finance"]["balance"] = maximum;
+    gain["finance"]["entries"] = Json::array({{{"id", "fixture_native_gain"}, {"week", 0}, {"work_id", nullptr},
+        {"category", "success_reward"}, {"amount", maximum - 1}, {"counterparty", nullptr}, {"memo", "fixture"}}});
+    const auto gain_result = v4_call(apc::v4::finalize_company, Json{{"state", gain}});
+    ASSERT_FALSE(gain_result.contains("error")) << gain_result.dump();
+    EXPECT_EQ(gain_result.at("result").at("overall").at("finance"), 20);
+}
+
+TEST(V4CompanyEnding, TamperedSummaryIsRejectedBeforeFinalization) {
+    const auto finalized = v4_call(apc::v4::finalize_company, Json{{"state", v4_empty_ended()}}).at("state");
+    auto invalid = finalized;
+    invalid["archive"]["company_result"]["overall"]["score"] = invalid["archive"]["company_result"]["overall"]["score"].get<int>() + 1;
+    const auto response = v4_call(apc::v4::finalize_company, Json{{"state", invalid}});
+    ASSERT_TRUE(response.contains("error"));
+    EXPECT_EQ(response.at("error").at("code"), "INVALID_STATE");
+    EXPECT_NE(response.at("error").at("message").get<std::string>().find("INV-22"), std::string::npos);
+}
+
+TEST(V4CompanyEnding, RejectsUnknownEndReasonAndTimeLimitBeforeWeekFiveTwenty) {
+    auto unknown = v4_empty_ended();
+    unknown["company"]["end_reason"] = "retired";
+    auto unknown_response = v4_call(apc::v4::finalize_company, Json{{"state", unknown}});
+    ASSERT_TRUE(unknown_response.contains("error"));
+    EXPECT_EQ(unknown_response.at("error").at("code"), "INVALID_STATE");
+    EXPECT_NE(unknown_response.at("error").at("message").get<std::string>().find("INV-21 company.end_reason"), std::string::npos);
+
+    auto early = v4_empty_ended();
+    early["company"]["end_reason"] = "time_limit";
+    early["company"]["week"] = 519;
+    auto early_response = v4_call(apc::v4::finalize_company, Json{{"state", early}});
+    ASSERT_TRUE(early_response.contains("error"));
+    EXPECT_EQ(early_response.at("error").at("code"), "INVALID_STATE");
+    EXPECT_NE(early_response.at("error").at("message").get<std::string>().find("INV-21 time_limit"), std::string::npos);
+}
+
+TEST(V4CompanyEnding, RejectsNegativeCompanyReputation) {
+    auto state = v4_empty_ended();
+    state["company"]["reputation"] = -1;
+    const auto response = v4_call(apc::v4::finalize_company, Json{{"state", state}});
+    ASSERT_TRUE(response.contains("error"));
+    EXPECT_EQ(response.at("error").at("code"), "INVALID_STATE");
+    EXPECT_NE(response.at("error").at("message").get<std::string>().find("INV-21 company.reputation"), std::string::npos);
+}
+
+TEST(V4CompanyEnding, ArchiveProfitRejectsSignedInt64Underflow) {
+    const auto initialized = v4_call(apc::v4::initialize, Json{{"seed", 7}}).at("state");
+    const auto started = v4_call(apc::v4::start_work, Json{{"state", initialized}, {"offer_id", "offer_01"}, {"mode", "contract"}}).at("state");
+    const auto aborted = v4_call(apc::v4::abort_work, Json{{"state", started}, {"work_id", "work_01"}}).at("state");
+    auto state = v4_call(apc::v4::end_company, Json{{"state", aborted}}).at("state");
+    ASSERT_EQ(state.at("archive").at("works").size(), 1);
+    auto& finance = state["archive"]["works"][0]["finance_summary"];
+    const auto maximum = std::numeric_limits<std::int64_t>::max();
+    finance["contract_received"] = 0;
+    finance["contract_refund"] = 2;
+    finance["investment_paid"] = 0;
+    finance["commercial_share"] = 0;
+    finance["bd_revenue"] = 0;
+    finance["success_reward"] = 0;
+    finance["penalty"] = 0;
+    finance["costs"] = Json{{"production", maximum}};
+    finance["total_costs"] = maximum;
+    finance["profit"] = maximum;
+    state["archive"]["works"][0]["commercial_revenue"] = 0;
+    state["archive"]["works"][0]["bd_gross"] = 0;
+    state["archive"]["works"][0]["bd_revenue"] = 0;
+    state["archive"]["works"][0]["committee_pool"] = 0;
+    state["archive"]["works"][0]["investor_share"] = 0;
+    state["archive"]["works"][0]["company_received"] = 0;
+    state["archive"]["works"][0]["channel_breakdown"] = Json::array();
+    const auto response = v4_call(apc::v4::finalize_company, Json{{"state", state}});
+    ASSERT_TRUE(response.contains("error"));
+    EXPECT_EQ(response.at("error").at("code"), "INVALID_STATE");
+    EXPECT_NE(response.at("error").at("message").get<std::string>().find("INV-22"), std::string::npos);
+}
+
+TEST(V4CompanyEnding, FinanceLedgerRejectsInt64Overflow) {
+    const auto maximum = std::numeric_limits<std::int64_t>::max();
+    const auto minimum = std::numeric_limits<std::int64_t>::min();
+    auto sum_overflow = v4_empty_ended();
+    sum_overflow["company"]["end_reason"] = "bankrupt";
+    sum_overflow["finance"]["opening_funds"] = 0;
+    sum_overflow["finance"]["balance"] = -2;
+    sum_overflow["finance"]["entries"] = Json::array({
+        {{"id", "fixture_native_overflow_a"}, {"week", 0}, {"work_id", nullptr}, {"category", "penalty"}, {"amount", maximum}, {"counterparty", nullptr}, {"memo", "fixture"}},
+        {{"id", "fixture_native_overflow_b"}, {"week", 0}, {"work_id", nullptr}, {"category", "penalty"}, {"amount", maximum}, {"counterparty", nullptr}, {"memo", "fixture"}}
+    });
+    const auto sum_response = v4_call(apc::v4::finalize_company, Json{{"state", sum_overflow}});
+    ASSERT_TRUE(sum_response.contains("error"));
+    EXPECT_EQ(sum_response.at("error").at("code"), "INVALID_STATE");
+    EXPECT_NE(sum_response.at("error").at("message").get<std::string>().find("INV-16 流水合计溢出"), std::string::npos);
+
+    auto balance_overflow = v4_empty_ended();
+    balance_overflow["company"]["end_reason"] = "bankrupt";
+    balance_overflow["finance"]["opening_funds"] = maximum;
+    balance_overflow["finance"]["balance"] = minimum;
+    balance_overflow["finance"]["entries"] = Json::array({
+        {{"id", "fixture_native_balance_overflow"}, {"week", 0}, {"work_id", nullptr}, {"category", "success_reward"}, {"amount", 1}, {"counterparty", nullptr}, {"memo", "fixture"}}
+    });
+    const auto balance_response = v4_call(apc::v4::finalize_company, Json{{"state", balance_overflow}});
+    ASSERT_TRUE(balance_response.contains("error"));
+    EXPECT_EQ(balance_response.at("error").at("code"), "INVALID_STATE");
+    EXPECT_NE(balance_response.at("error").at("message").get<std::string>().find("INV-16 期初加流水合计溢出"), std::string::npos);
+}
+
+TEST(V4CompanyEnding, EnforcesTerminalStatusReasonAndResultOwnership) {
+    auto missing_reason = v4_empty_ended();
+    missing_reason["company"]["end_reason"] = nullptr;
+    const auto missing_response = v4_call(apc::v4::finalize_company, Json{{"state", missing_reason}});
+    ASSERT_TRUE(missing_response.contains("error"));
+    EXPECT_EQ(missing_response.at("error").at("code"), "INVALID_STATE");
+    EXPECT_NE(missing_response.at("error").at("message").get<std::string>().find("INV-21 closing/ended"), std::string::npos);
+
+    auto initialized = v4_call(apc::v4::initialize, Json{{"seed", 7}}).at("state");
+    initialized["company"]["end_reason"] = "voluntary";
+    const auto running_response = v4_call(apc::v4::finalize_company, Json{{"state", initialized}});
+    ASSERT_TRUE(running_response.contains("error"));
+    EXPECT_EQ(running_response.at("error").at("code"), "INVALID_STATE");
+    EXPECT_NE(running_response.at("error").at("message").get<std::string>().find("INV-21 running"), std::string::npos);
+
+    auto finalized = v4_call(apc::v4::finalize_company, Json{{"state", v4_empty_ended()}}).at("state");
+    finalized["company"]["status"] = "running";
+    finalized["company"]["end_reason"] = nullptr;
+    const auto result_response = v4_call(apc::v4::finalize_company, Json{{"state", finalized}});
+    ASSERT_TRUE(result_response.contains("error"));
+    EXPECT_EQ(result_response.at("error").at("code"), "INVALID_STATE");
+    EXPECT_NE(result_response.at("error").at("message").get<std::string>().find("INV-22 archive.company_result"), std::string::npos);
 }

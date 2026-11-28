@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { isV4GameState, type V4GameState, type V4Project, type V4Staff, type V4WorkItem } from './gameV4State'
+import type { V4CompanyResult } from './gameV4'
+import { isV4Company, isV4GameState, isV4Staff, isV4WeekReport, type V4GameState, type V4Project, type V4Staff, type V4WeekReport, type V4WorkItem } from './gameV4State'
 
 const scores = () => ({ planning: 50, direction: 50, drawing: 50, animation: 50, management: 50, postproduction: 50 })
 const flags = () => ({ planning: false, direction: false, drawing: false, animation: false, management: false, postproduction: false })
@@ -49,6 +50,42 @@ const state = (): V4GameState => ({
   },
   archive: { works: [], series: [], company_result: null },
 })
+
+const endedState = (): V4GameState => {
+  const value = state()
+  value.company.week = 26
+  value.company.status = 'ended'
+  value.company.end_reason = 'voluntary'
+  const member = value.staff[0]
+  const result: V4CompanyResult = {
+    reason: 'voluntary', weeks: 26, final_funds: 900, net_cash_change: -100, total_projects: 0,
+    best_work_id: null, rating: 'D', reputation: 100,
+    overall: {
+      score: 22, max_score: 70, quality: 0, finance: 9, influence: 6, team: 7,
+      base_ending: 'D', achievement_promotions: 0, ending: 'D', evaluation_model: { id: 'm5_company_v1', status: 'candidate' },
+    },
+    commercial: { completed_projects: 0, unfinished_projects: 0, gross_revenue: 0, company_revenue: 0, project_profit: 0 },
+    team: {
+      core_staff_count: 1, temporary_staff_count: 0, average_ability: 50, current_experience: 300,
+      revealed_potential_dimensions: 0, maxed_dimensions: 6,
+      core_members: [{
+        id: member.id, name: member.name, role: 'director', abilities: structuredClone(member.abilities), experience: structuredClone(member.experience),
+        revealed_potential: structuredClone(member.revealed_potential),
+        maxed_dimensions: ['planning', 'direction', 'drawing', 'animation', 'management', 'postproduction'],
+        representative_work_id: null, works: [],
+      }],
+    },
+    best_work: null,
+    evaluations: [
+      { code: 'team_growth', label: '核心团队仍有成长积累', polarity: 'positive' },
+      { code: 'cash_burn', label: '公司现金净流出', polarity: 'negative' },
+      { code: 'no_deliveries', label: '没有形成作品归档', polarity: 'negative' },
+    ],
+    highlights: [], negatives: [],
+  }
+  value.archive.company_result = result
+  return value
+}
 
 const workItem = (): V4WorkItem => ({
   id: 'work_01.common.series_comp',
@@ -156,7 +193,7 @@ describe('v4 GameState 关键不变式', () => {
 
   it('拒绝非法 employment 或非正周薪', () => {
     const employment = state()
-    employment.staff[0].employment = 'intern'
+    Object.assign(employment.staff[0], { employment: 'intern' })
     expect(isV4GameState(employment)).toBe(false)
 
     const salary = state()
@@ -241,5 +278,99 @@ describe('v4 GameState 关键不变式', () => {
     expect(isV4GameState(value)).toBe(true)
     quality.story = 106
     expect(isV4GameState(value)).toBe(false)
+  })
+})
+
+describe('v4 公司终局状态契约', () => {
+  it('接受与当前公司、财务和员工快照精确一致的终局', () => {
+    expect(isV4GameState(endedState())).toBe(true)
+    expect(isV4GameState(JSON.parse(JSON.stringify(endedState())))).toBe(true)
+  })
+
+  it('拒绝非法状态、终局原因和错误十年期满周数', () => {
+    const negativeReputation = endedState()
+    negativeReputation.company.reputation = -1
+    negativeReputation.archive.company_result = null
+    expect(isV4Company(negativeReputation.company)).toBe(false)
+    expect(isV4GameState(negativeReputation)).toBe(false)
+
+    const invalidStates = [
+      ['status', (value: V4GameState) => { Object.assign(value.company, { status: 'paused' }) }],
+      ['reason', (value: V4GameState) => { Object.assign(value.company, { end_reason: 'retired' }) }],
+      ['time_limit', (value: V4GameState) => { value.company.end_reason = 'time_limit' }],
+      ['running_520', (value: V4GameState) => { value.company.status = 'running'; value.company.week = 520; value.company.end_reason = null }],
+      ['running_reason', (value: V4GameState) => { value.company.status = 'running'; value.company.end_reason = 'voluntary' }],
+      ['closing_null_reason', (value: V4GameState) => { value.company.status = 'closing'; value.company.end_reason = null; value.archive.company_result = null }],
+      ['result_running', (value: V4GameState) => { value.company.status = 'running'; value.company.end_reason = null }],
+    ] as const
+    for (const [name, invalidate] of invalidStates) {
+      const value = endedState()
+      invalidate(value)
+      expect(isV4GameState(value), name).toBe(false)
+    }
+    const timed = endedState()
+    timed.company.end_reason = 'time_limit'
+    timed.company.week = 520
+    timed.archive.company_result!.reason = 'time_limit'
+    timed.archive.company_result!.weeks = 520
+    expect(isV4GameState(timed)).toBe(true)
+
+    const awaitingFinalization = endedState()
+    awaitingFinalization.archive.company_result = null
+    expect(isV4GameState(awaitingFinalization)).toBe(true)
+  })
+
+  it('拒绝只篡改当前公司、财务或员工而保留旧终局快照', () => {
+    const mutations = [
+      ['week', (value: V4GameState) => { value.company.week++ }],
+      ['reputation', (value: V4GameState) => { value.company.reputation++ }],
+      ['reason', (value: V4GameState) => { value.company.end_reason = 'bankrupt' }],
+      ['finance', (value: V4GameState) => { value.finance.opening_funds += 100; value.finance.balance += 100 }],
+      ['name', (value: V4GameState) => { value.staff[0].name = '篡改员工' }],
+      ['ability', (value: V4GameState) => { value.staff[0].abilities.direction = 51; value.staff[0].potential.direction = 51 }],
+      ['staff', (value: V4GameState) => { value.staff = [] }],
+    ] as const
+    for (const [name, mutate] of mutations) {
+      const value = endedState()
+      mutate(value)
+      expect(isV4GameState(value), name).toBe(false)
+    }
+  })
+})
+
+describe('v4 员工成长契约', () => {
+  it('拒绝负经验、潜力低于能力或能力超过 100', () => {
+    const negative = staff()
+    negative.experience.planning = -1
+    expect(isV4Staff(negative)).toBe(false)
+
+    const capped = staff()
+    capped.potential.planning = 49
+    expect(isV4Staff(capped)).toBe(false)
+
+    const excessive = staff()
+    excessive.abilities.planning = 101
+    excessive.potential.planning = 101
+    expect(isV4Staff(excessive)).toBe(false)
+
+    const overflowingExperience = staff()
+    overflowingExperience.experience.planning = Number.MAX_SAFE_INTEGER
+    expect(isV4Staff(overflowingExperience)).toBe(false)
+    expect(isV4Staff({ ...staff(), experience: { ...staff().experience, planning: 2_147_483_647 } })).toBe(true)
+  })
+
+  it('接受六维成长回执并拒绝非法能力、重复揭示或负增长', () => {
+    const report: V4WeekReport = {
+      week: 0,
+      staff: [{
+        staff_id: 'staff_01', produced: 80, fatigue: 8, morale: 78,
+        growth: { experience_gain: { planning: 10 }, ability_gain: { planning: 1 }, potential_revealed: ['direction'] },
+      }],
+    }
+    expect(isV4WeekReport(report)).toBe(true)
+    expect(isV4WeekReport({ ...report, week: 521 })).toBe(false)
+    expect(isV4WeekReport({ ...report, staff: [{ ...report.staff[0], growth: { ...report.staff[0].growth, experience_gain: { unknown: 10 } } }] })).toBe(false)
+    expect(isV4WeekReport({ ...report, staff: [{ ...report.staff[0], growth: { ...report.staff[0].growth, ability_gain: { planning: -1 } } }] })).toBe(false)
+    expect(isV4WeekReport({ ...report, staff: [{ ...report.staff[0], growth: { ...report.staff[0].growth, potential_revealed: ['direction', 'direction'] } }] })).toBe(false)
   })
 })

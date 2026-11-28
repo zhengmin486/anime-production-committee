@@ -125,9 +125,23 @@ async function save(page) {
 }
 async function settleClosing(page) {
   await resolveEvents(page)
+  if (await page.getByTestId('company-status').filter({ hasText: '已结束' }).isVisible()) {
+    const generate = page.getByRole('button', { name: '生成经营总结' })
+    if (await generate.count() > 0) await generate.click()
+    return
+  }
   await page.getByRole('button', { name: '结束公司经营' }).click()
   await page.getByRole('button', { name: '确认结束经营' }).click()
-  await page.getByTestId('company-status').filter({ hasText: '关闭中' }).waitFor()
+  try {
+    await page.getByTestId('company-status').filter({ hasText: /关闭中|已结束/ }).waitFor()
+  } catch (error) {
+    throw new Error(`关闭公司失败：${await page.locator('body').innerText()}`, { cause: error })
+  }
+  if (await page.getByTestId('company-status').filter({ hasText: '已结束' }).isVisible()) {
+    const generate = page.getByRole('button', { name: '生成经营总结' })
+    if (await generate.count() > 0) await generate.click()
+    return
+  }
   while (await page.getByRole('button', { name: '结清交付', exact: true }).count() > 0) {
     await page.getByRole('button', { name: '结清交付', exact: true }).first().click()
   }
@@ -150,7 +164,7 @@ test('v4 浏览器：委员会＋承制双项目、招聘竞争、外包、周�
     await startOffer(page, 0, true)
     await page.locator('.v4-recruit-list article').filter({ hasText: '监督' }).first().getByRole('button', { name: '签约核心' }).click()
     await startOffer(page, 0)
-    assert.equal(await page.getByRole('tab').count(), 2)
+    assert.equal(await page.locator('.v4-work-tabs [role="tab"]').count(), 2)
     await page.getByLabel('陈原画 所属项目').selectOption('work_02')
     await page.getByRole('combobox', { name: /^工作项/ }).selectOption('work_01.common.character_design')
     await page.getByLabel('供应商').selectOption('supplier_draw')
@@ -167,7 +181,17 @@ test('v4 浏览器：委员会＋承制双项目、招聘竞争、外包、周�
     assert.equal(first.state.committees.length, 1)
     assert.equal(first.state.staff.find((member) => member.id === 'staff_ka').assignment_work_id, 'work_02')
     assert.ok(first.state.contracts[0].work_done > 0)
+    assert.ok(first.state.staff.some((member) => member.employment === 'core' && Object.values(member.experience).some((value) => value > 0)))
     await page.screenshot({ path: resolve(screenshots, 'v4-production-desktop.png'), fullPage: true })
+
+    await page.getByRole('button', { name: '员工成长' }).click()
+    await page.getByRole('heading', { name: '员工成长' }).waitFor()
+    assert.match(await page.locator('.v4-growth-receipt').textContent(), /最近推进回执 · 结算周 W1/)
+    assert.match(await page.locator('.v4-growth-receipt').textContent(), /名员工获得经验或潜力揭示/)
+    assert.ok(await page.locator('.v4-growth-badges').count() > 0)
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true)
+    await page.screenshot({ path: resolve(screenshots, 'v4-staff-growth-desktop.png'), fullPage: true })
+    await page.getByRole('button', { name: /^制作与外包/ }).click()
 
     await advance(page)
     await page.getByRole('button', { name: '保存进度', exact: true }).click()
@@ -182,13 +206,21 @@ test('v4 浏览器：委员会＋承制双项目、招聘竞争、外包、周�
     await page.getByRole('button', { name: '读取本地存档' }).click()
     await page.getByText('已读取本地存档。', { exact: true }).waitFor()
     assert.equal(await page.getByTestId('week').textContent(), '003')
+    await page.getByRole('button', { name: '员工成长' }).click()
+    assert.match(await page.locator('.v4-growth-receipt').textContent(), /尚无周结算回执/)
     await page.getByRole('button', { name: /^制作与外包/ }).click()
-    assert.equal(await page.getByRole('tab').count(), 2)
+    assert.equal(await page.locator('.v4-work-tabs [role="tab"]').count(), 2)
 
     await settleClosing(page)
     await page.getByRole('button', { name: '委员会与 Archive', exact: true }).click()
     assert.equal(await page.locator('.v4-archive-card').count(), 2)
     assert.ok(await page.locator('.v4-committee').count() >= 1)
+    const report = page.getByRole('region', { name: '公司经营总结' })
+    await report.waitFor()
+    assert.match((await report.getByTestId('company-ending').textContent()) ?? '', /^[SABCD]$/)
+    assert.match((await report.getByTestId('portfolio-rating').textContent()) ?? '', /^[SABCD]$/)
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true)
+    await page.screenshot({ path: resolve(screenshots, 'v4-company-ending-desktop.png'), fullPage: true })
     const final = await save(page)
     assert.equal(final.state.company.status, 'ended')
     assert.equal(final.state.archive.company_result.total_projects, 2)
@@ -218,7 +250,9 @@ test('v4 浏览器：自然市场企划可接手，合法临界存档通过界�
     const ready = await page.evaluate(async () => {
       const { default: create } = await import('/wasm/v4.mjs')
       const core = await create()
-      let state = JSON.parse(core.initialize_game(JSON.stringify({ seed: 19 }))).state
+      let initialization = JSON.parse(core.initialize_game(JSON.stringify({ seed: 19 })))
+      const initialHidden = initialization.state.staff.every((member) => Object.values(member.revealed_potential).every((value) => !value))
+      let state = initialization.state
       state = JSON.parse(core.start_work(JSON.stringify({ state, offer_id: 'offer_01', mode: 'contract' }))).state
       state.company.week = 1
       const work = state.works[0]
@@ -226,14 +260,25 @@ test('v4 浏览器：自然市场企划可接手，合法临界存档通过界�
         item.work_done = item.work_total
         item.deliver_at = 1000
       }
-      JSON.parse(core.deliver_work(JSON.stringify({ state, work_id: work.id })))
-      return { version: 4, savedAt: new Date().toISOString(), rules_version: 'v4', state }
+      const delivered = JSON.parse(core.deliver_work(JSON.stringify({ state, work_id: work.id })))
+      return {
+        initialHidden,
+        delivered: delivered.state,
+        report: delivered.report,
+        saved: { version: 4, savedAt: new Date().toISOString(), rules_version: 'v4', state },
+      }
     })
-    await putSave(page, ready)
+    assert.equal(ready.initialHidden, true)
+    assert.ok(ready.report.growth.potential_revealed.length > 0)
+    assert.ok(ready.delivered.staff.some((member) => Object.values(member.revealed_potential).some(Boolean)))
+    await putSave(page, ready.saved)
     await page.getByRole('button', { name: '读取存档', exact: true }).click()
     await page.getByRole('button', { name: '确认读取并替换', exact: true }).click()
     await page.getByText('已读取本地存档。', { exact: true }).waitFor()
     await page.getByRole('button', { name: /交付作品/ }).click()
+    await page.getByRole('button', { name: '员工成长' }).click()
+    assert.ok(await page.locator('.v4-ability-row progress').count() > 0)
+    assert.match(await page.locator('.v4-growth-grid').textContent(), /MAX|\/ \d+/)
     await page.getByRole('button', { name: '委员会与 Archive', exact: true }).click()
     const archive = page.locator('.v4-archive-card').first()
     try {
@@ -273,7 +318,28 @@ test('v4 浏览器：375px 工作台无横向溢出且键盘可达', async () =>
     await startOffer(page, 0)
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true)
     await page.screenshot({ path: resolve(screenshots, 'v4-production-375.png'), fullPage: true })
+    await page.getByRole('button', { name: '员工成长' }).click()
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true)
+    await page.screenshot({ path: resolve(screenshots, 'v4-staff-growth-375.png'), fullPage: true })
     await page.getByRole('button', { name: '公司账本', exact: true }).click()
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true)
+    await page.getByRole('button', { name: /^制作与外包/ }).click()
+    await page.getByRole('button', { name: '中止项目', exact: true }).click()
+    await page.getByRole('button', { name: '确认中止', exact: true }).click()
+    await settleClosing(page)
+    await page.getByRole('button', { name: '委员会与 Archive', exact: true }).click()
+    const report = page.getByRole('region', { name: '公司经营总结' })
+    await report.waitFor()
+    assert.match((await report.getByTestId('company-ending').textContent()) ?? '', /^[SABCD]$/)
+    const layout = await page.evaluate(() => ({
+      viewport: innerWidth,
+      scrollWidth: document.documentElement.scrollWidth,
+      offenders: [...document.querySelectorAll('*')]
+        .filter((element) => element.getBoundingClientRect().right > innerWidth + 1)
+        .slice(0, 20)
+        .map((element) => ({ tag: element.tagName, className: element.className, right: element.getBoundingClientRect().right, text: element.textContent?.slice(0, 80) })),
+    }))
+    await page.screenshot({ path: resolve(screenshots, 'v4-company-ending-375.png'), fullPage: true })
+    assert.ok(layout.scrollWidth <= layout.viewport, JSON.stringify(layout))
   } finally { await context.close() }
 })

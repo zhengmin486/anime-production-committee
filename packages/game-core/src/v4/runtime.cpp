@@ -24,7 +24,7 @@ constexpr int kMoraleWorkPenalty = 2;
 constexpr int kMoraleRestGain = 1;
 constexpr int kFatigueWorkGain = 8;
 constexpr int kFatigueRestLoss = 4;
-constexpr int kExperienceThreshold = 20;
+constexpr int kFounderPotentialHeadroom = 15;
 constexpr int kQualityFactorMax = 1040;  // v0.5：质量均值 105 → 1040‰
 
 // DEC-COMM-001/002、DEC-BD-001：六个常规商业窗口。
@@ -73,6 +73,7 @@ bool one_of_text(const std::string& value, std::initializer_list<const char*> al
 
 // 前向声明：validate() 在辅助函数定义之前使用。
 const Json* find_partner(const GameState& state, const std::string& partner_id);
+int reputation_tier(std::int64_t reputation);
 
 std::uint64_t fnv1a64(const std::string& text) {
     std::uint64_t hash = 1469598103934665603ULL;
@@ -839,6 +840,19 @@ bool archive_add(std::int64_t& total, std::int64_t amount) {
     return true;
 }
 
+bool archive_subtract(std::int64_t& total, std::int64_t amount) {
+    if (amount < 0 || total < std::numeric_limits<std::int64_t>::min() + amount) return false;
+    total -= amount;
+    return true;
+}
+
+bool checked_add(std::int64_t& total, std::int64_t amount) {
+    if ((amount > 0 && total > std::numeric_limits<std::int64_t>::max() - amount)
+        || (amount < 0 && total < std::numeric_limits<std::int64_t>::min() - amount)) return false;
+    total += amount;
+    return true;
+}
+
 std::string archive_rating_of(int score) {
     if (score >= 85) return "S";
     if (score >= 75) return "A";
@@ -975,7 +989,8 @@ bool archive_work_record(const Json& record, std::int64_t company_week,
         error("INV-22 archive.works[].finance_summary.bd_revenue 与根字段不一致: " + id);
         return false;
     }
-    if (!finance.at("profit").is_number_integer() || finance.at("bd_revenue").get<std::int64_t>() > finance.at("commercial_share").get<std::int64_t>()) {
+    if (!archive_integer(finance.at("profit"), std::numeric_limits<std::int64_t>::min())
+        || finance.at("bd_revenue").get<std::int64_t>() > finance.at("commercial_share").get<std::int64_t>()) {
         error("INV-22 archive.works[].finance_summary.profit/bd_revenue 非法: " + id);
         return false;
     }
@@ -1007,7 +1022,11 @@ bool archive_work_record(const Json& record, std::int64_t company_week,
         return false;
     }
     auto company_total = commercial_share;
-    if (costs_sum != total_costs || finance.at("profit").get<std::int64_t>() != contract_received - contract_refund - investment_paid - total_costs
+    auto expected_profit = contract_received;
+    const bool profit_matches = archive_subtract(expected_profit, contract_refund)
+        && archive_subtract(expected_profit, investment_paid) && archive_subtract(expected_profit, total_costs)
+        && finance.at("profit").get<std::int64_t>() == expected_profit;
+    if (costs_sum != total_costs || !profit_matches
         || !archive_add(company_total, success_reward) || company_total != record.at("company_received").get<std::int64_t>()) {
         error("INV-22 archive.works[].finance_summary 对账失败: " + id);
         return false;
@@ -1090,6 +1109,246 @@ bool archive_work_record(const Json& record, std::int64_t company_week,
     return archive_text(record.at("rules_status")) && record.at("rules_status") == "placeholder";
 }
 
+namespace {
+
+constexpr int kCompanyQualityPoints = 20;
+constexpr int kCompanyFinancePoints = 20;
+constexpr int kCompanyInfluencePoints = 15;
+constexpr int kCompanyAbilityPoints = 10;
+constexpr int kCompanyMaturityPoints = 5;
+constexpr int kCompanyTeamPoints = kCompanyAbilityPoints + kCompanyMaturityPoints;
+constexpr int kCompanyMaxPoints = kCompanyQualityPoints + kCompanyFinancePoints + kCompanyInfluencePoints + kCompanyTeamPoints;
+constexpr int kCompanyExperiencePerMaturityPoint = 200;
+constexpr int kCompanyMasterpieceScore = 90;
+constexpr int kCompanyPortfolioScore = 75;
+constexpr int kCompanyCommercialOpeningMultiple = 5;
+constexpr int kCompanyProfitOpeningMultiple = 2;
+constexpr int kCompanyInfluenceAchievementTier = 5;
+constexpr int kCompanyProductivityThreshold = 5;
+constexpr const char* kCompanyEndingLevels[5] = {"D", "C", "B", "A", "S"};
+
+int company_ending_level(const std::string& rating) {
+    for (int index = 0; index < 5; ++index) if (rating == kCompanyEndingLevels[index]) return index;
+    return 0;
+}
+
+int company_scaled_ratio(std::int64_t value, std::int64_t divisor, int maximum) {
+    if (divisor <= 0) return value >= 0 ? maximum : 0;
+    if (value <= 0) return 0;
+    const std::int64_t whole = value / divisor;
+    if (whole >= maximum) return maximum;
+    const std::int64_t remainder = value % divisor;
+    std::int64_t accumulated = 0;
+    int fraction = 0;
+    for (int step = 0; step < maximum && remainder > 0; ++step) {
+        if (accumulated >= divisor - remainder) {
+            accumulated -= divisor - remainder;
+            ++fraction;
+        } else {
+            accumulated += remainder;
+        }
+    }
+    return std::min(maximum, static_cast<int>(whole * maximum + fraction));
+}
+
+std::string company_base_ending(int score) {
+    if (score >= 56) return "S";
+    if (score >= 48) return "A";
+    if (score >= 36) return "B";
+    if (score >= 24) return "C";
+    return "D";
+}
+
+bool build_company_result(const GameState& state, Json& result) {
+    if (state.company.status != "ended" || !state.company.end_reason
+        || !one_of_text(*state.company.end_reason, {"voluntary", "time_limit", "bankrupt"})) return false;
+    const std::string reason = *state.company.end_reason;
+    if (reason == "time_limit" && state.company.week != kMaxWeek) return false;
+    if ((state.finance.balance > 0 && state.finance.opening_funds < std::numeric_limits<std::int64_t>::min() + state.finance.balance)
+        || (state.finance.balance < 0 && state.finance.opening_funds > std::numeric_limits<std::int64_t>::max() + state.finance.balance)) return false;
+    const auto net_cash_change = state.finance.balance - state.finance.opening_funds;
+
+    std::map<std::string, const Json*> records;
+    std::map<std::string, std::vector<std::string>> member_work_ids;
+    std::int64_t quality_sum = 0;
+    std::int64_t gross_revenue = 0;
+    std::int64_t company_revenue = 0;
+    std::int64_t project_profit = 0;
+    int completed_projects = 0;
+    int unfinished_projects = 0;
+    int best_score = -1;
+    int best_finished_score = -1;
+    const Json* best_record = nullptr;
+    for (const auto& record : state.archive.at("works")) {
+        const std::string id = record.at("id").get<std::string>();
+        records.emplace(id, &record);
+        for (const auto& member : record.at("team")) member_work_ids[member.at("id").get<std::string>()].push_back(id);
+        const int score = record.at("quality_score").get<int>();
+        if (!archive_add(quality_sum, score) || !archive_add(gross_revenue, record.at("commercial_revenue").get<std::int64_t>())
+            || !archive_add(company_revenue, record.at("finance_summary").at("commercial_share").get<std::int64_t>())
+            || !checked_add(project_profit, record.at("finance_summary").at("profit").get<std::int64_t>())) return false;
+        if (score > best_score) {
+            best_score = score;
+            best_record = &record;
+        }
+        if (record.at("end_reason") != "aborted" && !record.at("forced").get<bool>()) {
+            ++completed_projects;
+            best_finished_score = std::max(best_finished_score, score);
+        } else {
+            ++unfinished_projects;
+        }
+    }
+    const int total_projects = completed_projects + unfinished_projects;
+    const int average_quality = total_projects == 0 ? 0 : static_cast<int>(quality_sum / total_projects);
+    const int quality_points = average_quality * kCompanyQualityPoints / 100;
+
+    int finance_points = 10;
+    if (net_cash_change > 0) {
+        finance_points += company_scaled_ratio(net_cash_change, state.finance.opening_funds, 10);
+    } else if (net_cash_change < 0) {
+        if (state.finance.opening_funds <= 0) {
+            finance_points = 0;
+        } else {
+            const std::uint64_t loss = static_cast<std::uint64_t>(-(net_cash_change + 1)) + 1;
+            if (loss > static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max())) {
+                finance_points = 0;
+            } else {
+                finance_points = std::max(0, 10 - company_scaled_ratio(static_cast<std::int64_t>(loss), state.finance.opening_funds, 10));
+            }
+        }
+    }
+
+    const int reputation_band = reputation_tier(state.company.reputation);
+    const int influence_points = 5 + std::min(5, reputation_band) + std::min(5, (completed_projects + 3) / 4);
+
+    int core_staff_count = 0;
+    int temporary_staff_count = 0;
+    std::int64_t ability_sum = 0;
+    std::int64_t experience_sum = 0;
+    int revealed_dimensions = 0;
+    int maxed_dimensions = 0;
+    Json core_members = Json::array();
+    const auto ability_values = [](const std::array<int, kAbilityCount>& values) {
+        Json out = Json::object();
+        for (int index = 0; index < kAbilityCount; ++index) out[kAbilities[static_cast<std::size_t>(index)]] = values[static_cast<std::size_t>(index)];
+        return out;
+    };
+    for (const auto& member : state.staff) {
+        if (member.employment == "temporary") {
+            ++temporary_staff_count;
+            continue;
+        }
+        ++core_staff_count;
+        Json revealed = Json::object();
+        Json maxed = Json::array();
+        for (int index = 0; index < kAbilityCount; ++index) {
+            const auto slot = static_cast<std::size_t>(index);
+            if (!archive_add(ability_sum, member.abilities[slot]) || !archive_add(experience_sum, member.experience[slot])) return false;
+            revealed[kAbilities[slot]] = member.revealed_potential[slot];
+            if (member.revealed_potential[slot]) ++revealed_dimensions;
+            if (member.abilities[slot] >= member.potential[slot]) {
+                maxed.push_back(kAbilities[slot]);
+                ++maxed_dimensions;
+            }
+        }
+        const auto found_works = member_work_ids.find(member.id);
+        const std::vector<std::string> empty_works;
+        const auto& work_ids = found_works == member_work_ids.end() ? empty_works : found_works->second;
+        Json representative = nullptr;
+        int representative_score = -1;
+        for (const auto& work_id : work_ids) {
+            const auto record = records.find(work_id);
+            if (record == records.end()) continue;
+            const int score = record->second->at("quality_score").get<int>();
+            if (score > representative_score) {
+                representative_score = score;
+                representative = work_id;
+            }
+        }
+        core_members.push_back(Json{{"id", member.id}, {"name", member.name}, {"role", member.role},
+                                    {"abilities", ability_values(member.abilities)}, {"experience", ability_values(member.experience)},
+                                    {"revealed_potential", revealed}, {"maxed_dimensions", maxed},
+                                    {"representative_work_id", representative}, {"works", work_ids}});
+    }
+    const int average_ability = core_staff_count == 0 ? 0 : static_cast<int>(ability_sum / (core_staff_count * kAbilityCount));
+    const std::int64_t average_experience = core_staff_count == 0 ? 0 : experience_sum / core_staff_count;
+    const int maturity_points = core_staff_count == 0 ? 0
+        : static_cast<int>(std::min<std::int64_t>(kCompanyMaturityPoints,
+            (average_experience + kCompanyExperiencePerMaturityPoint - 1) / kCompanyExperiencePerMaturityPoint));
+    const int team_points = average_ability * kCompanyAbilityPoints / 100 + maturity_points;
+    const int overall_score = quality_points + finance_points + influence_points + team_points;
+
+    Json evaluations = Json::array();
+    const auto evaluate = [&evaluations](const char* code, const char* label, const char* polarity) {
+        evaluations.push_back(Json{{"code", code}, {"label", label}, {"polarity", polarity}});
+    };
+    int achievement_promotions = 0;
+    const auto promote = [&achievement_promotions](int levels) { achievement_promotions = std::min(5, achievement_promotions + levels); };
+    if (best_finished_score >= kCompanyMasterpieceScore) {
+        evaluate("masterpiece", "诞生 S 级代表作", "positive");
+        promote(2);
+    }
+    if (total_projects > 0 && average_quality >= kCompanyPortfolioScore) evaluate("quality_portfolio", "作品平均质量达到 A 档", "positive");
+    if (company_revenue > 0 && company_revenue / kCompanyCommercialOpeningMultiple >= state.finance.opening_funds) {
+        evaluate("commercial_success", "累计公司商业收入超过初始资金 5 倍", "positive");
+        promote(1);
+    }
+    if (project_profit > 0 && project_profit / kCompanyProfitOpeningMultiple >= state.finance.opening_funds) {
+        evaluate("sustainable_profit", "累计项目利润超过初始资金 2 倍", "positive");
+        promote(1);
+    }
+    if (reputation_band >= kCompanyInfluenceAchievementTier) {
+        evaluate("industry_influence", "声望达到 T5 及以上", "positive");
+        promote(1);
+    }
+    if (experience_sum > 0 || revealed_dimensions > 0 || maxed_dimensions > 0) evaluate("team_growth", "核心团队仍有成长积累", "positive");
+    if (completed_projects >= kCompanyProductivityThreshold) evaluate("productive_company", "正常完成至少 5 部作品", "positive");
+    if (state.company.end_reason == "bankrupt") evaluate("bankruptcy", "资金链断裂，公司破产清算", "negative");
+    if (net_cash_change < 0) evaluate("cash_burn", "公司现金净流出", "negative");
+    if (unfinished_projects > 0) evaluate("unfinished_works", "存在未正常完成的作品", "negative");
+    if (total_projects == 0) evaluate("no_deliveries", "没有形成作品归档", "negative");
+    if (project_profit < 0) evaluate("project_losses", "累计项目利润为负", "negative");
+
+    const std::string base_ending = reason == "bankrupt" ? "D" : company_base_ending(overall_score);
+    const std::string ending = reason == "bankrupt" ? "D"
+        : kCompanyEndingLevels[std::min(4, company_ending_level(base_ending) + achievement_promotions)];
+    Json best_work = nullptr;
+    if (best_record != nullptr) {
+        best_work = Json{{"id", best_record->at("id")}, {"name", best_record->at("name")},
+                         {"rating", best_record->at("rating")}, {"quality_score", best_score}, {"team", best_record->at("team")}};
+    }
+
+    Json highlights = Json::array();
+    Json negatives = Json::array();
+    if (best_record != nullptr) highlights.push_back("最佳作品：" + best_record->at("name").get<std::string>()
+                                                      + "（" + archive_rating_of(best_score) + "）");
+    if (total_projects > 0 && average_quality >= 75) highlights.push_back("作品平均质量达到 A 档");
+    if (reason == "bankrupt") negatives.push_back("资金链断裂，公司破产清算");
+    if (unfinished_projects > 0) negatives.push_back(std::to_string(unfinished_projects) + " 部作品未正常完成");
+
+    result = Json{{"reason", reason}, {"weeks", state.company.week}, {"final_funds", state.finance.balance},
+                  {"net_cash_change", net_cash_change}, {"total_projects", total_projects},
+                  {"best_work_id", best_record == nullptr ? Json(nullptr) : Json(best_record->at("id"))},
+                  {"rating", archive_rating_of(average_quality)},
+                  {"overall", Json{{"score", overall_score}, {"max_score", kCompanyMaxPoints},
+                                   {"quality", quality_points}, {"finance", finance_points}, {"influence", influence_points},
+                                   {"team", team_points}, {"base_ending", base_ending},
+                                   {"achievement_promotions", achievement_promotions}, {"ending", ending},
+                                   {"evaluation_model", Json{{"id", "m5_company_v1"}, {"status", "candidate"}}}}},
+                  {"commercial", Json{{"completed_projects", completed_projects}, {"unfinished_projects", unfinished_projects},
+                                      {"gross_revenue", gross_revenue}, {"company_revenue", company_revenue},
+                                      {"project_profit", project_profit}}},
+                  {"reputation", state.company.reputation},
+                  {"team", Json{{"core_staff_count", core_staff_count}, {"temporary_staff_count", temporary_staff_count},
+                                {"average_ability", average_ability}, {"current_experience", experience_sum},
+                                {"revealed_potential_dimensions", revealed_dimensions}, {"maxed_dimensions", maxed_dimensions},
+                                {"core_members", core_members}}},
+                  {"best_work", best_work}, {"evaluations", evaluations}, {"highlights", highlights}, {"negatives", negatives}};
+    return true;
+}
+
+}  // namespace
+
 void validate_archive(const GameState& state, const std::function<void(const std::string&, const char*)>& claim_id,
                       const std::function<void(const std::string&)>& error) {
     const Json& archive = state.archive;
@@ -1148,45 +1407,25 @@ void validate_archive(const GameState& state, const std::function<void(const std
 
     const Json& result = archive.at("company_result");
     if (result.is_null()) return;
-    if (!archive_exact_fields(result, {"reason", "weeks", "final_funds", "net_cash_change", "total_projects",
-                                       "best_work_id", "rating", "highlights", "negatives"})) {
+    if (state.company.status != "ended") {
+        error("INV-22 archive.company_result 只能存在于 ended 状态");
+        return;
+    }
+    if (!archive_exact_fields(result, {"reason", "weeks", "final_funds", "net_cash_change", "total_projects", "best_work_id", "rating",
+                                       "overall", "commercial", "reputation", "team", "best_work", "evaluations", "highlights", "negatives"})) {
         error("INV-22 archive.company_result 根字段缺失或含未知字段");
         return;
     }
-    if (state.company.status != "ended" || !archive_text(result.at("reason"))
-        || !one_of_text(result.at("reason").get<std::string>(), {"time_limit", "bankrupt", "voluntary"})
-        || result.at("reason").get<std::string>() != state.company.end_reason.value_or("")
-        || !archive_integer(result.at("weeks"), 0, kMaxWeek) || result.at("weeks").get<std::int64_t>() != state.company.week
-        || (result.at("reason") == "time_limit" && result.at("weeks").get<std::int64_t>() != kMaxWeek)
-        || !result.at("final_funds").is_number_integer()
-        || (result.at("reason") != "bankrupt" && result.at("final_funds").get<std::int64_t>() < 0)
-        || result.at("final_funds").get<std::int64_t>() != state.finance.balance
-        || !result.at("net_cash_change").is_number_integer()
-        || result.at("net_cash_change").get<std::int64_t>() != state.finance.balance - state.finance.opening_funds
-        || !archive_integer(result.at("total_projects"), 0) || result.at("total_projects").get<std::int64_t>() != static_cast<std::int64_t>(works.size())
-        || !(result.at("best_work_id").is_null() || archive_text(result.at("best_work_id")))
-        || !archive_text(result.at("rating")) || !archive_string_array(result.at("highlights"), false, "archive.company_result.highlights", error)
-        || !archive_string_array(result.at("negatives"), false, "archive.company_result.negatives", error)) {
-        error("INV-22 archive.company_result 与公司状态或字段类型不一致");
+    if (works.size() != archive.at("works").size()) {
+        error("INV-22 archive.company_result 无法从有效作品归档重算");
         return;
     }
-    std::int64_t quality_sum = 0;
-    int best_score = -1;
-    std::string best_id;
-    for (const auto& record : archive.at("works")) {
-        if (!record.is_object() || works.find(record.value("id", std::string{})) == works.end()) continue;
-        const int score = record.at("quality_score").get<int>();
-        quality_sum += score;
-        if (score > best_score) {
-            best_score = score;
-            best_id = record.at("id").get<std::string>();
-        }
+    Json expected;
+    if (!build_company_result(state, expected)) {
+        error("INV-22 archive.company_result 累计值溢出");
+        return;
     }
-    const int average = works.empty() ? 0 : static_cast<int>(quality_sum / static_cast<std::int64_t>(works.size()));
-    if (result.at("rating").get<std::string>() != archive_rating_of(average)
-        || (best_id.empty() ? !result.at("best_work_id").is_null() : result.at("best_work_id") != best_id)) {
-        error("INV-22 archive.company_result 评级或最佳作品与 Archive 不一致");
-    }
+    if (result != expected) error("INV-22 archive.company_result 必须与公司状态、Archive 和员工终局快照精确一致");
 }
 
 void validate_vendors(const GameState& state,
@@ -1574,6 +1813,7 @@ std::vector<std::string> validate(const GameState& state) {
     };
 
     if (state.version != kContractVersion) error("INV-01 version 必须为 4");
+    if (state.company.reputation < 0) error("INV-21 company.reputation 必须非负");
     if (state.company.week < 0 || state.company.week > kMaxWeek) error("INV-21 company.week 必须在 0..520");
     if (state.company.status == "running" && state.company.week >= kMaxWeek) {
         error("INV-21 running 状态下 week 必须小于 520");
@@ -1581,14 +1821,31 @@ std::vector<std::string> validate(const GameState& state) {
     if (state.company.status != "running" && state.company.status != "closing" && state.company.status != "ended") {
         error("INV-01 company.status 非法");
     }
+    if (state.company.end_reason && !one_of_text(*state.company.end_reason, {"voluntary", "time_limit", "bankrupt"})) {
+        error("INV-21 company.end_reason 非法");
+    }
+    if (state.company.end_reason == "time_limit" && state.company.week != kMaxWeek) {
+        error("INV-21 time_limit 终局必须发生在第 520 周");
+    }
+    if (state.company.status == "running" && state.company.end_reason) {
+        error("INV-21 running 状态不得填写 end_reason");
+    }
+    if (state.company.status != "running" && !state.company.end_reason) {
+        error("INV-21 closing/ended 状态必须填写 end_reason");
+    }
 
     std::set<std::string> staff_ids;
     for (const auto& member : state.staff) {
         claim_id(member.id, "staff");
         if (!staff_ids.insert(member.id).second) error("INV-02 staff.id 重复: " + member.id);
         for (int i = 0; i < kAbilityCount; ++i) {
-            const int value = member.abilities[static_cast<std::size_t>(i)];
+            const auto index = static_cast<std::size_t>(i);
+            const int value = member.abilities[index];
+            const int experience = member.experience[index];
+            const int potential = member.potential[index];
             if (value < 0 || value > 100) error("INV-01 staff 能力越界: " + member.id);
+            if (experience < 0) error("INV-01 staff 经验不能为负: " + member.id);
+            if (potential < value || potential > 100) error("INV-01 staff 潜力必须不低于当前能力且不超过 100: " + member.id);
         }
         if (member.fatigue < 0 || member.fatigue > 100) error("INV-01 staff.fatigue 越界: " + member.id);
         if (member.morale < 0 || member.morale > 100) error("INV-01 staff.morale 越界: " + member.id);
@@ -1647,7 +1904,8 @@ std::vector<std::string> validate(const GameState& state) {
             const int ability = candidate.staff.abilities[static_cast<std::size_t>(i)];
             const int potential = candidate.staff.potential[static_cast<std::size_t>(i)];
             if (ability < 0 || ability > 100) error("INV-01 候选能力越界: " + candidate.staff.id);
-            if (potential < 0 || potential > 100) error("INV-01 候选潜力越界: " + candidate.staff.id);
+            if (potential < ability || potential > 100) error("INV-01 候选潜力必须不低于当前能力且不超过 100: " + candidate.staff.id);
+            if (candidate.staff.experience[static_cast<std::size_t>(i)] < 0) error("INV-01 候选经验不能为负: " + candidate.staff.id);
         }
         if (candidate.staff.signing_fee < 0) error("INV-01 候选 signing_fee 不能为负: " + candidate.staff.id);
         if (candidate.staff.weekly_salary <= 0) error("INV-01 候选 weekly_salary 必须为正: " + candidate.staff.id);
@@ -1993,12 +2251,20 @@ std::vector<std::string> validate(const GameState& state) {
 
     // 财务恒等式
     std::int64_t sum = 0;
+    bool ledger_valid = true;
     for (const auto& entry : state.finance.entries) {
         claim_id(entry.id, "ledger");
         if (entry.week < 0 || entry.week > kMaxWeek) error("INV-01 流水周数越界: " + entry.id);
-        sum += entry.amount;
+        if (!checked_add(sum, entry.amount)) {
+            error("INV-16 流水合计溢出: " + entry.id);
+            ledger_valid = false;
+        }
     }
-    if (state.finance.balance != state.finance.opening_funds + sum) error("INV-16 余额不等于期初加流水合计");
+    if (ledger_valid) {
+        std::int64_t expected_balance = state.finance.opening_funds;
+        if (!checked_add(expected_balance, sum)) error("INV-16 期初加流水合计溢出");
+        else if (state.finance.balance != expected_balance) error("INV-16 余额不等于期初加流水合计");
+    }
     if (!state.finance.loans.is_array() || !state.finance.loans.empty()) {
         error("INV-18 当前 finance.loans 必须为空数组");
     }
@@ -2879,9 +3145,27 @@ SettlementOutcome settle_project(GameState& state, Project& work, const std::str
     walk_items(work, [&contributors](const WorkItem& item) {
         for (const auto& id : item.contributors) contributors.insert(id);
     });
+    if (work.supervisor_staff_id) contributors.insert(*work.supervisor_staff_id);
     for (const auto& id : contributors) {
         const Staff* member = find_staff(state, id);
         if (member != nullptr) team.push_back(Json{{"id", member->id}, {"name", member->name}, {"role", member->role}});
+    }
+    Json delivery_growth = Json::array();
+    if (!aborted && !forced) {
+        std::set<std::string> growth_contributors = contributors;
+        if (work.supervisor_staff_id) growth_contributors.insert(*work.supervisor_staff_id);
+        for (const auto& id : growth_contributors) {
+            Staff* member = find_staff(state, id);
+            if (member == nullptr || member->employment == "temporary") continue;
+            const auto revealed_before = member->revealed_potential;
+            if (!kernel::reveal_next_potential(*member)) continue;
+            Json revealed = Json::array();
+            for (int i = 0; i < kAbilityCount; ++i) {
+                const auto index = static_cast<std::size_t>(i);
+                if (!revealed_before[index] && member->revealed_potential[index]) revealed.push_back(kAbilities[index]);
+            }
+            delivery_growth.push_back(Json{{"staff_id", member->id}, {"potential_revealed", revealed}});
+        }
     }
     Json dims = Json::object();
     for (int i = 0; i < kDimensionCount; ++i) dims[kDimensions[static_cast<std::size_t>(i)]] = quality.dims[static_cast<std::size_t>(i)];
@@ -2986,7 +3270,8 @@ SettlementOutcome settle_project(GameState& state, Project& work, const std::str
                           {"penalty_waived", penalty_waived},
                           {"total_costs", total_costs},
                           {"net_received", company_revenue + contract_refund - penalty},
-                          {"channels", channel_report}};
+                          {"channels", channel_report},
+                          {"growth", {{"potential_revealed", delivery_growth}}}};
 
     state.contracts.erase(std::remove_if(state.contracts.begin(), state.contracts.end(), [&work_id](const Json& contract) {
         return contract.is_object() && contract.value("work_id", std::string{}) == work_id;
@@ -3134,7 +3419,10 @@ std::string initialize(const std::string& input) {
             member.role = role;
             member.employment = "core";
             member.abilities = abilities;
-            member.potential = abilities;
+            for (int i = 0; i < kAbilityCount; ++i) {
+                member.potential[static_cast<std::size_t>(i)] =
+                    std::min(100, abilities[static_cast<std::size_t>(i)] + kFounderPotentialHeadroom);
+            }
             member.talent_type = "specialist";
             member.weekly_salary = 40000;
             // 创始名册不是通过 hire_core 进来的，没有签约费可记；
@@ -3835,11 +4123,22 @@ std::string advance_week(const std::string& input) {
         }
 
         // ---- 阶段 4：项目生产推进与阶段切换 ----
-        std::map<std::string, std::set<int>> experience_gains;
+        std::map<std::string, std::array<int, kAbilityCount>> experience_gains;
         Json outsource_report = Json::array();
         std::string outsource_error;
         if (!tick_outsourcing(state, week, outsource_report, outsource_error)) {
             return fail_stage(4, "INTERNAL_ERROR", outsource_error);
+        }
+        std::map<std::string, int> outsourced_points_by_work;
+        for (const auto& entry : outsource_report) {
+            const int points = entry.at("points").get<int>();
+            if (points <= 0) continue;
+            const auto contract = std::find_if(state.contracts.begin(), state.contracts.end(), [&](const Json& value) {
+                return value.is_object() && value.value("id", std::string{}) == entry.at("id").get<std::string>();
+            });
+            if (contract != state.contracts.end()) {
+                outsourced_points_by_work[contract->at("work_id").get<std::string>()] += points;
+            }
         }
         for (Project* work : ordered) {
             if (work->status != "producing") continue;
@@ -3865,6 +4164,7 @@ std::string advance_week(const std::string& input) {
             const auto assignments = kernel::allocate(*work, assigned, team_permille);
 
             std::map<std::string, Json> item_reports;
+            std::map<std::string, std::vector<std::pair<std::string, int>>> item_contributions;
             std::vector<std::string> order;
             for (const auto& assignment : assignments) {
                 Staff* member = find_staff(state, assignment.staff_id);
@@ -3892,9 +4192,22 @@ std::string advance_week(const std::string& input) {
 
                 if (result.points > 0) {
                     member->last_participation = Participation{work->id, item->id, week};
-                    if (result.points >= kExperienceThreshold) {
-                        experience_gains[member->id].insert(ability_index(item->ability));
-                    }
+                    item_contributions[item->id].push_back({member->id, result.points});
+                }
+            }
+
+            for (auto& [item_id, contributions] : item_contributions) {
+                std::sort(contributions.begin(), contributions.end(), [](const auto& a, const auto& b) {
+                    if (a.second != b.second) return a.second > b.second;
+                    return a.first < b.first;
+                });
+                WorkItem* item = find_item(*work, item_id);
+                const int ability = item == nullptr ? -1 : ability_index(item->ability);
+                if (ability < 0) continue;
+                for (std::size_t rank = 0; rank < contributions.size(); ++rank) {
+                    const int gain = kernel::experience_for_participation(rank == 0);
+                    int& current = experience_gains[contributions[rank].first][static_cast<std::size_t>(ability)];
+                    current = std::max(current, gain);
                 }
             }
 
@@ -3903,6 +4216,18 @@ std::string advance_week(const std::string& input) {
             for (const auto& id : order) {
                 items.push_back(item_reports[id]);
                 total_points += item_reports[id]["points"].get<int>();
+            }
+            if ((total_points > 0 || outsourced_points_by_work[work->id] > 0) && work->supervisor_staff_id) {
+                Staff* supervisor = find_staff(state, *work->supervisor_staff_id);
+                if (supervisor != nullptr && supervisor->employment != "temporary") {
+                    const int gain = kernel::experience_for_participation(true);
+                    for (const char* ability_name : {"direction", "management"}) {
+                        const int ability = ability_index(ability_name);
+                        if (ability < 0) continue;
+                        int& current = experience_gains[supervisor->id][static_cast<std::size_t>(ability)];
+                        current = std::max(current, gain);
+                    }
+                }
             }
             // 质量聚合：工作项 → 阶段 → 单集 → 作品，让"随机提升若干质量项"变成玩家看得见的数
             const auto aggregated = kernel::aggregate_work(*work);
@@ -3917,12 +4242,18 @@ std::string advance_week(const std::string& input) {
         // ---- 阶段 5：人员经验、疲劳与红灯 ----
         Json staff_report = Json::array();
         for (auto& member : state.staff) {
+            kernel::GrowthResult growth;
             if (member.employment != "temporary") {
-                for (const int ability : experience_gains[member.id]) {
-                    if (ability < 0) continue;
-                    member.experience[static_cast<std::size_t>(ability)] =
-                        std::min(100, member.experience[static_cast<std::size_t>(ability)] + 1);
-                }
+                growth = kernel::apply_growth(member, experience_gains[member.id]);
+            }
+            Json experience_gain = Json::object();
+            Json ability_gain = Json::object();
+            Json potential_revealed = Json::array();
+            for (int i = 0; i < kAbilityCount; ++i) {
+                const auto index = static_cast<std::size_t>(i);
+                if (growth.experience_gain[index] > 0) experience_gain[kAbilities[index]] = growth.experience_gain[index];
+                if (growth.ability_gain[index] > 0) ability_gain[kAbilities[index]] = growth.ability_gain[index];
+                if (growth.potential_revealed[index]) potential_revealed.push_back(kAbilities[index]);
             }
             const int produced = produced_by_staff[member.id];
             if (produced > 0) {
@@ -3936,7 +4267,10 @@ std::string advance_week(const std::string& input) {
                 member.last_participation.reset();
             }
             staff_report.push_back(Json{{"staff_id", member.id}, {"produced", produced},
-                                        {"fatigue", member.fatigue}, {"morale", member.morale}});
+                                        {"fatigue", member.fatigue}, {"morale", member.morale},
+                                        {"growth", {{"experience_gain", experience_gain},
+                                                    {"ability_gain", ability_gain},
+                                                    {"potential_revealed", potential_revealed}}}});
         }
 
         // ---- 阶段 6：商业窗口、完成与交付收入 ----
@@ -5051,48 +5385,10 @@ std::string finalize_company(const std::string& input) {
             return encode(error_body("INVALID_PHASE", "公司结局已生成"));
         }
 
-        const std::string reason = state.company.end_reason.value_or("voluntary");
-        std::int64_t quality_sum = 0;
-        int total_projects = 0;
-        int best_score = -1;
-        std::string best_work_id;
-        std::string best_work_name;
-        int unfinished = 0;
-        if (state.archive.contains("works") && state.archive.at("works").is_array()) {
-            for (const auto& record : state.archive.at("works")) {
-                const int score = record.value("quality_score", 0);
-                quality_sum += score;
-                ++total_projects;
-                if (score > best_score) {
-                    best_score = score;
-                    best_work_id = record.value("id", std::string{});
-                    best_work_name = record.value("name", std::string{});
-                }
-                if (record.value("end_reason", std::string{}) != "completed") ++unfinished;
-            }
+        Json result;
+        if (!build_company_result(state, result)) {
+            return encode(error_body("INVALID_STATE", "公司结局累计值溢出"));
         }
-        // [PLACEHOLDER] 公司评级复用作品分数线，待数值标定。
-        const int average = total_projects > 0 ? static_cast<int>(quality_sum / total_projects) : 0;
-        const std::string rating = rating_of(average);
-
-        Json highlights = Json::array();
-        Json negatives = Json::array();
-        if (!best_work_id.empty()) {
-            highlights.push_back("最佳作品：" + best_work_name + "（" + rating_of(best_score) + "）");
-        }
-        if (total_projects > 0 && average >= 75) highlights.push_back("作品平均质量达到 A 档");
-        if (reason == "bankrupt") negatives.push_back("资金链断裂，公司破产清算");
-        if (unfinished > 0) negatives.push_back(std::to_string(unfinished) + " 部作品未正常完成");
-
-        Json result = Json{{"reason", reason},
-                           {"weeks", state.company.week},
-                           {"final_funds", state.finance.balance},
-                           {"net_cash_change", state.finance.balance - state.finance.opening_funds},
-                           {"total_projects", total_projects},
-                           {"best_work_id", best_work_id.empty() ? Json(nullptr) : Json(best_work_id)},
-                           {"rating", rating},
-                           {"highlights", highlights},
-                           {"negatives", negatives}};
         state.archive["company_result"] = result;
 
         const auto errors = validate(state);

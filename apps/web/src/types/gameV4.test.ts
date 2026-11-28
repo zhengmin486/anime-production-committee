@@ -1,5 +1,5 @@
 import { describe, expect, expectTypeOf, it } from 'vitest'
-import { isCompanyResult, isV4Archive, isV4CompanyResult, isV4WorkRecord, isWorkRecord } from './gameV4'
+import { companyReputationProfile, isCompanyResult, isV4Archive, isV4CompanyResult, isV4WorkRecord, isWorkRecord } from './gameV4'
 import type { V4Archive, V4CompanyResult, V4WorkRecord } from './gameV4'
 import { isV4Market, isV4Offer, type V4Market } from './gameV4State'
 import { isCompanyResult as isV3CompanyResult, isWorkRecord as isV3WorkRecord } from './gameV3'
@@ -57,9 +57,28 @@ function abortedWork(): V4WorkRecord {
 }
 
 function result(): V4CompanyResult {
+  const abilities = { planning: 60, direction: 60, drawing: 60, animation: 60, management: 60, postproduction: 60 }
+  const experience = { planning: 0, direction: 0, drawing: 0, animation: 0, management: 0, postproduction: 0 }
+  const revealed = { planning: false, direction: false, drawing: false, animation: false, management: false, postproduction: false }
   return {
     reason: 'voluntary', weeks: 26, final_funds: 1950, net_cash_change: 950, total_projects: 1,
-    best_work_id: 'work_01', rating: 'B', highlights: ['最佳作品：星海邮差（B）'], negatives: []
+    best_work_id: 'work_01', rating: 'B',
+    overall: {
+      score: 45, max_score: 70, quality: 14, finance: 19, influence: 6, team: 6,
+      base_ending: 'B', achievement_promotions: 0, ending: 'B', evaluation_model: { id: 'm5_company_v1', status: 'candidate' }
+    },
+    commercial: { completed_projects: 1, unfinished_projects: 0, gross_revenue: 100, company_revenue: 50, project_profit: 950 },
+    reputation: 0,
+    team: {
+      core_staff_count: 1, temporary_staff_count: 0, average_ability: 60, current_experience: 0,
+      revealed_potential_dimensions: 0, maxed_dimensions: 0,
+      core_members: [{
+        id: 'staff_dir', name: '导演', role: 'director', abilities, experience, revealed_potential: revealed,
+        maxed_dimensions: [], representative_work_id: 'work_01', works: ['work_01']
+      }]
+    },
+    best_work: { id: 'work_01', name: '星海邮差', rating: 'B', quality_score: 70, team: work().team },
+    evaluations: [], highlights: ['最佳作品：星海邮差（B）'], negatives: []
   }
 }
 
@@ -67,8 +86,46 @@ function archive(): V4Archive {
   return { works: [work()], series: [], company_result: result() }
 }
 
+describe('v4 声望只读剖面', () => {
+  it('按 T0–T7 冻结阈值映射行业定位、下一档、临时能力与弹性工位', () => {
+    const cases: [number, number, string, number | null, number | null, number, number, number][] = [
+      [0, 0, '信用受损 / 边缘作坊', 99, 100, 42, 52, 1],
+      [99, 0, '信用受损 / 边缘作坊', 99, 100, 42, 52, 1],
+      [100, 1, '初创工作室', 249, 250, 42, 52, 1],
+      [249, 1, '初创工作室', 249, 250, 42, 52, 1],
+      [250, 2, '新锐工作室', 599, 600, 56, 65, 2],
+      [599, 2, '新锐工作室', 599, 600, 56, 65, 2],
+      [600, 3, '稳健制作公司', 1_999, 2_000, 56, 65, 2],
+      [1_999, 3, '稳健制作公司', 1_999, 2_000, 56, 65, 2],
+      [2_000, 4, '知名实力厂牌', 9_999, 10_000, 56, 65, 3],
+      [9_999, 4, '知名实力厂牌', 9_999, 10_000, 56, 65, 3],
+      [10_000, 5, '一线头部大厂', 59_999, 60_000, 66, 74, 3],
+      [59_999, 5, '一线头部大厂', 59_999, 60_000, 66, 74, 3],
+      [60_000, 6, '超一线行业巨头', 299_999, 300_000, 66, 74, 4],
+      [299_999, 6, '超一线行业巨头', 299_999, 300_000, 66, 74, 4],
+      [300_000, 7, '国民级 / 殿堂级传奇', null, null, 66, 74, 4],
+    ]
+    for (const [reputation, tier, position, max, next, abilityMin, abilityMax, capacity] of cases) {
+      expect(companyReputationProfile(reputation), `reputation=${reputation}`).toEqual({
+        tier, tier_label: `T${tier}`, industry_position: position,
+        range: { min: reputationTiersMinimum(tier), max },
+        next_tier: next === null ? null : { tier: tier + 1, min_reputation: next },
+        temporary_ability_range: { min: abilityMin, max: abilityMax },
+        flexible_staff_capacity: capacity,
+      })
+    }
+  })
+
+  it('1M 是巅峰标杆而非上限，T7 可继续增长', () => {
+    expect(companyReputationProfile(1_000_000)).toMatchObject({ tier: 7, range: { min: 300_000, max: null }, next_tier: null })
+    expect(companyReputationProfile(1_000_001)).toMatchObject({ tier: 7, range: { min: 300_000, max: null }, next_tier: null })
+  })
+})
+
+const reputationTiersMinimum = (tier: number) => [0, 100, 250, 600, 2_000, 10_000, 60_000, 300_000][tier]
+
 describe('v4 终局结果契约', () => {
-  it('接受九字段结果及 JSON 往返，并与 v3 评级互斥', () => {
+  it('接受结构化结局及 JSON 往返，并与 v3 评级互斥', () => {
     const value = result()
     expect(isV4CompanyResult(value)).toBe(true)
     expect(isV4CompanyResult(JSON.parse(JSON.stringify(value)))).toBe(true)
@@ -90,10 +147,54 @@ describe('v4 终局结果契约', () => {
       }
     }
     expect(isV4CompanyResult({ ...result(), highlights: [''] })).toBe(false)
-    expect(isV4CompanyResult({ ...result(), best_work_id: 'missing' })).toBe(true)
+    const missing = result()
+    missing.best_work_id = 'missing'
+    missing.best_work!.id = 'missing'
+    expect(isV4CompanyResult(missing)).toBe(true)
     const dangling = archive()
     dangling.company_result!.best_work_id = 'missing'
+    dangling.company_result!.best_work!.id = 'missing'
     expect(isV4Archive(dangling)).toBe(false)
+  })
+
+  it('只接受候选评价模型并校验分数、跨档与团队聚合', () => {
+    expect(isV4CompanyResult(changed(result(), 'overall.evaluation_model.status', 'frozen'))).toBe(false)
+    expect(isV4CompanyResult(changed(result(), 'overall.evaluation_model.extra', 1))).toBe(false)
+    expect(isV4CompanyResult(changed(result(), 'overall.score', 49))).toBe(false)
+    expect(isV4CompanyResult(changed(result(), 'overall.achievement_promotions', 1))).toBe(false)
+    expect(isV4CompanyResult(changed(result(), 'team.current_experience', 1))).toBe(false)
+    expect(isV4CompanyResult(changed(result(), 'team.core_members.0.representative_work_id', null))).toBe(false)
+    expect(isV4Archive(changed(archive(), 'company_result.overall.quality', 15))).toBe(false)
+    expect(isV4Archive(changed(archive(), 'company_result.commercial.gross_revenue', 101))).toBe(false)
+    expect(isV4Archive(changed(archive(), 'company_result.team.core_members.0.works', []))).toBe(false)
+    const capped = archive()
+    capped.company_result!.overall.team = 16
+    expect(isV4Archive(capped)).toBe(false)
+    capped.company_result!.overall.team = 15
+    capped.company_result!.overall.score = 54
+    capped.company_result!.overall.base_ending = 'A'
+    capped.company_result!.overall.ending = 'A'
+    capped.company_result!.team.average_ability = 100
+    capped.company_result!.team.current_experience = 1200
+    capped.company_result!.evaluations = [{ code: 'team_growth', label: '核心团队仍有成长积累', polarity: 'positive' }]
+    for (const ability of Object.keys(capped.company_result!.team.core_members[0].abilities) as (keyof V4CompanyResult['team']['core_members'][number]['abilities'])[]) {
+      capped.company_result!.team.core_members[0].abilities[ability] = 100
+      capped.company_result!.team.core_members[0].experience[ability] = 200
+    }
+    expect(isV4CompanyResult(capped.company_result)).toBe(true)
+    expect(isV4Archive(capped)).toBe(true)
+  })
+
+  it('允许正负特殊评价并存但拒绝错误极性和重复评价', () => {
+    const value = result()
+    value.evaluations = [
+      { code: 'team_growth', label: '核心团队仍有成长积累', polarity: 'positive' },
+      { code: 'cash_burn', label: '公司现金净流出', polarity: 'negative' }
+    ]
+    expect(isV4CompanyResult(value)).toBe(true)
+    expect(isV4CompanyResult(changed(value, 'evaluations.0.polarity', 'negative'))).toBe(false)
+    expect(isV4CompanyResult(changed(value, 'evaluations.1.code', 'team_growth'))).toBe(false)
+    expect(isV4Archive({ ...archive(), company_result: value })).toBe(false)
   })
 })
 
@@ -179,6 +280,30 @@ describe('v4 完整 WorkRecord 契约', () => {
     expect(isV4WorkRecord(changed(value, 'finance_summary.commercial_share', 195))).toBe(false)
   })
 
+  it('大额财务中间运算使用精确整数，安全整数结果不回绕', () => {
+    const maximum = Number.MAX_SAFE_INTEGER
+    const value = work()
+    value.mode = 'committee'
+    value.investment_percent = 30
+    value.commercial_revenue = maximum - 1
+    value.bd_gross = 0
+    value.bd_revenue = 0
+    value.committee_pool = maximum - 1
+    value.investor_share = 0
+    value.company_received = maximum - 1
+    value.finance_summary = {
+      contract_received: maximum, contract_refund: 0, investment_paid: maximum, commercial_share: maximum - 1,
+      bd_revenue: 0, success_reward: 0, penalty: 0, costs: { production: maximum - 1 }, total_costs: maximum - 1, profit: 0,
+    }
+    value.channel_breakdown = [{
+      window: 'domestic_streaming', potential: maximum - 1, quality_factor: 1000, heat_factor: 1000, reputation_factor: 1000,
+      tv_multiplier: 1000, agency_fee_permille: 0, gross: maximum - 1, net: maximum - 1, revenue: maximum - 1,
+      company_received: maximum - 1, owner: 'committee_pool',
+    }]
+    expect(isV4WorkRecord(value)).toBe(true)
+    expect(isV4WorkRecord(changed(value, 'finance_summary.profit', -1))).toBe(false)
+  })
+
   it('校验中止状态、周、实际违约金与退款利润', () => {
     expect(isV4WorkRecord(abortedWork())).toBe(true)
     expect(isV4WorkRecord(changed(abortedWork(), 'status', 'DELIVERED'))).toBe(false)
@@ -257,13 +382,20 @@ describe('v4 Archive 与系列引用契约', () => {
   it('保留中止履历但拒绝将其写入系列', () => {
     const value = archive()
     value.works[0] = abortedWork()
+    value.company_result = null
     expect(isV4Archive(value)).toBe(true)
     value.series = [{ ip_id: 'ip_01', title: '星海邮差', works: ['work_01'], last_week: 26 }]
     expect(isV4Archive(value)).toBe(false)
   })
 
   it('允许破产终局保留负现金', () => {
-    expect(isV4CompanyResult({ ...result(), reason: 'bankrupt', final_funds: -1 })).toBe(true)
+    const bankrupt = result()
+    bankrupt.reason = 'bankrupt'
+    bankrupt.final_funds = -1
+    bankrupt.net_cash_change = -1001
+    bankrupt.overall.base_ending = 'D'
+    bankrupt.overall.ending = 'D'
+    expect(isV4CompanyResult(bankrupt)).toBe(true)
     expect(isV4CompanyResult({ ...result(), reason: 'voluntary', final_funds: -1 })).toBe(false)
   })
 

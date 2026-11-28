@@ -1,6 +1,7 @@
 #include "apc/v4/kernel.hpp"
 
 #include <algorithm>
+#include <limits>
 #include <map>
 
 namespace apc::v4::kernel {
@@ -17,6 +18,10 @@ constexpr int kFatiguePerPoint = 4;          // 疲劳 0 → 1.00，100 → 0.60
 constexpr int kFitMatch = 1000;
 constexpr int kFitMismatch = 800;
 constexpr int kPointsPerStaffWeek = 100;     // 1 人周 = 100 工作点
+constexpr int kWeeklyExperience = 10;        // 1.0 EXP，内部以 0.1 EXP 为整数单位
+constexpr int kPrimaryExperiencePermille = 1000;
+constexpr int kAssistExperiencePermille = 600;
+constexpr int kPotentialRevealGap = 5;
 constexpr int kHandoverLoss = 250;           // 接手磨合：该员工在该项产出扣 25%
 constexpr int kSupervisorSwitchLoss = 100;   // 监督换项目：团队级扣 10%
 constexpr int kQualityApproach = 300;        // 质量评级向本周样本靠拢 30%
@@ -146,6 +151,77 @@ int capacity_permille(const Staff& staff, const std::string& ability) {
 
 int points_from_capacity(int capacity_permille_value) {
     return capacity_permille_value * kPointsPerStaffWeek / 1000;
+}
+
+int experience_for_participation(bool primary) {
+    return kWeeklyExperience * (primary ? kPrimaryExperiencePermille : kAssistExperiencePermille) / 1000;
+}
+
+namespace {
+
+int interpolate_threshold(int value, int low, int high, int low_cost, int high_cost) {
+    return low_cost + (value - low) * (high_cost - low_cost) / (high - low - 1);
+}
+
+int experience_threshold(int ability) {
+    if (ability < 30) return 10;
+    if (ability < 60) return interpolate_threshold(ability, 30, 60, 10, 16);
+    if (ability < 75) return interpolate_threshold(ability, 60, 75, 35, 65);
+    if (ability < 90) return interpolate_threshold(ability, 75, 90, 100, 200);
+    return interpolate_threshold(ability, 90, 100, 250, 450);
+}
+
+}  // namespace
+
+GrowthResult apply_growth(Staff& staff, const std::array<int, kAbilityCount>& experience_gains) {
+    GrowthResult result;
+    for (int i = 0; i < kAbilityCount; ++i) {
+        const auto index = static_cast<std::size_t>(i);
+        const int cap = staff.potential[index];
+        if (staff.abilities[index] >= cap) {
+            if (!staff.revealed_potential[index]) {
+                staff.revealed_potential[index] = true;
+                result.potential_revealed[index] = true;
+            }
+            continue;
+        }
+        if (cap - staff.abilities[index] <= kPotentialRevealGap && !staff.revealed_potential[index]) {
+            staff.revealed_potential[index] = true;
+            result.potential_revealed[index] = true;
+        }
+        const int before = staff.abilities[index];
+        const int gain = std::max(0, experience_gains[index]);
+        if (gain == 0) continue;
+        std::int64_t accumulated = static_cast<std::int64_t>(staff.experience[index]) + gain;
+        result.experience_gain[index] = gain;
+        while (staff.abilities[index] < cap && accumulated >= experience_threshold(staff.abilities[index])) {
+            accumulated -= experience_threshold(staff.abilities[index]);
+            ++staff.abilities[index];
+        }
+        staff.experience[index] = static_cast<int>(std::min<std::int64_t>(
+            accumulated, std::numeric_limits<int>::max()));
+        result.ability_gain[index] = staff.abilities[index] - before;
+        if (staff.abilities[index] >= cap) {
+            if (!staff.revealed_potential[index]) {
+                staff.revealed_potential[index] = true;
+                result.potential_revealed[index] = true;
+            }
+        } else if (cap - staff.abilities[index] <= kPotentialRevealGap && !staff.revealed_potential[index]) {
+            staff.revealed_potential[index] = true;
+            result.potential_revealed[index] = true;
+        }
+    }
+    return result;
+}
+
+bool reveal_next_potential(Staff& staff) {
+    for (int i = 0; i < kAbilityCount; ++i) {
+        const auto index = static_cast<std::size_t>(i);
+        if (staff.revealed_potential[index]) continue;
+        staff.revealed_potential[index] = true;
+        return true;
+    }
+    return false;
 }
 
 namespace {

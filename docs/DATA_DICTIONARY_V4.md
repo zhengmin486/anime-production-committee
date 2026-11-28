@@ -90,12 +90,15 @@ GameState {
 | 字段 | 类型 | 可空 | 说明 | 状态 |
 | --- | --- | --- | --- | --- |
 | `id` `name` `founded_week` `week` `status` `reputation` `reputation_log` | — | 否 | M0 §3 必填 | `实现` |
-| `end_reason` | string\|null | 是（仅 `running` 为 null） | M0 §3 | `实现` |
+| `end_reason` | string\|null | 是 | `voluntary/time_limit/bankrupt`；`time_limit` 必须发生在第 520 周；running 必须为 null，closing/ended 必须填写，主动关闭路径写 voluntary | `实现` |
 | `facilities` | Facility[] | 是（可空数组） | §14.7 阶段 2 的设施维护费、§14.9 扩容的数据前提 | `待实现`——代码无此字段 |
 | `core_staff_capacity` | int | — | §14.9 / #63：由设施扩建等级派生，仅统计核心员工 | `实现`（开局 4 人）；设施升级与派生阶梯待实现，不存入存档 |
 | `status` 取值 | `running/closing/ended` | — | `runtime.cpp` 校验 | `实现` |
 | `week` ∈ [0,520] ∧ `running ⇒ week<520` | — | — | INV-21 | `实现` |
+| `reputation` ≥ 0 | int64 | 否 | 公司声望快照；负值在状态入口拒绝 | `实现` |
 | `reputation_log[]` | `{week, reason, delta, after}` | — | DA §7.2 | `实现` |
+
+前端 `companyReputationProfile` 是按 DEC-REP-001 / DEC-COMPANY-004 / DEC-STAFF-009 派生的只读剖面，不写入存档或改变 hash：展示 T0–T7、行业定位、下一档门槛、临时候选能力区间及弹性工位上限。T7 无下一档，1M 只是巅峰标杆而非数值上限；临时工用量按当前在册 `employment=temporary` 人数统计。
 
 ### 3.2 `Staff`
 
@@ -104,7 +107,7 @@ GameState {
 | 字段 | 类型 | 可空/默认 | 状态 | 备注 |
 | --- | --- | --- | --- | --- |
 | `id name role employment fatigue morale departure_warning assignment_work_id` | — | 必填 | `实现` | 与 M0 §3 一致 |
-| `abilities` `experience` `potential` `revealed_potential` | **对象**（非数组） | 必填 | `实现` | 固定 6 键：`planning/direction/drawing/animation/management/postproduction`；C++ 是 `std::array`，JSON 是对象 |
+| `abilities` `experience` `potential` `revealed_potential` | **对象**（非数组） | 必填 | `实现` | 固定 6 键：`planning/direction/drawing/animation/management/postproduction`；C++ 是 `std::array`，JSON 是对象；能力/潜力为 0..100，经验为非负 int32 |
 | `talent_type` `weekly_salary` `signing_fee` | string / int | 必填 | `实现` | `signing_fee` 默认 0；V4 不再使用 project_fee，历史 v3 字段按 `historical_fields` 隔离 |
 | `project_fee` | int | — | `historical_fields` | 仅 v3 历史字段；M0 §3/§14.6 已由 `signing_fee + weekly_salary` 取代，V4 Schema 禁止出现 |
 | `assignment_work_id` | string\|null | 是 | `实现` | INV-09/10；核心员工单项目归属，临时员工归属必须与合同项目一致 |
@@ -153,7 +156,7 @@ GameState {
 | 无 `status` 字段（全派生） | INV-05 | `待实现`（无断言） |
 | `contributors` 只增不删、无重复、只含参与过者 | INV-12 | `实现` |
 | 工作项 id 前缀 `<work_id>.<key>` | 保证 INV-02 唯一 | `实现` |
-| 主责/协力档位 | 由 kernel 派生，不入存档 | `待裁决` D-04 |
+| 主责/协力档位 | 由 kernel 按本周同工作项正产出最高者派生，最高者获 100% 经验、其余协力获 60%；不进入存档或周回执 | `待标定`；当前为模块内确定性实现假设，档位是否回显仍登记 D-04 |
 
 ### 3.6 `Finance`
 
@@ -161,7 +164,7 @@ GameState {
 
 | 字段 | 分类 | 当前约束 | 说明 |
 | --- | --- | --- | --- |
-| `opening_funds` `balance` `entries[]` | `实现` | `balance = opening_funds + Σentries.amount`；running 时 ≥0，bankrupt 的 closing/ended 允许负余额 | INV-16/INV-25；Finance 是现金唯一权威 |
+| `opening_funds` `balance` `entries[]` | `实现` | `balance = opening_funds + Σentries.amount`；流水求和与期初相加均拒绝 int64 溢出/回绕；running 时 ≥0，bankrupt 的 closing/ended 允许负余额 | INV-16/INV-25；Finance 是现金唯一权威 |
 | `loans` | `reserved_fields` | 必填，当前恒为 `[]` | M0 §3/INV-18/DECISION_LOG §7 明确保留；非空数组或错误类型拒绝 |
 | `solvency{state,since_week,deadline_week,gap}` | `reserved_fields` | 必填；`state="normal"`、`since_week=null`、`deadline_week=null`、`gap=0` | `state="crisis"` 拒绝；不得绕过 INV-25 |
 | `entries[]` 形状 | `实现` | `{id, week, work_id\|null, category, amount, counterparty\|null, memo}` | 与 DA §7.5 一致 |
@@ -224,7 +227,7 @@ GameState {
 - `investor_share = committee_pool - (commercial_share - bd_revenue)`。
 - `company_received = commercial_share + success_reward`。
 - `Σcosts = total_costs`；允许类目为 salary/production/temporary/outsourcing/events/extension/distribution/penalty/development，不要求全部出现。
-- `profit = contract_received - contract_refund + commercial_share + success_reward - investment_paid - total_costs`。penalty 已计入 costs 时不再重复扣除。
+- `profit = contract_received - contract_refund + commercial_share + success_reward - investment_paid - total_costs`。penalty 已计入 costs 时不再重复扣除。C++ 以有符号 int64 安全逐次减法对账，拒绝中间下溢或回绕；TypeScript 以 BigInt 计算中间值，但只接受 JS 安全整数载荷。
 
 `episodes[]` 当前固定为 `{id, quality}`；`team[]` 当前固定为 `{id, name, role}`，角色枚举与项目岗位快照一致，接受旧七岗位代码以及 DEC-STAFF-006 的八职业身份（作画/演出/脚本/摄影/监督/音乐/声优/美术）。完整键树见 `docs/v4-contract-shape.json`，TypeScript 守卫见 `apps/web/src/types/gameV4.ts`，不得用 v3 WorkRecord 代替。
 
@@ -239,7 +242,23 @@ GameState {
 
 #### 3.9.3 `CompanyResult` 与 v3 隔离
 
-v4 固定九字段：`reason/weeks/final_funds/net_cash_change/total_projects/best_work_id/rating/highlights/negatives`。reason 为 time_limit/bankrupt/voluntary，rating 为 S/A/B/C/D；time_limit 的 weeks 必须为 520。项目数、评级和最佳作品与 Archive.works 一致；评分并列时取 Archive 中首条。bankrupt 的 final_funds 允许为负，其余原因必须非负。v3 的七字段结果与 renowned/stable/small/failed 评级只保留在 `gameV3.ts`，v4 使用独立 `gameV4.ts` 子契约。
+v4 `CompanyResult` 固定 15 个根字段：`reason/weeks/final_funds/net_cash_change/total_projects/best_work_id/rating/overall/commercial/reputation/team/best_work/evaluations/highlights/negatives`。reason 为 time_limit/bankrupt/voluntary；time_limit 的 weeks 必须为 520。bankrupt 的 final_funds 允许为负，其余原因必须非负。`archive.company_result` 非空时公司必须为 ended；ended 尚未调用 finalize_company 时允许为空。v3 的七字段结果与 renowned/stable/small/failed 评级只保留在 `gameV3.ts`。
+
+| 分组 | 固定字段 | 语义与约束 |
+| --- | --- | --- |
+| 终局身份 | `reason, weeks, final_funds, net_cash_change, total_projects` | 现金变化等于最终资金减期初资金；作品数等于 Archive.works 长度 |
+| 旧质量评级 | `rating` | 全部 Archive 作品平均质量的 S/A/B/C/D；空归档为 D，不是公司综合结局 |
+| 综合评价 | `overall` | `score/max_score/quality/finance/influence/team/base_ending/achievement_promotions/ending/evaluation_model`；满分 70，模型固定 `m5_company_v1 / candidate` |
+| 商业累计 | `commercial` | `completed_projects/unfinished_projects/gross_revenue/company_revenue/project_profit`；正常完成指 `end_reason≠aborted && !forced`，两类项目数之和等于总作品数 |
+| 声望 | `reputation` | 终局公司声望快照 |
+| 团队 | `team` | `core_staff_count/temporary_staff_count/average_ability/current_experience/revealed_potential_dimensions/maxed_dimensions/core_members`；聚合值由核心成员精确重算 |
+| 核心成员 | `team.core_members[]` | `id/name/role/abilities/experience/revealed_potential/maxed_dimensions/representative_work_id/works`；只覆盖终局仍在册核心员工，works 按 Archive 顺序，代表作为其中质量最高且同分取首条 |
+| 最佳作品 | `best_work_id, best_work` | 全部 Archive 中质量最高且同分取首条；`best_work={id,name,rating,quality_score,team}`，team 是交付时快照；无作品时两者均为 null |
+| 特殊评价 | `evaluations` | `{code,label,polarity}`；code 唯一，positive/negative 可并存；旧 `highlights/negatives` 保留兼容文案 |
+
+`overall.ending` 是公司综合结局，`rating` 仍只表示作品平均质量，两者不得混用。基础档按 56/48/36/24 分界为 S/A/B/C/D；正常完成作品出现质量 ≥90 的代表作、商业/利润达到期初资金倍率、声望达到 T5 可跨档，破产强制 D。所有权重、门槛和倍率均为 **ASSUMPTION / candidate**，完整公式见数值总清单 §21.1，不代表经济平衡验收。
+
+`team.current_experience` 是核心成员当前升级阈值内经验的总和，不是终身累计经验。终局快照不包含潜力数值，只记录潜力是否揭示与触顶维度，不补猜上限，也不生成离职员工命运；工作台只对已揭示维度显示 MAX，聚合展示也排除未揭示触顶事实。C++ INV-22 从有效状态与 Archive 精确重算整个 `CompanyResult`；TypeScript 在结构校验后重算累计值、分数、评价和员工作品引用，并在 GameState 层比对当前 Company、Finance、Staff 与终局快照。两端共同拒绝未知终局原因、非 520 周的 time_limit、running 携带终局原因、closing/ended 缺少终局原因、非 ended 状态携带 company_result，以及当前员工/公司/资金被篡改而总结未同步更新的存档。
 
 ### 3.10 `Supplier` / `OutsourceContract` / `Partner` / `Committee` / `MarketState`
 
@@ -376,7 +395,10 @@ M0 §5 的 23 条命令均已有入口。`NOT_IMPLEMENTED` 不再用于非整除
 report {
   week: int
   works[]: { work_id, total_points, items[]{item_id, points, quality_gain}, quality{dims, mean} }
-  staff[]: { staff_id, produced, fatigue, morale }
+  staff[]: {
+    staff_id, produced, fatigue, morale,
+    growth: { experience_gain{ability: int}, ability_gain{ability: int}, potential_revealed[ability] }
+  }
   settlements[]: { work_id, end_reason, archived, rating, penalty, ... }
   events: { drawn, count, events[]{event_id, work_id}, expired[]{work_id, event_id, option_id, automatic} }
   funds:  { delta, balance, costs{salary, operations, production} }
@@ -386,6 +408,9 @@ report {
 
 - 破产回执使用 `mode="bankrupt"`、`bankrupt=true`、`skipped=true`、`gap`，`works/staff/settlements` 为空，`funds.delta=0`。
 - `funds.costs` 只有 3 个键，与 14 类 category 不对应，登记 D-13。
+- `report.staff[].growth` 是周成长增量快照：`experience_gain` 与 `ability_gain` 只含正增长能力键，内部经验单位为 **0.1 EXP**（`10` = `1.0 EXP`）；`potential_revealed` 只含本周新揭示的能力。临时员工仍返回三键，但增长为空。该回执不持久化，新游戏和读档后前端清空。
+- 同一员工本周参与多个工作项时，同一能力取最高经验系数，不重复叠加；监督仅在本项目实际正产出（含外包正增量）且为核心员工时按主责系数获得 `direction/management` 经验。这是待 M7 标定的模块内假设，不是新增冻结规则。
+- `report.settlements[].growth.potential_revealed[]` 在非中止且非强制交付时返回 `{staff_id, potential_revealed[]}`，记录本次完整交付实际核心贡献者（含监督）新揭示的潜力维度；中止与强制交付为空数组。当前每次完整交付按能力数组顺序揭示首个未揭示维度，尚未记录跨作品的 1–2 部计数。
 - `report` 不是 DA §9.4 的 `WeekReceipt`；后者是前端派生读模型，边界见 D-14。
 - `report.outsourcing[]` 只在存在外包合同 tick 时出现，固定六字段；`result` 为 normal/delay/rework，`status` 为结算后的合同状态。没有合同时省略该数组，不影响 `report` 根七字段。
 - 交付/结清的 `report.settlements[]` 同时记录 `bd_gross`（BD/DVD 毛收入）与 `bd_revenue`（公司 50% 所得）；`commercial_revenue` 为全部开放窗口毛收入，`committee_pool` 为非 BD 净池，`commercial_share + investor_share = committee_pool`。
@@ -427,7 +452,7 @@ M0 §5 的“工作副本 + 一次提交”在已实现命令上成立：守卫�
 | 2 | 刚性支出预检 | `实现`；不足直接破产，pending 按冻结默认分支结清 |
 | 3 | 刚性支出扣款 | `实现`；核心/临时员工周薪均走唯一流水 |
 | 4 | 项目生产推进 | `实现` |
-| 5 | 经验/疲劳/红灯 | 经验/疲劳/士气 `实现`；`forced_rest` 未实现 |
+| 5 | 经验/疲劳/红灯 | 正产出经验、主责/协力系数、监督专项经验、分段升级/溢出/触顶、接近上限与完整交付潜力揭示已实现；疲劳/士气 `实现`；`forced_rest` 未实现 |
 | 6 | 商业窗口与交付收入 | `实现`；含委员会分账与强制交付扣罚 |
 | 7 | 延迟状态倒计时 | 限时事件默认分支 `实现`；DEC-EVENT-002 一次升级已冻结，代码由独立工作树收尾 |
 | 8 | 随机事件与周数递增 | `实现`；第 520 周 pending 按冻结默认分支结清后关闭 |
@@ -498,7 +523,7 @@ M0 §4 共 **29 条**。当前 `validate()` 实际断言 **22 条**：`INV-01/02
 | D-01 | `loans/solvency` 删除议题 | **已确认保留** | §3.6；M0 §3/INV-18；DECISION_LOG §7 | 归入 `reserved_fields`；审计存在性、默认值和行为边界，不再建议删除 |
 | D-02 | `project_fee → signing_fee` | **已确认** | §3.2；M0 §3/§14.6 | V4 仅 `signing_fee`；v3 `project_fee` 保留为 `historical_fields` |
 | D-03 | 监督岗位数据形状 | C | §3.2；DEC-STAFF-008 | 字段/INV-27/原子换岗已实现；非基础职业转任阈值仍待裁决 |
-| D-04 | 主责/协力档位是否进回执 | B/C | §3.5 | 建议读模型，不入存档 |
+| D-04 | 主责/协力档位是否进回执 | B/C | §3.5 | 当前按同工作项本周正产出最高者派生且不回显；并列按 staff id；跨工作项同能力取最高系数，均待 #54 标定，建议读模型、不入存档 |
 | D-05 | 根 version/seed 必填 | C | §2 | 建议 seed 必填 |
 | D-06 | Project.offer 缺失/{}/null | C | §3.3 | 建议统一为 null |
 | D-07 | 未冻结载荷 | B | §3.11 | 随对应命令冻结 |
@@ -562,7 +587,7 @@ npm run test:v4 && npm run audit:v4
 | Staff 静态字段与 `signing_fee/weekly_salary` | initialize；hire_core 解包入册 | 唯一 | 不再使用 `project_fee` |
 | `recruitment.pool/pity/last_scout_week` | initialize；scout/hire_core；advance_week 轮换 | Staff 域唯一 | M0 §14.13.1；dismiss_staff 只移名册不动池 |
 | `fatigue/morale` | advance_week 与事件效果 | 多写 + 代写 | P1-G2 |
-| `experience` | advance_week | 唯一 | 事件效果不包含 exp |
+| `abilities/experience/potential/revealed_potential` | initialize/recruit；advance_week 写能力与经验；advance_week/完整交付写揭示 | Staff 成长函数唯一 | 六维独立；临时员工不成长；接近上限 gap≤5 与每次完整交付揭示一维为待标定实现假设 |
 | `assignment_work_id` | start_work/assign_staff；事件替换；交付/关闭释放 | 唯一 | INV-09/INV-27 |
 | `last_participation` | advance_week | 唯一 | INV-11 |
 

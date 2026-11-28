@@ -1,12 +1,13 @@
 import { create } from 'zustand'
 import { callV4Core, initializeGameV4, type V4CoreMethod } from '../services/gameCoreV4'
 import { loadGameV4, saveGameV4, V4_RULES_VERSION } from '../services/saveGameV4'
-import type { V4GameState } from '../types/gameV4State'
+import { isV4WeekReport, type V4GameState, type V4WeekReport } from '../types/gameV4State'
 
 type StateCommand = Exclude<V4CoreMethod, 'initialize_game' | 'hash_state'>
 
 interface GameStoreV4 {
   game: V4GameState | null
+  lastReport: V4WeekReport | null
   busy: boolean
   error: string | null
   notice: string | null
@@ -54,6 +55,7 @@ export const useGameStoreV4 = create<GameStoreV4>((set, get) => {
 
   return {
     game: null,
+    lastReport: null,
     busy: false,
     error: null,
     notice: null,
@@ -61,13 +63,14 @@ export const useGameStoreV4 = create<GameStoreV4>((set, get) => {
     saveConflict: false,
     start: (seed) => run(async () => {
       const { state } = await initializeGameV4(startingSeed(seed))
-      return { game: state, rulesWarning: false }
+      return { game: state, lastReport: null, rulesWarning: false }
     }),
     load: () => run(async () => {
       const loaded = await loadGameV4()
       return loaded
         ? {
             game: loaded.state,
+            lastReport: null,
             rulesWarning: loaded.rulesVersion !== V4_RULES_VERSION,
             notice: loaded.rulesVersion === V4_RULES_VERSION ? '已读取本地存档。' : '规则已更新，数值可能与存档时不同。',
           }
@@ -91,8 +94,12 @@ export const useGameStoreV4 = create<GameStoreV4>((set, get) => {
       if (!game) return Promise.resolve(false)
       return run(async () => {
         const response = await callV4Core(method, { ...input, state: game })
+        if (method === 'advance_week' && !isV4WeekReport(response.report)) {
+          throw new Error('周结算回执格式无效，当前经营数据未改变。')
+        }
         return {
           game: response.state,
+          ...(method === 'advance_week' ? { lastReport: response.report as V4WeekReport } : {}),
           notice: typeof response.message === 'string' ? response.message : null,
         }
       }).then(() => get().error === null)

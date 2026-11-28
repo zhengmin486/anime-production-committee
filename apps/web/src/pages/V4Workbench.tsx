@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useGameStoreV4 } from '../stores/gameStoreV4'
-import type { V4CooperationMode, V4PartnershipChannel } from '../types/gameV4'
-import type { V4GameState, V4JsonObject, V4Project, V4WorkItem } from '../types/gameV4State'
+import { companyReputationProfile, type V4CompanyResult, type V4CooperationMode, type V4PartnershipChannel, type V4WorkRecord } from '../types/gameV4'
+import { V4_ABILITIES, type V4GameState, type V4JsonObject, type V4Project, type V4Staff, type V4WeekReport, type V4WorkItem } from '../types/gameV4State'
 import './V4Workbench.css'
 
 const money = (value: number) => `¥${value.toLocaleString('zh-CN')}`
@@ -15,6 +15,12 @@ const abilityLabel: Record<string, string> = {
   planning: '企划', direction: '演出', drawing: '作画', animation: '动画', management: '管理', postproduction: '后期',
 }
 const workStatus: Record<string, string> = { producing: '制作中', delivering: '待结清', delivered: '已交付', aborted: '已中止' }
+const endReasonLabel: Record<V4CompanyResult['reason'], string> = { voluntary: '主动结束', time_limit: '十年期满', bankrupt: '破产清算' }
+const experienceText = (value: number) => (value / 10).toFixed(1).replace(/\.0$/, '')
+const potentialSummary = (member: V4Staff) => {
+  const revealed = V4_ABILITIES.filter((ability) => member.revealed_potential[ability]).map((ability) => member.potential[ability])
+  return revealed.length > 0 ? `已揭示潜力 ${Math.min(...revealed)}–${Math.max(...revealed)}` : '潜力未揭示'
+}
 
 function itemsOf(work: V4Project): V4WorkItem[] {
   return [...work.common.items, ...work.episodes.flatMap((episode) => episode.stages.flatMap((stage) => stage.items))]
@@ -27,8 +33,8 @@ function progressOf(work: V4Project) {
 }
 export default function V4Workbench() {
   const store = useGameStoreV4()
-  const { game, busy, error, notice, rulesWarning, saveConflict } = store
-  const [tab, setTab] = useState<'market' | 'production' | 'committee' | 'ledger'>('market')
+  const { game, lastReport, busy, error, notice, rulesWarning, saveConflict } = store
+  const [tab, setTab] = useState<'market' | 'production' | 'staff' | 'committee' | 'ledger'>('market')
   const [selectedOfferId, setSelectedOfferId] = useState<string | null>(null)
   const [mode, setMode] = useState<V4CooperationMode>('contract')
   const [percent, setPercent] = useState(50)
@@ -101,6 +107,8 @@ export default function V4Workbench() {
 
   const activeWorks = game.works.filter((work) => work.status === 'producing')
   const unviewedEvents = game.events.pending.filter((event) => !event.viewed).length
+  const reputationProfile = companyReputationProfile(game.company.reputation)
+  const temporaryStaffCount = game.staff.filter((member) => member.employment === 'temporary').length
   const reserved: (V4JsonObject & { used: number })[] = game.suppliers.map((supplier) => ({
     ...supplier,
     used: game.contracts.filter((contract) => contract.status === 'active' && contract.supplier_id === supplier.id)
@@ -121,12 +129,17 @@ export default function V4Workbench() {
       <div className="v4-week"><span>当前周</span><strong data-testid="week">{String(game.company.week).padStart(3, '0')}</strong><small>/ 520</small></div>
       <div className="v4-metric"><span>公司现金</span><strong data-testid="balance">{money(game.finance.balance)}</strong><small className={reconciled ? '' : 'v4-error'}>{reconciled ? '流水对账一致' : '流水对账异常'}</small></div>
       <div className="v4-metric"><span>制作项目</span><strong>{activeWorks.length}</strong><small>累计交付 {game.archive.works.length} 部</small></div>
-      <div className="v4-metric"><span>声望</span><strong>{game.company.reputation}</strong><small>市场热度 {Object.values(game.market.heat).map((heat) => heat.level).join(' / ') || '—'}</small></div>
+      <div className="v4-metric v4-reputation"><span>声望</span><strong>{game.company.reputation}</strong><div className="v4-reputation-profile">
+        <small>{reputationProfile.tier_label} · {reputationProfile.industry_position}</small>
+        <small>{reputationProfile.next_tier ? `距 T${reputationProfile.next_tier.tier} ${(reputationProfile.next_tier.min_reputation - game.company.reputation).toLocaleString('zh-CN')}` : '1M 为巅峰标杆，仍可增长'}</small>
+        <small>临时候选能力 {reputationProfile.temporary_ability_range.min}–{reputationProfile.temporary_ability_range.max} · 弹性工位 {temporaryStaffCount}/{reputationProfile.flexible_staff_capacity}</small>
+        <small>市场热度 {Object.values(game.market.heat).map((heat) => heat.level).join(' / ') || '—'}</small>
+      </div></div>
       <div className="v4-week-control"><button className="v4-button v4-primary" data-testid="advance-week" disabled={busy || game.company.status !== 'running' || unviewedEvents > 0} onClick={() => store.command('advance_week')}>推进本周 <span aria-hidden="true">→</span></button><small>{unviewedEvents ? '请先在制作与外包中查看待办事件' : game.events.pending.length ? '已查看事件可继续推进，未处理事件将保留' : '人员周薪与外包在推进时结算'}</small></div>
     </section>
 
     <nav className="v4-tabs" aria-label="工作台分区">
-      {([['market', '企划市场'], ['production', '制作与外包'], ['committee', '委员会与 Archive'], ['ledger', '公司账本']] as const).map(([id, label]) =>
+      {([['market', '企划市场'], ['production', '制作与外包'], ['staff', '员工成长'], ['committee', '委员会与 Archive'], ['ledger', '公司账本']] as const).map(([id, label]) =>
         <button key={id} aria-current={tab === id ? 'page' : undefined} onClick={() => setTab(id)}>{label}{id === 'production' && activeWorks.length > 0 ? <span>{activeWorks.length}</span> : null}{id === 'committee' && game.committees.some((entry) => entry.status === 'active') ? <span>委员会</span> : null}</button>)}
     </nav>
 
@@ -193,24 +206,26 @@ export default function V4Workbench() {
       <ClosingPanel game={game} busy={busy} run={store.command} confirmClose={confirmClose} setConfirmClose={setConfirmClose} />
     </section>}
 
+    {tab === 'staff' && <StaffGrowthPanel game={game} lastReport={lastReport} />}
+
     {tab === 'committee' && <section className="v4-section" aria-labelledby="archive-title">
-      <div className="v4-section-title"><div><p className="v4-index">03 / PARTNERSHIP</p><h2 id="archive-title">委员会与 Archive</h2></div><p>最大余数法分配整数收益；渠道展示拆分不改变公司应收总额。</p></div>
+      <div className="v4-section-title"><div><p className="v4-index">04 / PARTNERSHIP</p><h2 id="archive-title">委员会与 Archive</h2></div><p>最大余数法分配整数收益；渠道展示拆分不改变公司应收总额。</p></div>
       <div className="v4-committee-grid">{game.committees.length === 0 ? <p className="v4-empty">尚未组建委员会。</p> : game.committees.map((committee) => {
         const work = game.works.find((entry) => entry.id === committee.work_id) ?? game.archive.works.find((entry) => entry.id === committee.work_id)
         const members = Array.isArray(committee.members) ? committee.members as V4JsonObject[] : []
         return <article className="v4-committee" key={text(committee.id)}><div className="v4-subheading"><h3>{work ? ('offer' in work ? work.offer.name : work.name) : text(committee.work_id)}</h3><span>{text(committee.status)}</span></div><p>W{number(committee.formed_week)} 组建 · {text(committee.closed_week, '尚未关闭')}</p><ul>{members.map((member) => <li key={text(member.partner_id)}>{text(game.partners.find((partner) => partner.id === member.partner_id)?.name, text(member.partner_id))}<span>{windowLabel[member.channel as V4PartnershipChannel] ?? text(member.channel)}</span></li>)}</ul></article>
       })}</div>
+      {game.archive.company_result && <CompanyResultPanel result={game.archive.company_result} works={game.archive.works} />}
       <div className="v4-archive-list">{game.archive.works.length === 0 ? <p className="v4-empty">交付后，作品报告、团队与逐渠道分账会归档在这里。</p> : [...game.archive.works].reverse().map((work) => <article className="v4-archive-card" key={work.id}>
         <header><div><span className="v4-tag">{modeLabel(work.mode)} · {work.source}</span><h3>{work.name}</h3></div><div className="v4-rating"><span>评级</span><strong>{work.rating}</strong></div></header>
         <dl><div><dt>结束周 / 原因</dt><dd>W{work.end_week} · {work.end_reason}</dd></div><div><dt>质量</dt><dd>{work.quality_score}</dd></div><div><dt>BD/DVD 公司净收</dt><dd>{money(work.bd_revenue)}</dd></div><div><dt>委员会池</dt><dd>{money(work.committee_pool)}</dd></div><div><dt>商业应收合计</dt><dd>{money(work.finance_summary.commercial_share)}</dd></div><div><dt>项目归因利润</dt><dd>{money(work.finance_summary.profit)}</dd></div></dl>
         <div className="v4-table-wrap"><table><caption>逐渠道结算对账</caption><thead><tr><th>渠道</th><th>总票房</th><th>净额</th><th>归属</th><th>公司实收</th></tr></thead><tbody>{work.channel_breakdown.map((channel) => <tr key={channel.window}><th>{windowLabel[channel.window]}</th><td>{money(channel.gross)}</td><td>{money(channel.net)}</td><td>{channel.owner === 'company' ? '公司' : '委员会池'}</td><td>{money(channel.company_received)}</td></tr>)}</tbody><tfoot><tr><th>合计</th><td>{money(work.commercial_revenue)}</td><td>{money(work.committee_pool + work.bd_revenue)}</td><td>—</td><td>{money(work.finance_summary.commercial_share)}</td></tr></tfoot></table></div>
         <p className="v4-fineprint">Archive 为公司应收归因，不另设项目现金池。团队：{work.team.map((member) => member.name).join('、') || '无'}。</p>
       </article>)}</div>
-      {game.archive.company_result && <section className="v4-company-result"><p className="v4-index">FINAL REPORT</p><h3>{text(game.archive.company_result.reason)} · {game.archive.company_result.rating} 级</h3><p>经营 {game.archive.company_result.weeks} 周 · 完成 {game.archive.company_result.total_projects} 部 · 净现金变化 {money(game.archive.company_result.net_cash_change)}</p></section>}
     </section>}
 
     {tab === 'ledger' && <section className="v4-section" aria-labelledby="ledger-title">
-      <div className="v4-section-title"><div><p className="v4-index">04 / RECONCILIATION</p><h2 id="ledger-title">公司账本</h2></div><p>按周追加的公司现金流水；项目字段仅用于归因。</p></div>
+      <div className="v4-section-title"><div><p className="v4-index">05 / RECONCILIATION</p><h2 id="ledger-title">公司账本</h2></div><p>按周追加的公司现金流水；项目字段仅用于归因。</p></div>
       <div className="v4-ledger-summary"><div><span>期初资金</span><strong>{money(game.finance.opening_funds)}</strong></div><span aria-hidden="true">＋</span><div><span>流水合计</span><strong>{money(ledgerTotal)}</strong></div><span aria-hidden="true">＝</span><div><span>当前现金</span><strong>{money(game.finance.balance)}</strong></div><b className={reconciled ? 'v4-ok' : 'v4-error'}>{reconciled ? '对账通过' : '对账失败'}</b></div>
       <div className="v4-supplier-strip">{reserved.map((supplier) => <div key={text(supplier.id)}><span>{text(supplier.name)}</span><strong>{supplier.used} / {number(supplier.capacity_per_week)}</strong><small>周产能预留</small></div>)}</div>
       <div className="v4-table-wrap"><table><caption>最近 80 笔公司现金流水</caption><thead><tr><th>周</th><th>类目</th><th>项目归因</th><th>对方</th><th>摘要</th><th>金额</th></tr></thead><tbody>{[...game.finance.entries].reverse().slice(0, 80).map((entry) => <tr key={entry.id}><th>W{entry.week}</th><td>{entry.category}</td><td>{entry.work_id ?? '公司'}</td><td>{entry.counterparty ?? '—'}</td><td>{entry.memo}</td><td className={entry.amount < 0 ? 'v4-negative' : 'v4-positive'}>{entry.amount > 0 ? '+' : ''}{money(entry.amount)}</td></tr>)}</tbody></table>{game.finance.entries.length === 0 && <p className="v4-empty">尚无现金流水。</p>}</div>
@@ -221,6 +236,153 @@ export default function V4Workbench() {
 }
 
 type Run = (method: Parameters<ReturnType<typeof useGameStoreV4.getState>['command']>[0], input?: Record<string, unknown>) => Promise<boolean>
+
+function StaffGrowthPanel({ game, lastReport }: { game: V4GameState; lastReport: V4WeekReport | null }) {
+  const reports = new Map(lastReport?.staff.map((entry) => [entry.staff_id, entry]) ?? [])
+  const changedCount = lastReport?.staff.filter((entry) => Object.keys(entry.growth.experience_gain).length > 0
+    || Object.keys(entry.growth.ability_gain).length > 0 || entry.growth.potential_revealed.length > 0).length ?? 0
+  return <section className="v4-section" aria-labelledby="staff-growth-title">
+    <div className="v4-section-title"><div><p className="v4-index">03 / STAFF GROWTH</p><h2 id="staff-growth-title">员工成长</h2></div><p>只有实际正产出才获得经验；主责与协力系数由核心结算，潜力未揭示时不显示上限。</p></div>
+    <div className="v4-growth-receipt" role="status" aria-live="polite">
+      <strong>{lastReport ? `最近推进回执 · 结算周 W${lastReport.week}` : '尚无周结算回执'}</strong>
+      <span>{lastReport ? changedCount > 0 ? `${changedCount} 名员工获得经验或潜力揭示` : '本次推进没有员工成长变化' : '推进本周后，这里会显示经验、能力升级与潜力揭示。'}</span>
+    </div>
+    <div className="v4-growth-grid">{game.staff.map((member) => {
+      const growth = reports.get(member.id)?.growth
+      const project = game.works.find((work) => work.id === member.assignment_work_id)
+      return <article className="v4-growth-card" key={member.id}>
+        <header><div><span className="v4-tag">{member.employment === 'temporary' ? 'TEMPORARY' : member.role}</span><h3>{member.name}</h3><p>{project?.offer.name ?? '公司空闲'} · 疲劳 {member.fatigue} · 士气 {member.morale}</p></div><span className="v4-seal">{member.employment === 'temporary' ? '临时' : '核心'}</span></header>
+        {member.employment === 'temporary' && <p className="v4-fineprint">临时员工不进入长期成长，结项后退出名册。</p>}
+        <div className="v4-ability-list">{V4_ABILITIES.map((ability) => {
+          const current = member.abilities[ability]
+          const revealed = member.revealed_potential[ability]
+          const potential = member.potential[ability]
+          const maxed = revealed && current >= potential
+          const experienceGain = growth?.experience_gain[ability] ?? 0
+          const abilityGain = growth?.ability_gain[ability] ?? 0
+          const justRevealed = growth?.potential_revealed.includes(ability) ?? false
+          return <div className={`v4-ability-row ${maxed ? 'is-maxed' : ''}`} key={ability}>
+            <div className="v4-ability-heading"><span>{abilityLabel[ability]}</span><strong>{current}{revealed ? ` / ${potential}` : ''}{maxed ? ' MAX' : ''}</strong></div>
+            {revealed ? <progress max={100} value={current} aria-label={`${member.name} ${abilityLabel[ability]} 潜力进度`} /> : <div className="v4-growth-hidden" aria-hidden="true" />}
+            <small>经验 {experienceText(member.experience[ability])}{revealed ? maxed ? ' · 已触顶' : '' : ' · 潜力未揭示'}</small>
+            {(experienceGain > 0 || abilityGain > 0 || justRevealed) && <div className="v4-growth-badges">
+              {experienceGain > 0 && <span>EXP +{experienceText(experienceGain)}</span>}
+              {abilityGain > 0 && <span>能力 +{abilityGain}</span>}
+              {justRevealed && <span>潜力揭示</span>}
+            </div>}
+          </div>
+        })}</div>
+      </article>
+    })}</div>
+    {game.staff.length === 0 && <p className="v4-empty">当前没有在册员工。</p>}
+  </section>
+}
+
+function CompanyResultPanel({ result, works }: { result: V4CompanyResult; works: V4WorkRecord[] }) {
+  const workNames = new Map(works.map((work) => [work.id, work.name]))
+  const workName = (id: string | null) => id === null ? '暂无代表作' : workNames.get(id) ?? id
+  const positive = result.evaluations.filter((entry) => entry.polarity === 'positive')
+  const negative = result.evaluations.filter((entry) => entry.polarity === 'negative')
+  const revealedMaxed = result.team.core_members.reduce((sum, member) => sum
+    + member.maxed_dimensions.filter((ability) => member.revealed_potential[ability]).length, 0)
+  const scores = [
+    { label: '作品质量', value: result.overall.quality, max: 20, note: '全部归档作品平均质量' },
+    { label: '公司财务', value: result.overall.finance, max: 20, note: '期初资金与净现金变化' },
+    { label: '行业影响', value: result.overall.influence, max: 15, note: '最终声望与正常完成作品数' },
+    { label: '核心团队', value: result.overall.team, max: 15, note: '能力 10 分＋经验成熟度 5 分' },
+  ]
+  return <section className="v4-company-result" aria-labelledby="company-result-title" data-testid="company-result">
+    <header className="v4-final-heading">
+      <div>
+        <p className="v4-index">FINAL REPORT / M5</p>
+        <span className="v4-tag">{endReasonLabel[result.reason]}</span>
+        <h2 id="company-result-title">公司经营总结</h2>
+        <p>经营 {result.weeks} 周 · 归档 {result.total_projects} 部作品 · 净现金变化 {money(result.net_cash_change)}</p>
+      </div>
+      <div className="v4-final-ending">
+        <span>公司综合结局</span>
+        <strong data-testid="company-ending">{result.overall.ending}</strong>
+        <small>基础结局 {result.overall.base_ending} · 成就晋升 +{result.overall.achievement_promotions}</small>
+      </div>
+    </header>
+
+    <div className="v4-candidate-model">
+      <div><strong>候选评价模型</strong><span>{result.overall.evaluation_model.id} · {result.overall.evaluation_model.status}</span></div>
+      <p>质量 20＋财务 20＋影响 15＋团队 15，满分 70。权重、门槛与成就倍率尚未冻结，不代表经济平衡验收。</p>
+    </div>
+
+    <dl className="v4-final-stats">
+      <div><dt>最终资金</dt><dd>{money(result.final_funds)}</dd></div>
+      <div><dt>最终声望</dt><dd>{result.reputation}</dd></div>
+      <div><dt>正常完成</dt><dd>{result.commercial.completed_projects} 部</dd></div>
+      <div><dt>未正常完成</dt><dd>{result.commercial.unfinished_projects} 部</dd></div>
+      <div><dt>累计毛商业收入</dt><dd>{money(result.commercial.gross_revenue)}</dd></div>
+      <div><dt>累计公司商业所得</dt><dd>{money(result.commercial.company_revenue)}</dd></div>
+      <div><dt>累计项目利润</dt><dd>{money(result.commercial.project_profit)}</dd></div>
+      <div><dt>归档作品</dt><dd>{result.total_projects} 部</dd></div>
+    </dl>
+
+    <section className="v4-final-section" aria-labelledby="company-score-title">
+      <div className="v4-subheading"><h3 id="company-score-title">四维评价</h3><span>{result.overall.score} / {result.overall.max_score}</span></div>
+      <div className="v4-final-score-layout">
+        <div className="v4-final-score-grid">{scores.map((item) => <article className="v4-final-score" key={item.label}>
+          <div><span>{item.label}</span><strong>{item.value}<small> / {item.max}</small></strong></div>
+          <progress max={item.max} value={item.value} aria-label={`${item.label}得分`} />
+          <p>{item.note}</p>
+        </article>)}</div>
+        <aside className="v4-portfolio-rating">
+          <span>作品平均质量评级</span>
+          <strong data-testid="portfolio-rating">{result.rating}</strong>
+          <p>仅按全部 Archive 作品质量均值计算，与左侧公司综合结局不是同一指标。</p>
+        </aside>
+      </div>
+    </section>
+
+    <section className="v4-final-section" aria-labelledby="company-best-title">
+      <div className="v4-subheading"><h3 id="company-best-title">最佳作品</h3><span>全部归档最高质量 · 同分取最先归档</span></div>
+      {result.best_work ? <article className="v4-final-best">
+        <div className="v4-rating"><span>作品评级</span><strong>{result.best_work.rating}</strong></div>
+        <div><h4>{result.best_work.name}</h4><p>质量 {result.best_work.quality_score} · {result.best_work.id}</p></div>
+        <div className="v4-final-best-team"><span>当时团队</span><p>{result.best_work.team.map((member) => member.name).join('、') || '无团队成员记录'}</p></div>
+      </article> : <p className="v4-empty">没有形成作品归档，暂无最佳作品。</p>}
+    </section>
+
+    <section className="v4-final-section" aria-labelledby="company-evaluations-title">
+      <div className="v4-subheading"><h3 id="company-evaluations-title">经营评价</h3><span>正负评价可并存；仅成就评价按候选模型跨档，风险评价不直接降档</span></div>
+      <div className="v4-final-evaluations">
+        <article className="v4-final-evaluation is-positive"><h4>积极评价</h4>{positive.length > 0 ? <ul>{positive.map((entry) => <li key={entry.code}>{entry.label}</li>)}</ul> : <p>本次没有积极评价。</p>}</article>
+        <article className="v4-final-evaluation is-negative"><h4>风险与遗憾</h4>{negative.length > 0 ? <ul>{negative.map((entry) => <li key={entry.code}>{entry.label}</li>)}</ul> : <p>本次没有负面评价。</p>}</article>
+      </div>
+    </section>
+
+    <section className="v4-final-section" aria-labelledby="company-team-title">
+      <div className="v4-subheading"><h3 id="company-team-title">核心员工终局</h3><span>终局仍在册快照</span></div>
+      <dl className="v4-final-stats v4-final-staff-summary">
+        <div><dt>核心员工</dt><dd>{result.team.core_staff_count} 人</dd></div>
+        <div><dt>临时员工</dt><dd>{result.team.temporary_staff_count} 人</dd></div>
+        <div><dt>平均能力</dt><dd>{result.team.average_ability}</dd></div>
+        <div><dt>当前等级经验进度</dt><dd>{experienceText(result.team.current_experience)}</dd></div>
+        <div><dt>已揭示潜力维度</dt><dd>{result.team.revealed_potential_dimensions}</dd></div>
+        <div><dt>触顶维度</dt><dd>{revealedMaxed}</dd></div>
+      </dl>
+      <p className="v4-fineprint">当前等级经验仅是升级阈值内的进度总和，不是终身累计经验；潜力数值未写入终局契约，已揭示维度不补猜上限。</p>
+      {result.team.core_members.length === 0 ? <p className="v4-empty">终局时没有在册核心员工。</p> : <div className="v4-final-staff-grid">{result.team.core_members.map((member) => <article className="v4-final-staff-card" key={member.id}>
+        <header><div><span className="v4-tag">{member.role}</span><h4>{member.name}</h4><p>代表作：{workName(member.representative_work_id)}</p></div><span className="v4-seal">核心</span></header>
+        <p className="v4-final-works">参与作品：{member.works.length > 0 ? member.works.map(workName).join('、') : '无'}</p>
+        <div className="v4-ability-list">{V4_ABILITIES.map((ability) => {
+          const revealed = member.revealed_potential[ability]
+          const maxed = revealed && member.maxed_dimensions.includes(ability)
+          return <div className={`v4-ability-row ${maxed ? 'is-maxed' : ''}`} key={ability}>
+            <div className="v4-ability-heading"><span>{abilityLabel[ability]}</span><strong>{member.abilities[ability]}{maxed ? ' MAX' : ''}</strong></div>
+            {revealed ? <progress max={100} value={member.abilities[ability]} aria-label={`${member.name} ${abilityLabel[ability]} 终局能力`} /> : <div className="v4-growth-hidden" aria-hidden="true" />}
+            <small>当前经验 {experienceText(member.experience[ability])} · {revealed ? '潜力已揭示' : '潜力未揭示'}</small>
+          </div>
+        })}</div>
+      </article>)}</div>}
+      <p className="v4-fineprint">快照仅覆盖终局仍在公司的核心员工，不虚构已离职员工的最终状态或个人命运。</p>
+    </section>
+  </section>
+}
 
 function ProjectPanel({ game, work, busy, run }: { game: V4GameState; work: V4Project; busy: boolean; run: Run }) {
   const [confirmAbort, setConfirmAbort] = useState(false)
@@ -254,7 +416,7 @@ function ProjectPanel({ game, work, busy, run }: { game: V4GameState; work: V4Pr
 
 function RecruitmentPanel({ game, busy, run }: { game: V4GameState; busy: boolean; run: Run }) {
   return <section className="v4-subsection" aria-labelledby="recruit-title"><div className="v4-subheading"><h3 id="recruit-title">核心招聘</h3><button className="v4-text-button" disabled={busy || game.company.status !== 'running' || game.recruitment.last_scout_week === game.company.week} onClick={() => run('scout')}>本周招募</button></div>
-    {game.recruitment.pool.length === 0 ? <p className="v4-empty">招聘池为空。每周可招募一次候选人。</p> : <div className="v4-recruit-list">{game.recruitment.pool.map((candidate) => <article key={candidate.staff.id}><div><strong>{candidate.staff.name}</strong><span>{candidate.staff.role} · {candidate.staff.talent_type}</span><small>主能力 {Math.max(...Object.values(candidate.staff.abilities))} · 签约费 {money(candidate.staff.signing_fee)}{candidate.expires_week !== null ? ` · W${candidate.expires_week} 到期` : ''}</small></div><button className="v4-button" disabled={busy || game.company.status !== 'running' || candidate.staff.employment !== 'core'} onClick={() => run('hire_core', { staff_id: candidate.staff.id })}>签约核心</button></article>)}</div>}
+    {game.recruitment.pool.length === 0 ? <p className="v4-empty">招聘池为空。每周可招募一次候选人。</p> : <div className="v4-recruit-list">{game.recruitment.pool.map((candidate) => <article key={candidate.staff.id}><div><strong>{candidate.staff.name}</strong><span>{candidate.staff.role} · {candidate.staff.talent_type}</span><small>主能力 {Math.max(...Object.values(candidate.staff.abilities))} · {potentialSummary(candidate.staff)} · 签约费 {money(candidate.staff.signing_fee)}{candidate.expires_week !== null ? ` · W${candidate.expires_week} 到期` : ''}</small></div><button className="v4-button" disabled={busy || game.company.status !== 'running' || candidate.staff.employment !== 'core'} onClick={() => run('hire_core', { staff_id: candidate.staff.id })}>签约核心</button></article>)}</div>}
     <p className="v4-fineprint">正常临时候选来源仍受冻结契约冲突阻塞，界面不伪造临时招聘入口。</p>
   </section>
 }

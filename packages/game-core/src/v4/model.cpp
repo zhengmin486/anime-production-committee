@@ -1,6 +1,7 @@
 #include "apc/v4/model.hpp"
 
 #include <algorithm>
+#include <limits>
 
 namespace apc::v4 {
 
@@ -45,9 +46,17 @@ std::array<int, kAbilityCount> abilities_from_json(const Json& value) {
     std::array<int, kAbilityCount> values{};
     if (!value.is_object()) return values;
     for (int i = 0; i < kAbilityCount; ++i) {
-        if (value.contains(kAbilities[i]) && value.at(kAbilities[i]).is_number_integer()) {
-            values[i] = value.at(kAbilities[i]).get<int>();
+        if (!value.contains(kAbilities[i]) || !value.at(kAbilities[i]).is_number_integer()) continue;
+        const auto& number = value.at(kAbilities[i]);
+        if (number.is_number_unsigned()) {
+            if (number.get<std::uint64_t>() > static_cast<std::uint64_t>(std::numeric_limits<int>::max())) {
+                throw Json::out_of_range::create(302, "v4 能力数值超出 int 范围", nullptr);
+            }
+        } else if (number.get<std::int64_t>() < std::numeric_limits<int>::min() ||
+                   number.get<std::int64_t>() > std::numeric_limits<int>::max()) {
+            throw Json::out_of_range::create(302, "v4 能力数值超出 int 范围", nullptr);
         }
+        values[i] = number.get<int>();
     }
     return values;
 }

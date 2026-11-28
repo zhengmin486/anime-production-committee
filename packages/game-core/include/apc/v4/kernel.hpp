@@ -40,6 +40,16 @@ std::string staff_specialty(const Staff& staff);
 // 专业匹配系数：匹配 1000，不匹配 800
 int fit_permille(const Staff& staff, const std::string& ability);
 
+// ---- 员工成长 ----
+int experience_for_participation(bool primary);
+struct GrowthResult {
+    std::array<int, kAbilityCount> experience_gain{};
+    std::array<int, kAbilityCount> ability_gain{};
+    std::array<bool, kAbilityCount> potential_revealed{};
+};
+GrowthResult apply_growth(Staff& staff, const std::array<int, kAbilityCount>& experience_gains);
+bool reveal_next_potential(Staff& staff);
+
 // ---- 分派 ----
 struct ItemAssignment {
     std::string work_id;

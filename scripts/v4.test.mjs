@@ -187,6 +187,201 @@ test('临时员工不积累长期经验，结项后退出名册但保留团队�
   assert.ok(delivered.state.archive.works[0].team.some((member) => member.id === 'staff_ka'))
 })
 
+test('M5 创始员工保留成长空间且潜力默认不揭示', () => {
+  const state = ok('initialize', { seed: 7 }).state
+  for (const member of state.staff) {
+    for (const ability of Object.keys(member.abilities)) {
+      assert.ok(member.potential[ability] > member.abilities[ability])
+      assert.equal(member.revealed_potential[ability], false)
+    }
+  }
+})
+
+test('M5 正产出按主责 100%、协力 60% 获取经验，监督另获方向与管理经验', () => {
+  let state = setupTiny()
+  state.works[0].common.items[0].work_total = 1000
+  state = assign(state, 'staff_dir')
+  state = assign(state, 'staff_ka')
+  const advanced = ok('advance_week', { state })
+  const reports = Object.fromEntries(advanced.report.staff.map((entry) => [entry.staff_id, entry.growth]))
+  assert.deepEqual([reports.staff_dir.experience_gain.planning, reports.staff_ka.experience_gain.planning].sort((a, b) => b - a), [10, 6])
+  assert.equal(reports.staff_dir.experience_gain.direction, 10)
+  assert.equal(reports.staff_dir.experience_gain.management, 10)
+  assert.deepEqual(reports.staff_anim, { experience_gain: {}, ability_gain: {}, potential_revealed: [] })
+  assert.equal(advanced.state.staff.find((entry) => entry.id === 'staff_dir').experience.planning, reports.staff_dir.experience_gain.planning)
+})
+
+test('M5 升级扣除阈值、保留溢出并允许连续跨级', () => {
+  let state = ok('initialize', { seed: 7 }).state
+  state = ok('instantiate_work', { state, blueprint: singleItemBlueprint(1000), work_id: 'work_01', duration_weeks: 26 }).state
+  const member = state.staff.find((entry) => entry.id === 'staff_dir')
+  member.abilities.planning = 30
+  member.potential.planning = 100
+  member.experience.planning = 25
+  state = assign(state, 'staff_dir')
+  const advanced = ok('advance_week', { state })
+  const grown = advanced.state.staff.find((entry) => entry.id === 'staff_dir')
+  assert.equal(grown.abilities.planning, 33)
+  assert.equal(grown.experience.planning, 5)
+  const report = advanced.report.staff.find((entry) => entry.staff_id === 'staff_dir').growth
+  assert.equal(report.experience_gain.planning, 10)
+  assert.equal(report.ability_gain.planning, 3)
+})
+
+test('M5 触顶维度停止累计但保留最后升级溢出，其他维度继续成长', () => {
+  let state = ok('initialize', { seed: 7 }).state
+  state = ok('instantiate_work', { state, blueprint: singleItemBlueprint(1000), work_id: 'work_01', duration_weeks: 26 }).state
+  const member = state.staff.find((entry) => entry.id === 'staff_dir')
+  member.abilities.planning = 50
+  member.potential.planning = 50
+  member.experience.planning = 7
+  member.abilities.direction = 30
+  member.potential.direction = 100
+  member.experience.direction = 9
+  state = assign(state, 'staff_dir')
+  const advanced = ok('advance_week', { state })
+  const grown = advanced.state.staff.find((entry) => entry.id === 'staff_dir')
+  assert.equal(grown.abilities.planning, 50)
+  assert.equal(grown.experience.planning, 7)
+  assert.equal(grown.revealed_potential.planning, true)
+  assert.equal(grown.abilities.direction, 31)
+  assert.equal(grown.experience.direction, 9)
+  const report = advanced.report.staff.find((entry) => entry.staff_id === 'staff_dir').growth
+  assert.equal(report.experience_gain.planning, undefined)
+  assert.equal(report.experience_gain.direction, 10)
+})
+
+test('M5 周结算接近潜力上限时揭示对应维度', () => {
+  let state = ok('initialize', { seed: 7 }).state
+  state = ok('instantiate_work', { state, blueprint: singleItemBlueprint(1000), work_id: 'work_01', duration_weeks: 26 }).state
+  const member = state.staff.find((entry) => entry.id === 'staff_dir')
+  member.abilities.planning = 95
+  member.potential.planning = 100
+  member.experience.planning = 0
+  state = assign(state, 'staff_dir')
+  const advanced = ok('advance_week', { state })
+  const grown = advanced.state.staff.find((entry) => entry.id === 'staff_dir')
+  assert.equal(grown.revealed_potential.planning, true)
+  const report = advanced.report.staff.find((entry) => entry.staff_id === 'staff_dir').growth
+  assert.deepEqual(report.potential_revealed, ['planning'])
+})
+
+test('M5 完整交付为实际核心贡献者揭示一个潜力维度，中止不揭示', () => {
+  let state = setupTiny()
+  state = assign(state, 'staff_ka')
+  state = ok('advance_week', { state }).state
+  const member = state.staff.find((entry) => entry.id === 'staff_ka')
+  for (const ability of Object.keys(member.revealed_potential)) member.revealed_potential[ability] = false
+  completeWork(state, 'work_01', 80)
+  const delivered = ok('deliver_work', { state, work_id: 'work_01' })
+  const grown = delivered.state.staff.find((entry) => entry.id === 'staff_ka')
+  assert.equal(Object.values(grown.revealed_potential).filter(Boolean).length, 1)
+  const reveal = delivered.report.growth.potential_revealed.find((entry) => entry.staff_id === 'staff_ka')
+  assert.equal(reveal.potential_revealed.length, 1)
+
+  state = setupTiny()
+  state = assign(state, 'staff_ka')
+  state = ok('advance_week', { state }).state
+  const abortedMember = state.staff.find((entry) => entry.id === 'staff_ka')
+  for (const ability of Object.keys(abortedMember.revealed_potential)) abortedMember.revealed_potential[ability] = false
+  const aborted = ok('abort_work', { state, work_id: 'work_01' })
+  assert.equal(Object.values(aborted.state.staff.find((entry) => entry.id === 'staff_ka').revealed_potential).some(Boolean), false)
+  assert.deepEqual(aborted.report.growth.potential_revealed, [])
+})
+
+test('M5 拒绝负经验或潜力低于当前能力的存档', () => {
+  for (const mutate of [
+    (member) => { member.experience.planning = -1 },
+    (member) => { member.potential.planning = member.abilities.planning - 1 },
+  ]) {
+    const state = setupTiny()
+    mutate(state.staff[0])
+    const result = call('advance_week', { state })
+    assert.equal(result.error?.code, 'INVALID_STATE')
+  }
+})
+
+test('M5 零产出不获取经验或揭示潜力', () => {
+  const state = setupTiny()
+  for (const item of allItems(state, 'work_01')) item.work_done = item.work_total
+  const before = state.staff.map((member) => member.experience)
+  const advanced = ok('advance_week', { state })
+  assert.deepEqual(advanced.state.staff.map((member) => member.experience), before)
+  for (const entry of advanced.report.staff) assert.deepEqual(entry.growth, {
+    experience_gain: {}, ability_gain: {}, potential_revealed: [],
+  })
+})
+
+test('M5 同工作项同点按员工 ID 定主责，跨工作项同能力取最高系数', () => {
+  let tied = setupTiny()
+  for (const item of allItems(tied, 'work_01')) item.work_done = item.work_total
+  const common = findItem(tied, 'work_01', 'common.series_comp')
+  common.work_total = 200
+  common.work_done = 0
+  tied.staff.find((member) => member.id === 'staff_ka').abilities.drawing =
+    tied.staff.find((member) => member.id === 'staff_dir').abilities.direction
+  tied = assign(tied, 'staff_dir')
+  tied = assign(tied, 'staff_ka')
+  const tieReports = Object.fromEntries(ok('advance_week', { state: tied }).report.staff.map((entry) => [entry.staff_id, entry.growth]))
+  assert.equal(tieReports.staff_dir.experience_gain.planning, 10)
+  assert.equal(tieReports.staff_ka.experience_gain.planning, 6)
+
+  let sharedAbility = setupTiny()
+  sharedAbility = assign(sharedAbility, 'staff_dir')
+  sharedAbility = assign(sharedAbility, 'staff_ka')
+  const reports = Object.fromEntries(ok('advance_week', { state: sharedAbility }).report.staff.map((entry) => [entry.staff_id, entry.growth]))
+  assert.equal(reports.staff_dir.experience_gain.planning, 10)
+  assert.equal(reports.staff_ka.experience_gain.planning, 10)
+})
+
+test('M5 纯外包正产出同样形成实际监督履职', () => {
+  let state = tickFixture('normal')
+  for (const item of allItems(state, 'work_01')) item.work_done = item.work_total
+  findItem(state, 'work_01', 'common.series_comp').work_done = 60
+  state.suppliers[0].speed = 100
+  state = signTickContract(state).state
+  state = assign(state, 'staff_dir')
+  const advanced = ok('advance_week', { state })
+  assert.equal(advanced.report.outsourcing[0].points, 40)
+  assert.equal(advanced.report.works[0].total_points, 0)
+  const report = advanced.report.staff.find((entry) => entry.staff_id === 'staff_dir')
+  assert.equal(report.produced, 0)
+  assert.equal(report.growth.experience_gain.planning, undefined)
+  assert.equal(report.growth.experience_gain.direction, 10)
+  assert.equal(report.growth.experience_gain.management, 10)
+})
+
+test('M5 int32 经验上界不溢出，越界数值在入口拒绝', () => {
+  let state = setupTiny()
+  const member = state.staff.find((entry) => entry.id === 'staff_dir')
+  member.abilities.planning = 30
+  member.potential.planning = 31
+  member.experience.planning = 2_147_483_647
+  state = assign(state, 'staff_dir')
+  const grown = ok('advance_week', { state }).state.staff.find((entry) => entry.id === 'staff_dir')
+  assert.equal(grown.abilities.planning, 31)
+  assert.equal(grown.experience.planning, 2_147_483_647)
+
+  const invalid = structuredClone(state)
+  invalid.staff.find((entry) => entry.id === 'staff_dir').experience.planning = Number.MAX_SAFE_INTEGER
+  assert.equal(call('advance_week', { state: invalid }).error?.code, 'INVALID_INPUT')
+})
+
+test('M5 强制交付不揭示潜力', () => {
+  let state = setupTiny()
+  state.works[0].deadline_week = 1
+  state = assign(state, 'staff_ka')
+  state = ok('advance_week', { state }).state
+  state.events.pending = []
+  for (const member of state.staff) {
+    for (const ability of Object.keys(member.revealed_potential)) member.revealed_potential[ability] = false
+  }
+  const forced = ok('advance_week', { state })
+  assert.equal(forced.report.settlements[0].forced, true)
+  assert.deepEqual(forced.report.settlements[0].growth.potential_revealed, [])
+  assert.equal(forced.state.staff.some((member) => Object.values(member.revealed_potential).some(Boolean)), false)
+})
+
 test('周结算重复提交同一状态不产生双工资、双生产或双推进', () => {
   let state = setupTiny(22)
   state = assign(state, 'staff_dir', 'work_01')
@@ -678,6 +873,7 @@ test('质量：同等工作量下，能力与随机都会改变质量', () => {
     state.staff.find((entry) => entry.id === 'staff_dir').assignment_work_id = null
     const member = state.staff.find((entry) => entry.id === 'staff_dir')
     member.abilities.planning = ability
+    member.potential.planning = Math.max(member.potential.planning, ability)
     member.role = 'scriptwriter'   // planning 主专业，排除适配差异
     state = assign(state, 'staff_dir')
     const advanced = ok('advance_week', { state })
@@ -755,6 +951,7 @@ test('质量：公共制作通过依赖上限影响下游与作品层', () => {
     state.staff.find((entry) => entry.id === 'staff_dir').assignment_work_id = null
     const member = state.staff.find((entry) => entry.id === 'staff_dir')
     member.abilities.planning = 90
+    member.potential.planning = Math.max(member.potential.planning, 90)
     member.role = 'scriptwriter'
     state = assign(state, 'staff_dir')
     const advanced = ok('advance_week', { state })
@@ -2502,6 +2699,54 @@ test('M3 hire_temporary：报酬、合同、周薪、弹性工位与延期同步
   assert.equal(committee.staff.find((entry) => entry.id === committeeCandidate).temporary_contract.end_week, oldDeadline + 4)
 })
 
+test('M5 声望剖面：真实 WASM 临时能力分档与冻结阈值一致', () => {
+  const tiers = [[99, 42, 52], [100, 42, 52], [249, 42, 52], [250, 56, 65], [9_999, 56, 65], [10_000, 66, 74], [300_000, 66, 74]]
+  for (const [reputation, minimum, maximum] of tiers) {
+    const state = setupTiny(17)
+    state.company.reputation = reputation
+    const candidateId = prepareTemporaryCandidate(state)
+    const candidate = state.recruitment.pool.find((entry) => entry.staff.id === candidateId).staff
+    for (const ability of [minimum - 1, maximum + 1]) {
+      candidate.abilities.animation = ability
+      candidate.potential.animation = ability
+      const rejected = call('hire_temporary', { state, work_id: 'work_01', candidate_id: candidateId })
+      assert.equal(rejected.error?.code, 'INVALID_INPUT', `reputation=${reputation} ability=${ability}`)
+      assert.match(rejected.error.message, /临时候选能力不符合当前声望档位/)
+    }
+    candidate.abilities.animation = minimum
+    candidate.potential.animation = minimum
+    assert.equal(call('hire_temporary', { state, work_id: 'work_01', candidate_id: candidateId }).error, undefined)
+  }
+})
+
+test('M5 声望剖面：真实 WASM 弹性工位按 T0–T7 分组映射', () => {
+  const tiers = [[100, 1, 42], [250, 2, 56], [600, 2, 56], [2_000, 3, 56], [10_000, 3, 66], [60_000, 4, 66], [300_000, 4, 66]]
+  for (const [reputation, capacity, ability] of tiers) {
+    let state = setupTiny(17)
+    state.company.reputation = reputation
+    const source = structuredClone(state.recruitment.pool[0])
+    for (let index = 0; index <= capacity; index++) {
+      const entry = structuredClone(source)
+      entry.staff.id = `fixture_capacity_${reputation}_${index}`
+      entry.staff.employment = 'temporary'
+      entry.staff.role = 'animator'
+      for (const key of Object.keys(entry.staff.abilities)) entry.staff.abilities[key] = ability
+      for (const key of Object.keys(entry.staff.potential)) entry.staff.potential[key] = ability
+      for (const key of Object.keys(entry.staff.experience)) entry.staff.experience[key] = 0
+      state.recruitment.pool.push(entry)
+      const result = call('hire_temporary', {
+        state, work_id: 'work_01', candidate_id: entry.staff.id
+      })
+      if (index < capacity) {
+        assert.equal(result.error, undefined, `reputation=${reputation} capacity=${capacity}`)
+        state = result.state
+      } else {
+        assert.equal(result.error?.code, 'CAPACITY_EXCEEDED', `reputation=${reputation}`)
+      }
+    }
+  }
+})
+
 function rejectVendorState(state, invariant) {
   const result = call('advance_week', { state })
   assert.equal(result.error?.code, 'INVALID_STATE')
@@ -2828,6 +3073,249 @@ test('M2 关闭路径：end_company 锁 closing，finalize_delivery 结清，fin
   assert.equal(outcome.result.final_funds, outcome.state.finance.balance)
   assert.equal(outcome.state.archive.company_result.reason, 'voluntary')
   assert.equal(call('finalize_company', { state: outcome.state }).error.code, 'INVALID_PHASE')
+})
+
+test('M5 公司结局：空归档生成候选综合评价与核心员工终局快照', () => {
+  const closed = ok('end_company', { state: ok('initialize', { seed: 7 }).state })
+  assert.equal(closed.state.company.status, 'ended')
+  const outcome = ok('finalize_company', { state: closed.state })
+  const result = outcome.result
+  assert.equal(result.reason, 'voluntary')
+  assert.equal(result.total_projects, 0)
+  assert.equal(result.rating, 'D')
+  assert.equal(result.best_work_id, null)
+  assert.equal(result.best_work, null)
+  assert.equal(result.overall.max_score, 70)
+  assert.ok(result.overall.score <= 70)
+  assert.equal(result.overall.score, result.overall.quality + result.overall.finance + result.overall.influence + result.overall.team)
+  assert.deepEqual(result.overall.evaluation_model, { id: 'm5_company_v1', status: 'candidate' })
+  assert.ok(result.evaluations.some((entry) => entry.code === 'no_deliveries' && entry.polarity === 'negative'))
+  assert.equal(result.team.core_staff_count, outcome.state.staff.filter((member) => member.employment === 'core').length)
+  assert.equal(result.team.core_members.length, result.team.core_staff_count)
+  for (const member of result.team.core_members) {
+    assert.deepEqual(member.works, [])
+    assert.equal(member.representative_work_id, null)
+    assert.deepEqual(Object.keys(member.abilities).sort(), ['animation', 'direction', 'drawing', 'management', 'planning', 'postproduction'])
+  }
+})
+
+test('M5 公司结局：团队能力与成熟度合计封顶 15 分', () => {
+  const closed = ok('end_company', { state: ok('initialize', { seed: 7 }).state }).state
+  for (const member of closed.staff.filter((entry) => entry.employment === 'core')) {
+    for (const ability of Object.keys(member.abilities)) {
+      member.abilities[ability] = 100
+      member.potential[ability] = 100
+      member.revealed_potential[ability] = true
+      member.experience[ability] = 1000
+    }
+  }
+  const result = ok('finalize_company', { state: closed }).result
+  assert.equal(result.overall.team, 15)
+  assert.ok(result.overall.score <= result.overall.max_score)
+})
+
+test('M5 公司结局：S 级代表作跨多个档次且同分最佳保持首个', () => {
+  let state = ok('initialize', { seed: 7 }).state
+  state = ok('start_work', { state, offer_id: 'offer_01', mode: 'contract' }).state
+  state = assign(state, 'staff_dir')
+  state = completeWork(state, 'work_01', 70)
+  state = ok('end_company', { state }).state
+  state = ok('finalize_delivery', { state, work_id: 'work_01' }).state
+  state.archive.works[0].quality_score = 90
+  state.archive.works[0].rating = 'S'
+  const tied = structuredClone(state.archive.works[0])
+  tied.id = 'work_02'
+  tied.name = '同分代表作'
+  state.archive.works.push(tied)
+
+  const result = ok('finalize_company', { state }).result
+  const levels = ['D', 'C', 'B', 'A', 'S']
+  const base = levels.indexOf(result.overall.base_ending)
+  const ending = levels.indexOf(result.overall.ending)
+  assert.ok(result.overall.achievement_promotions >= 2)
+  assert.ok(ending >= Math.min(4, base + 2))
+  assert.ok(result.evaluations.some((entry) => entry.code === 'masterpiece' && entry.polarity === 'positive'))
+  assert.equal(result.rating, 'S')
+  assert.equal(result.best_work_id, 'work_01')
+  assert.equal(result.best_work.name, state.archive.works[0].name)
+  assert.deepEqual(result.team.core_members.find((member) => member.id === 'staff_dir').works, ['work_01', 'work_02'])
+})
+
+test('M5 公司结局：破产优先覆盖成就，正负特殊评价仍可并存', () => {
+  let state = ok('initialize', { seed: 7 }).state
+  state = ok('start_work', { state, offer_id: 'offer_01', mode: 'contract' }).state
+  state = assign(state, 'staff_dir')
+  state = completeWork(state, 'work_01', 70)
+  state = ok('end_company', { state }).state
+  state = ok('finalize_delivery', { state, work_id: 'work_01' }).state
+  state.company.end_reason = 'bankrupt'
+  state.staff.find((member) => member.id === 'staff_dir').experience.planning = 1
+  const delta = -1 - state.finance.balance
+  state.finance.entries.push({
+    id: 'fixture.bankrupt', week: 0, work_id: null, category: 'penalty', amount: delta, counterparty: null, memo: 'fixture bankruptcy'
+  })
+  state.finance.balance = -1
+
+  const result = ok('finalize_company', { state }).result
+  assert.equal(result.reason, 'bankrupt')
+  assert.equal(result.final_funds, -1)
+  assert.equal(result.overall.base_ending, 'D')
+  assert.equal(result.overall.ending, 'D')
+  assert.equal(result.rating, state.archive.works[0].rating)
+  assert.ok(result.evaluations.some((entry) => entry.polarity === 'positive'))
+  assert.ok(result.evaluations.some((entry) => entry.code === 'bankruptcy' && entry.polarity === 'negative'))
+  assert.ok(result.evaluations.some((entry) => entry.code === 'cash_burn' && entry.polarity === 'negative'))
+})
+
+test('M5 公司结局：主动结束与十年期满使用同一评价标准', () => {
+  const closed = ok('end_company', { state: ok('initialize', { seed: 7 }).state }).state
+  const voluntary = ok('finalize_company', { state: closed }).result
+  const timed = structuredClone(closed)
+  timed.company.end_reason = 'time_limit'
+  timed.company.week = 520
+  const timeLimit = ok('finalize_company', { state: timed }).result
+  assert.equal(timeLimit.weeks, 520)
+  for (const field of ['rating', 'overall', 'commercial', 'team', 'best_work', 'evaluations', 'highlights', 'negatives']) {
+    assert.deepEqual(timeLimit[field], voluntary[field], field)
+  }
+})
+
+test('M5 公司结局：大额现金比例不溢出且损失封顶', () => {
+  const closed = ok('end_company', { state: ok('initialize', { seed: 7 }).state }).state
+  const loss = structuredClone(closed)
+  loss.finance.opening_funds = Number.MAX_SAFE_INTEGER
+  loss.finance.balance = 0
+  loss.finance.entries = [{
+    id: 'fixture.loss', week: 0, work_id: null, category: 'penalty', amount: -Number.MAX_SAFE_INTEGER,
+    counterparty: null, memo: 'fixture maximum safe loss'
+  }]
+  const lossResult = ok('finalize_company', { state: loss }).result
+  assert.equal(lossResult.net_cash_change, -Number.MAX_SAFE_INTEGER)
+  assert.equal(lossResult.overall.finance, 0)
+
+  const gain = structuredClone(closed)
+  gain.finance.opening_funds = 1
+  gain.finance.balance = Number.MAX_SAFE_INTEGER
+  gain.finance.entries = [{
+    id: 'fixture.gain', week: 0, work_id: null, category: 'success_reward', amount: Number.MAX_SAFE_INTEGER - 1,
+    counterparty: null, memo: 'fixture maximum safe gain'
+  }]
+  const gainResult = ok('finalize_company', { state: gain }).result
+  assert.equal(gainResult.overall.finance, 20)
+})
+
+test('M5 公司结局：损坏的结构化结局在命令入口精确拒绝', () => {
+  const finalized = ok('finalize_company', {
+    state: ok('end_company', { state: ok('initialize', { seed: 7 }).state }).state
+  }).state
+  const mutations = [
+    (state) => { delete state.archive.company_result.overall },
+    (state) => { state.archive.company_result.overall.score++ },
+    (state) => { state.archive.company_result.commercial.gross_revenue = 1 },
+    (state) => { state.archive.company_result.evaluations[0].label = '篡改评价' },
+    (state) => { state.archive.company_result.team.core_members[0].works = ['ghost'] },
+    (state) => { state.archive.company_result.extra = true },
+    (state) => { state.staff[0].name = '篡改员工' },
+    (state) => { state.company.week++ },
+    (state) => { state.company.reputation++ }
+  ]
+  for (const mutate of mutations) {
+    const invalid = structuredClone(finalized)
+    mutate(invalid)
+    const response = call('finalize_company', { state: invalid })
+    assert.equal(response.error?.code, 'INVALID_STATE')
+    assert.match(response.error.message, /INV-22/)
+  }
+})
+
+test('M5 公司结局：拒绝未知终局原因和不足 520 周的十年期满', () => {
+  const closed = ok('end_company', { state: ok('initialize', { seed: 7 }).state }).state
+  for (const [reason, week, invariant] of [['retired', 0, /INV-21 company.end_reason/], ['time_limit', 519, /INV-21 time_limit/]]) {
+    const invalid = structuredClone(closed)
+    invalid.company.end_reason = reason
+    invalid.company.week = week
+    const response = call('finalize_company', { state: invalid })
+    assert.equal(response.error?.code, 'INVALID_STATE')
+    assert.match(response.error.message, invariant)
+  }
+})
+
+test('M5 公司结局：真实 WASM 拒绝负声望终局', () => {
+  const closed = ok('end_company', { state: ok('initialize', { seed: 7 }).state }).state
+  closed.company.reputation = -1
+  const response = call('finalize_company', { state: closed })
+  assert.equal(response.error?.code, 'INVALID_STATE')
+  assert.match(response.error.message, /INV-21 company.reputation/)
+  assert.equal('state' in response, false)
+})
+
+test('M5 公司结局：真实 WASM 拒绝 Archive 利润的 int64 下溢回绕', () => {
+  let state = ok('initialize', { seed: 7 }).state
+  state = ok('start_work', { state, offer_id: 'offer_01', mode: 'contract' }).state
+  state = ok('abort_work', { state, work_id: 'work_01' }).state
+  state = ok('end_company', { state }).state
+  const record = state.archive.works[0]
+  Object.assign(record, {
+    commercial_revenue: 0, bd_gross: 0, bd_revenue: 0, committee_pool: 0, investor_share: 0,
+    company_received: 0, penalty_paid: 0, channel_breakdown: [],
+    finance_summary: {
+      contract_received: 0, contract_refund: 2, investment_paid: 0, commercial_share: 0, bd_revenue: 0,
+      success_reward: 0, penalty: 0, costs: { production: '__INT64_MAX__' }, total_costs: '__INT64_MAX__', profit: '__INT64_MAX__'
+    }
+  })
+  const input = JSON.stringify({ state }).replaceAll('"__INT64_MAX__"', '9223372036854775807')
+  const response = JSON.parse(core.finalize_company(input))
+  assert.equal(response.error?.code, 'INVALID_STATE')
+  assert.match(response.error.message, /INV-22/)
+})
+
+test('M5 公司结局：真实 WASM 拒绝财务流水合计与余额计算溢出', () => {
+  const closed = ok('end_company', { state: ok('initialize', { seed: 7 }).state }).state
+  const sumOverflow = structuredClone(closed)
+  sumOverflow.company.end_reason = 'bankrupt'
+  sumOverflow.finance.opening_funds = 0
+  sumOverflow.finance.balance = -2
+  sumOverflow.finance.entries = [
+    { id: 'fixture.wasm-overflow-a', week: 0, work_id: null, category: 'penalty', amount: '__INT64_MAX__', counterparty: null, memo: 'fixture' },
+    { id: 'fixture.wasm-overflow-b', week: 0, work_id: null, category: 'penalty', amount: '__INT64_MAX__', counterparty: null, memo: 'fixture' }
+  ]
+  const sumResponse = JSON.parse(core.finalize_company(JSON.stringify({ state: sumOverflow }).replaceAll('"__INT64_MAX__"', '9223372036854775807')))
+  assert.equal(sumResponse.error?.code, 'INVALID_STATE')
+  assert.match(sumResponse.error.message, /INV-16 流水合计溢出/)
+
+  const balanceOverflow = structuredClone(closed)
+  balanceOverflow.company.end_reason = 'bankrupt'
+  balanceOverflow.finance.opening_funds = '__INT64_MAX__'
+  balanceOverflow.finance.balance = '__INT64_MIN__'
+  balanceOverflow.finance.entries = [
+    { id: 'fixture.wasm-balance-overflow', week: 0, work_id: null, category: 'success_reward', amount: 1, counterparty: null, memo: 'fixture' }
+  ]
+  const balanceResponse = JSON.parse(core.finalize_company(JSON.stringify({ state: balanceOverflow })
+    .replaceAll('"__INT64_MAX__"', '9223372036854775807').replaceAll('"__INT64_MIN__"', '-9223372036854775808')))
+  assert.equal(balanceResponse.error?.code, 'INVALID_STATE')
+  assert.match(balanceResponse.error.message, /INV-16 期初加流水合计溢出/)
+})
+
+test('M5 公司结局：真实 WASM 拒绝状态、原因与结局归属不一致', () => {
+  const closed = ok('end_company', { state: ok('initialize', { seed: 7 }).state }).state
+  const missingReason = structuredClone(closed)
+  missingReason.company.end_reason = null
+  const missingResponse = call('finalize_company', { state: missingReason })
+  assert.equal(missingResponse.error?.code, 'INVALID_STATE')
+  assert.match(missingResponse.error.message, /INV-21 closing\/ended/)
+
+  const runningReason = ok('initialize', { seed: 7 }).state
+  runningReason.company.end_reason = 'voluntary'
+  const runningResponse = call('finalize_company', { state: runningReason })
+  assert.equal(runningResponse.error?.code, 'INVALID_STATE')
+  assert.match(runningResponse.error.message, /INV-21 running/)
+
+  const finalized = ok('finalize_company', { state: closed }).state
+  finalized.company.status = 'running'
+  finalized.company.end_reason = null
+  const resultResponse = call('finalize_company', { state: finalized })
+  assert.equal(resultResponse.error?.code, 'INVALID_STATE')
+  assert.match(resultResponse.error.message, /INV-22 archive.company_result/)
 })
 
 test('M2 结清负余额：提交前原子拒绝，不写流水或 Archive', () => {

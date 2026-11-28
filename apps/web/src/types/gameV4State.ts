@@ -2,8 +2,10 @@ import {
   V4_DIMENSIONS,
   V4_PARTNERSHIP_CHANNELS,
   V4_WINDOWS,
+  companyResultMatchesState,
   isV4Archive,
   type V4Archive,
+  type V4CompanyEndReason,
   type V4CooperationMode,
   type V4Dimension,
   type V4PartnershipChannel,
@@ -37,8 +39,8 @@ export interface V4Company {
   name: string
   founded_week: number
   week: number
-  status: string
-  end_reason: string | null
+  status: 'running' | 'closing' | 'ended'
+  end_reason: V4CompanyEndReason | null
   reputation: number
   reputation_log: V4ReputationLog[]
 }
@@ -59,7 +61,7 @@ export interface V4Staff {
   id: string
   name: string
   role: string
-  employment: string
+  employment: 'core' | 'temporary'
   abilities: V4AbilityScores
   experience: V4AbilityScores
   potential: V4AbilityScores
@@ -73,6 +75,26 @@ export interface V4Staff {
   assignment_work_id: string | null
   last_participation: V4Participation | null
   temporary_contract: V4TemporaryContract | null
+}
+
+export interface V4StaffGrowth {
+  experience_gain: Partial<Record<V4Ability, number>>
+  ability_gain: Partial<Record<V4Ability, number>>
+  potential_revealed: V4Ability[]
+}
+
+export interface V4StaffWeekReport {
+  staff_id: string
+  produced: number
+  fatigue: number
+  morale: number
+  growth: V4StaffGrowth
+}
+
+export interface V4WeekReport {
+  week: number
+  staff: V4StaffWeekReport[]
+  [key: string]: unknown
 }
 
 export interface V4WorkItem {
@@ -290,6 +312,7 @@ export interface V4CommandErrorResponse {
 export type V4CommandResult = V4CommandResponse | V4CommandErrorResponse
 
 const maxInteger = Number.MAX_SAFE_INTEGER
+const maxCoreInteger = 2_147_483_647
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value)
 const isText = (value: unknown): value is string => typeof value === 'string' && value.trim().length > 0
 const integer = (value: unknown, min = 0, max = maxInteger): value is number => typeof value === 'number' && Number.isSafeInteger(value) && value >= min && value <= max
@@ -303,6 +326,8 @@ const arrayOf = <T>(value: unknown, guard: (item: unknown) => item is T): value 
 const isObjectArray = (value: unknown): value is V4JsonObject[] => Array.isArray(value) && value.every(isRecord)
 const scores = (value: unknown): value is V4AbilityScores => exactFields(value, V4_ABILITIES)
   && V4_ABILITIES.every((ability) => integer(value[ability]))
+const experienceScores = (value: unknown): value is V4AbilityScores => exactFields(value, V4_ABILITIES)
+  && V4_ABILITIES.every((ability) => integer(value[ability], 0, maxCoreInteger))
 const flags = (value: unknown): value is V4AbilityFlags => exactFields(value, V4_ABILITIES)
   && V4_ABILITIES.every((ability) => typeof value[ability] === 'boolean')
 const dimensions = (value: unknown): value is V4QualityDimensions => exactFields(value, V4_DIMENSIONS)
@@ -336,7 +361,11 @@ const isV4ReputationLog = (value: unknown): value is V4ReputationLog => exactFie
 export const isV4Company = (value: unknown): value is V4Company => exactFields(value,
   ['id', 'name', 'founded_week', 'week', 'status', 'end_reason', 'reputation', 'reputation_log'])
   && isText(value.id) && isText(value.name) && integer(value.founded_week) && integer(value.week, 0, 520)
-  && isText(value.status) && nullableText(value.end_reason) && integer(value.reputation)
+  && choice(value.status, ['running', 'closing', 'ended'])
+  && (value.status !== 'running' || value.week < 520)
+  && (value.end_reason === null || choice(value.end_reason, ['voluntary', 'time_limit', 'bankrupt']))
+  && (value.status === 'running' ? value.end_reason === null : value.end_reason !== null)
+  && (value.end_reason !== 'time_limit' || value.week === 520) && integer(value.reputation)
   && arrayOf(value.reputation_log, isV4ReputationLog)
 
 const isV4Participation = (value: unknown): value is V4Participation => exactFields(value, ['work_id', 'item_id', 'week'])
@@ -345,15 +374,35 @@ const isV4Participation = (value: unknown): value is V4Participation => exactFie
 const isV4TemporaryContract = (value: unknown): value is V4TemporaryContract => exactFields(value, ['work_id', 'start_week', 'end_week'])
   && isText(value.work_id) && integer(value.start_week, 0, 520) && integer(value.end_week, 1)
 
-export const isV4Staff = (value: unknown): value is V4Staff => exactFields(value,
-  ['id', 'name', 'role', 'employment', 'abilities', 'experience', 'potential', 'revealed_potential', 'talent_type',
-    'weekly_salary', 'signing_fee', 'fatigue', 'morale', 'departure_warning', 'assignment_work_id', 'last_participation', 'temporary_contract'])
-  && isText(value.id) && isText(value.name) && isText(value.role) && choice(value.employment, ['core', 'temporary'])
-  && scores(value.abilities) && scores(value.experience) && scores(value.potential) && flags(value.revealed_potential)
-  && isText(value.talent_type) && integer(value.weekly_salary, 1) && integer(value.signing_fee)
-  && integer(value.fatigue, 0, 100) && integer(value.morale, 0, 100) && typeof value.departure_warning === 'boolean'
-  && nullableText(value.assignment_work_id) && (value.last_participation === null || isV4Participation(value.last_participation))
-  && (value.temporary_contract === null || isV4TemporaryContract(value.temporary_contract))
+export const isV4Staff = (value: unknown): value is V4Staff => {
+  if (!exactFields(value,
+    ['id', 'name', 'role', 'employment', 'abilities', 'experience', 'potential', 'revealed_potential', 'talent_type',
+      'weekly_salary', 'signing_fee', 'fatigue', 'morale', 'departure_warning', 'assignment_work_id', 'last_participation', 'temporary_contract'])
+    || !isText(value.id) || !isText(value.name) || !isText(value.role) || !choice(value.employment, ['core', 'temporary'])
+    || !scores(value.abilities) || !experienceScores(value.experience) || !scores(value.potential) || !flags(value.revealed_potential)
+    || !isText(value.talent_type) || !integer(value.weekly_salary, 1) || !integer(value.signing_fee)
+    || !integer(value.fatigue, 0, 100) || !integer(value.morale, 0, 100) || typeof value.departure_warning !== 'boolean'
+    || !nullableText(value.assignment_work_id) || (value.last_participation !== null && !isV4Participation(value.last_participation))
+    || (value.temporary_contract !== null && !isV4TemporaryContract(value.temporary_contract))) return false
+  const staff = value as unknown as V4Staff
+  return V4_ABILITIES.every((ability) => staff.abilities[ability] <= 100
+    && staff.potential[ability] <= 100 && staff.potential[ability] >= staff.abilities[ability])
+}
+
+const growthGains = (value: unknown): value is Partial<Record<V4Ability, number>> => isRecord(value)
+  && Object.entries(value).every(([ability, gain]) => choice(ability, V4_ABILITIES) && integer(gain, 1))
+
+const isV4StaffGrowth = (value: unknown): value is V4StaffGrowth => exactFields(value, ['experience_gain', 'ability_gain', 'potential_revealed'])
+  && growthGains(value.experience_gain) && growthGains(value.ability_gain)
+  && arrayOf(value.potential_revealed, (ability) => choice(ability, V4_ABILITIES))
+  && new Set(value.potential_revealed).size === value.potential_revealed.length
+
+const isV4StaffWeekReport = (value: unknown): value is V4StaffWeekReport => exactFields(value, ['staff_id', 'produced', 'fatigue', 'morale', 'growth'])
+  && isText(value.staff_id) && integer(value.produced) && integer(value.fatigue, 0, 100)
+  && integer(value.morale, 0, 100) && isV4StaffGrowth(value.growth)
+
+export const isV4WeekReport = (value: unknown): value is V4WeekReport => isRecord(value)
+  && integer(value.week, 0, 520) && arrayOf(value.staff, isV4StaffWeekReport)
 
 const isV4WorkItem = (value: unknown): value is V4WorkItem => exactFields(value,
   ['id', 'key', 'ability', 'work_total', 'work_done', 'deliver_at', 'deps', 'is_gate', 'quality', 'contributors'])
@@ -439,12 +488,15 @@ export const isV4GameState = (value: unknown): value is V4GameState => {
     || value.version !== 4 || !integer(value.seed, 0, 0xffffffff) || !isV4Company(value.company)
     || !arrayOf(value.staff, isV4Staff) || !isV4Recruitment(value.recruitment) || !arrayOf(value.works, isV4Project)
     || !isObjectArray(value.suppliers) || !isObjectArray(value.contracts) || !isObjectArray(value.partners) || !isObjectArray(value.committees)
-    || !isV4Market(value.market) || !isV4EventState(value.events) || !isV4Finance(value.finance) || !isV4Archive(value.archive)) return false
+    || !isV4Market(value.market) || !isV4EventState(value.events) || !isV4Finance(value.finance) || !isV4Archive(value.archive)
+    || (value.archive.company_result !== null && value.company.status !== 'ended')) return false
 
   const state = value as unknown as V4GameState
-  const ledgerTotal = state.finance.entries.reduce((sum, entry) => sum + entry.amount, 0)
-  const expectedBalance = state.finance.opening_funds + ledgerTotal
-  if (!Number.isSafeInteger(ledgerTotal) || !Number.isSafeInteger(expectedBalance) || expectedBalance !== state.finance.balance) return false
+  const ledgerTotal = state.finance.entries.reduce((sum, entry) => sum + BigInt(entry.amount), 0n)
+  const expectedBalance = BigInt(state.finance.opening_funds) + ledgerTotal
+  const maximum = BigInt(Number.MAX_SAFE_INTEGER)
+  if (ledgerTotal < -maximum || ledgerTotal > maximum || expectedBalance < -maximum || expectedBalance > maximum
+    || Number(expectedBalance) !== state.finance.balance) return false
 
   const worksById = new Map(state.works.map((work) => [work.id, work]))
   const staffIds = new Set<string>()
@@ -512,7 +564,7 @@ export const isV4GameState = (value: unknown): value is V4GameState => {
   for (const entry of state.finance.entries) {
     if (entry.work_id !== null && !knownWorkIds.has(entry.work_id)) return false
   }
-  return true
+  return companyResultMatchesState(state.archive, state)
 }
 
 export const isV4CommandError = (value: unknown): value is V4CommandError => exactFields(value, ['code', 'message'])

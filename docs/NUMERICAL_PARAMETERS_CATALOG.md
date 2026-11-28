@@ -84,6 +84,8 @@
 
 ### 3.2 职业适配和监督资格
 
+**M5 当前接入假设（ASSUMPTION，2026-11-28）**：创始员工六维潜力统一为 `min(100, 当前能力 + 15)`，避免开局即触顶；该值仅用于让成长链路可运行，不代表正式创始人优势或潜力分布。标定后可改生成函数与初始化测试回退，现有员工存档不做自动迁移。
+
 - 各工作项的主责职业映射表。**待细化**。
 - 各工作项的协力职业映射表。**待细化**。
 - 主责职业对产能的适配系数。**已确认锚点：100%**；其余配套公式待标定。
@@ -113,13 +115,13 @@
 | 主责经验系数 | 有效主责产出对应的经验倍率 | **已确认**：100% | [DECISION_LOG](DECISION_LOG.md)、[#54 成长](https://github.com/zhengmin486/anime-production-committee/issues/54) |
 | 协力经验系数 | 有效协力产出对应的经验倍率 | **已确认**：60% | [DECISION_LOG](DECISION_LOG.md)、[#54 成长](https://github.com/zhengmin486/anime-production-committee/issues/54) |
 | 外派经验系数 | 外派实际参与工作带来的对应能力经验 | **临时参考**：常规产出的 50% | [DECISION_LOG](DECISION_LOG.md)、[#54 成长](https://github.com/zhengmin486/anime-production-committee/issues/54) |
-| 基础经验增量 | 每点有效产出或每周工作如何转化为经验 | **待标定** | [DECISION_LOG](DECISION_LOG.md)、[DOMAIN_ARCHITECTURE](DOMAIN_ARCHITECTURE.md)、[#54 成长](https://github.com/zhengmin486/anime-production-committee/issues/54) |
-| 能力升级阈值 | 不同能力值升 1 点分别需要多少经验 | **待标定** | [DECISION_LOG](DECISION_LOG.md)、[#54 成长](https://github.com/zhengmin486/anime-production-committee/issues/54) |
-| 分段成长曲线 | 新手、骨干、大师阶段的经验成本函数 | **已确认分段方向**：低于 40、40–69、70 及以上；公式待标定 | [DECISION_LOG](DECISION_LOG.md)、[#54 成长](https://github.com/zhengmin486/anime-production-committee/issues/54) |
+| 基础经验增量 | 每点有效产出或每周工作如何转化为经验 | **首版候选接入**：每个有正产出的活跃制作周主责 1.0 EXP、协力 0.6 EXP；内部以 0.1 EXP 整数存储；仍待 M7 标定 | [DECISION_LOG](DECISION_LOG.md)、[DOMAIN_ARCHITECTURE](DOMAIN_ARCHITECTURE.md)、[#54 成长](https://github.com/zhengmin486/anime-production-committee/issues/54) |
+| 能力升级阈值 | 不同能力值升 1 点分别需要多少经验 | **首版候选接入**：能力 <30 为 1.0 EXP；30–59 为 1.0→1.6；60–74 为 3.5→6.5；75–89 为 10→20；90–99 为 25→45（整数插值，单位 EXP） | [DECISION_LOG](DECISION_LOG.md)、[#54 成长](https://github.com/zhengmin486/anime-production-committee/issues/54) |
+| 分段成长曲线 | 新手、骨干、大师阶段的经验成本函数 | **已确认分段方向**：低于 40、40–69、70 及以上；首版按 #54 的 520 周候选成本接入，边界取 30/60/75/90，仍待 M7 标定 | [DECISION_LOG](DECISION_LOG.md)、[#54 成长](https://github.com/zhengmin486/anime-production-committee/issues/54) |
 | 经验溢出处理 | 一周跨越多个升级阈值时的经验扣除和剩余经验 | **规则已确认**；整数和舍入细节待细化 | [DECISION_LOG](DECISION_LOG.md)、[#54 成长](https://github.com/zhengmin486/anime-production-committee/issues/54) |
-| 潜力揭示节奏 | 完整交付作品数、接近潜力上限时的揭示条件 | **方向已确认**：完整交付 1–2 部作品可逐步揭示；精确判定待细化 | [DECISION_LOG](DECISION_LOG.md)、[#54 成长](https://github.com/zhengmin486/anime-production-committee/issues/54) |
+| 潜力揭示节奏 | 完整交付作品数、接近潜力上限时的揭示条件 | **方向已确认**：完整交付 1–2 部作品可逐步揭示；当前假设为周结算 `potential - ability ≤ 5` 时揭示，非中止/非强制完整交付每名实际核心贡献者（含监督）再揭示一维，按能力数组顺序取首个未揭示维度；跨作品计数尚未实现 | [DECISION_LOG](DECISION_LOG.md)、[#54 成长](https://github.com/zhengmin486/anime-production-committee/issues/54) |
 | 带新加速 | 带新加速型特性对新人的经验倍率 | **临时参考**：135% | [DECISION_LOG](DECISION_LOG.md)、[#54 成长](https://github.com/zhengmin486/anime-production-committee/issues/54)、[#56 标签](https://github.com/zhengmin486/anime-production-committee/issues/56) |
-| 监督专项经验 | 实际履职带来的 direction、management 经验 | **待标定** | [DECISION_LOG](DECISION_LOG.md)、[#54 成长](https://github.com/zhengmin486/anime-production-committee/issues/54) |
+| 监督专项经验 | 实际履职带来的 direction、management 经验 | **规则已确认**：项目实际正产出且监督为核心员工时获得；当前按主责 1.0 EXP/周接入，空挂不成长，倍率待标定 | [DECISION_LOG](DECISION_LOG.md)、[#54 成长](https://github.com/zhengmin486/anime-production-committee/issues/54) |
 | 成长触顶后的处理 | 单项能力触顶是否停止累计经验、其他能力是否继续成长 | **规则已确认**；实现细节核验 | [DECISION_LOG](DECISION_LOG.md)、[#54 成长](https://github.com/zhengmin486/anime-production-committee/issues/54) |
 | 老搭档磨合减免 | 共同成功交付 A 级以上作品的关键主创带来的减免值 | **待标定**；受普通磨合总减免上限约束 | [DECISION_LOG](DECISION_LOG.md)、[#54 成长](https://github.com/zhengmin486/anime-production-committee/issues/54)、[#57 加班/状态](https://github.com/zhengmin486/anime-production-committee/issues/57) |
 | 代表作履历背书 | A/S 级委员会作品署名对谈判或伙伴匹配的权重 | **待标定** | [DECISION_LOG](DECISION_LOG.md)、[#54 成长](https://github.com/zhengmin486/anime-production-committee/issues/54)、[#60 声望](https://github.com/zhengmin486/anime-production-committee/issues/60) |
@@ -155,6 +157,13 @@
 | 外派收入 | 外派一周为公司带来多少现金 | **待标定** | [DECISION_LOG](DECISION_LOG.md)、[#64 经济](https://github.com/zhengmin486/anime-production-committee/issues/64) |
 | 外派经验 | 外派工作对应的能力经验增量 | **待标定** | [DECISION_LOG](DECISION_LOG.md)、[#54 成长](https://github.com/zhengmin486/anime-production-committee/issues/54) |
 | 外派持续时间 | 每个外派机会的合同周数 | **临时参考**：约 1–2 周 | [DESIGN_BACKLOG](DESIGN_BACKLOG_2026-11-25.md)、[DECISION_LOG](DECISION_LOG.md) |
+
+**M5 当前成长口径（ASSUMPTION，2026-11-28）**：
+
+- 主责/协力不新增持久字段：同一工作项本周实际正产出最高者为主责，协力为其余正产出者；并列按 staff id 升序，保证确定性。
+- 同一员工同一能力本周参与多个工作项时取最高系数，不重复叠加，以保持“每个活跃制作周 1.0 EXP”的候选口径；不同能力可分别增长。
+- 经验只在 `delta_work > 0` 时产生；临时员工不进入长期成长。升级逐级扣阈值并保留余量，可连续跨级；触顶后停止接收该维度新经验，但保留最后升级余量，其他维度继续。
+- 创始员工 +15 潜力、gap≤5 揭示、每次完整交付揭示一维，以及上述主责推导均为局部、可逆、待 #54/M7 标定的实现假设；可通过改 `kernel.cpp`/`runtime.cpp` 常数与对应测试回退，不改变存档字段。
 
 **边界提醒：** 红灯员工本人强制休养，不阻塞公司和其他项目周推进；磨合只影响工作量产出，不直接影响质量；监督换项目的团队级损失与普通人员磨合减免分开计算。
 
@@ -801,7 +810,31 @@
 - 公司终局评价的维度、权重和分数线。
 - 财务、作品履历、员工成长、合作关系和声望如何进入终局评价。
 
-**状态：** 竞争模拟参数需要结合实际首版范围确认；终局评价模型按现行决策暂缓。首版先持续记录账本、作品、员工和关系事实，不提前确定复杂综合评分权重。
+**状态：** 竞争模拟与排名参数仍需结合实际首版范围确认。2026-11-28 已按线上 #8 评论方向接入可运行的公司终局候选模型，用于结构化经营总结；它不是冻结规则，也不得据此宣称 M5 或经济平衡完成。
+
+### 21.1 M5 公司终局候选模型（ASSUMPTION，2026-11-28）
+
+模型标识固定为 `m5_company_v1`，状态固定为 `candidate`。输入只使用 Archive、Finance、Company 与当前 Staff 快照；不引入竞争公司、设施或虚构个人命运。
+
+| 参数 | 候选值 / 公式 | 状态与边界 |
+| --- | --- | --- |
+| 总分与权重 | 70＝质量 20＋财务 20＋影响 15＋团队 15 | ASSUMPTION；团队 15 再拆为能力 10＋经验成熟度 5 |
+| 作品平均质量 | `floor(Σquality_score / Archive.works.length)`；空归档为 0 | 全部作品（含中止/强制）参与旧 `rating`；评级阈值仍为 S≥85/A≥75/B≥65/C≥50/D |
+| 质量分 | `floor(average_quality × 20 / 100)` | 0..20 |
+| 财务基础分 | 净现金变化为 0 时得 10 | 净现金变化＝最终资金－期初资金 |
+| 财务收益 | 再加 `floor(net_change / opening_funds × 10)`，封顶 10 | 期初资金≤0 且正收益时直接满分；整除/余数实现避免大额溢出 |
+| 财务损失 | 扣 `floor(loss / opening_funds × 10)`，最低 0 | 期初资金≤0 且净损失时为 0 |
+| 影响分 | `5 + min(5, reputation_tier) + min(5, ceil(completed_projects / 4))` | 0..15；声望档位沿用现有 T0–T7 阈值 |
+| 团队能力分 | `floor(average_ability × 10 / 100)` | 0..10；平均能力为当前核心员工六维能力算术平均向下取整 |
+| 团队成熟分 | `min(5, ceil(floor(current_experience / core_count) / 200))` | 0..5；无核心员工为 0；current_experience 不是终身经验 |
+| 基础结局 | ≥56 S、≥48 A、≥36 B、≥24 C、否则 D | ASSUMPTION；破产强制 base_ending=D |
+| 正常完成 | `end_reason≠aborted && !forced` | 其余作品计入 unfinished_projects；company_closed 的正常交付仍算完成 |
+
+成就跨档均为 ASSUMPTION：正常完成作品最高质量 ≥90 加 2 档；累计公司商业收入 `>0` 且 `floor(company_revenue/5)≥opening_funds` 加 1 档；累计项目利润 `>0` 且 `floor(project_profit/2)≥opening_funds` 加 1 档；声望 T5 及以上加 1 档。晋升总数封顶 5，最终结局封顶 S；破产优先强制 D。积极与消极特殊评价可并存；成就评价按上表跨档，风险评价不直接降档，评价文本不另加减分。
+
+最佳作品与员工代表作均取全部 Archive 中质量最高者，同分保持 Archive 顺序中的首条；S 级代表作成就只看正常完成作品。当前运行仍使用 2M 期初资金且无设施系统；#61 评论中的 14M 与设施维护框架尚未与本模型的口径裁决同步，不得自行替换经济参数。
+
+终局输入完整性属于工程约束而非数值候选：`reason/weeks/final_funds/net_cash_change/reputation` 必须与当前 Company、Finance 一致且 `company.reputation` 非负，团队聚合和每名核心成员快照必须与当前 Staff、Archive 重算一致；`time_limit` 必须为第 520 周，running 不得携带终局原因，closing/ended 必须携带终局原因，非空 `company_result` 只能存在于 ended 状态。Archive 利润对账与 Finance 流水求和均禁止有符号整数中间溢出/回绕，前端安全整数边界不得反推替代真实 `opening_funds`。
 
 **决定前应查阅：** [DECISION_LOG.md](DECISION_LOG.md)、[DOMAIN_ARCHITECTURE](DOMAIN_ARCHITECTURE.md)、[DEVELOPMENT_ROADMAP.md](DEVELOPMENT_ROADMAP.md)、[设计建议总清单](DESIGN_BACKLOG_2026-11-25.md)。
 
@@ -867,7 +900,7 @@
 - **特殊商业机会**：触发概率归 #58，触发来源和供给归 #59/#65，收益及前置费用归 #64，声望与关系反馈由 #60 和相关模块校核。
 - **竞争公司**：若进入首版模拟，需明确其范围和规则归属，再将生成概率、项目能力、收入分布分派给相应标定领域；不得因为没人负责就默认塞入 #58。
 - **风险和经营体验指标**：运行时风险阈值由对应系统和 #61/#63/#64 协同；试玩验收指标由产品负责人确认，不应自动成为新玩法规则。
-- **终局评分和长期公司价值**：按现行决策暂缓；不得提前把它们混入 #60 声望或 #61 公司成长标定。
+- **终局评分和长期公司价值**：已有 §21.1 的可运行候选模型，但权重、门槛与成就倍率仍待 M7 标定；不得把候选值混入 #60 声望或 #61 公司成长的冻结参数。
 
 ---
 
