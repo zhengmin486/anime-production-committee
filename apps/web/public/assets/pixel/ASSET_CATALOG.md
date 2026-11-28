@@ -29,6 +29,10 @@ apps/web/public/assets/pixel/
 ├── office/
 │   ├── 2dpig/                                     办公室角色/动物/家具/示例场景
 │   └── antea-furniture-office-equipment/          办公室家具与设备 PNG
+├── studio/
+│   └── ProductionStudio.svg                     基于 2dPig 办公室重绘的制作现场（内嵌 256×224 PNG，5× 像素放大显示）
+├── market/
+│   └── DistributionMarket.svg                    基于 2dPig 办公室重绘的发行与市场场景（内嵌 256×224 PNG，5× 像素放大显示）
 ├── ui/
 │   └── cupnooble-sprout-lands-ui-pack/            按钮、气泡、emoji、天气图标与像素字体
 └── characters/
@@ -173,15 +177,20 @@ apps/web/public/assets/pixel/
 | 重复文件 | Kenney 2 组（原包设计）、Glint 32 组（outline/no_outline 原包设计）；其余无。全部未去重 |
 | 缓存 / 临时文件 | 无 `Thumbs.db` / `.DS_Store` / `__MACOSX` / `.tmp` / `.log` / `.bak`；zip 本身留在仓库外 |
 
+## 场景派生素材
+
+- `studio/ProductionStudio.svg` 沿用 2dPig `PixelOffice.png` 的办公空间结构进行制作现场重绘；`market/DistributionMarket.svg` 仅沿用其像素建筑语言与完整角色精灵，重新组织为业务公告板、接待柜台、作品展示墙、发行显示屏和业绩看板共存的单一市场场景。两者均为 1280×1120 SVG 文本资源，内嵌原始 256×224 PNG，并以 5× 最近邻像素放大显示，既保留像素边界，也便于通过 GitHub MCP 文本接口提交。
+- `studio/ProductionStudio.svg` 继承 2dPig 的 CC0 授权；`market/DistributionMarket.svg` 还合成 Antea 家具素材，须保留作者署名。发行与市场场景未使用 AI 高清海报；公告卡、作品封面、发行图表和业绩看板均为画面内像素元素。
+
 ## 前端使用建议
 
 1. **办公室场景**优先用 Antea（16/32px 家具设备）与 2dPig（角色、动物、示例场景）；Glint 可补 16×16 室内地板/墙/家具，但注意其禁止再分发条款。
 2. **UI / 状态气泡**用 Cup Nooble：按钮、对话框、emoji、天气图标和像素字体；免费版只能用于非商业项目，商业化需换 Premium 或取得授权。
 3. **16×16 人物动画**用 DeepDiveGameStudio Humanoid：15 组 GIF/Aseprite 动画；禁止把素材本身再分发。
 4. **不要使用 Kenney `pixel-pack`**：它只有 1×1 像素，仅作为本批指定原始包留存。
-5. 所有资源路径按 Vite `public` 规则为 `/assets/pixel/...`。本库只建素材，不接入页面、不改现有场景、不决定最终美术风格。
+5. 所有资源路径按 Vite `public` 规则为 `/assets/pixel/...`；原始素材包保持原样，场景派生图单独存放在 `studio/` 与 `market/`。
 6. 对外发布仓库前，请项目所有者复核 Glint / Cup / Humanoid 的“禁止再分发”条款；当前入库是按用户明确指示执行。
 
-## 本轮边界
+## 素材导入批次边界
 
-未修改游戏逻辑、前端组件、引擎配置、现有场景或既有素材文档；未执行全量测试；未合并 main。
+首批素材导入时未修改游戏逻辑、前端组件、引擎配置、现有场景或既有素材文档；未执行全量测试；未合并 main。后续场景派生与页面接入记录不改变上述原始素材包的来源和授权结论。

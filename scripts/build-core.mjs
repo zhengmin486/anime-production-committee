@@ -162,7 +162,7 @@ function buildWasm(cmake, ninja) {
   run(emcmake, [cmake, '-S', source, '-B', build, '-G', 'Ninja',
     `-DCMAKE_MAKE_PROGRAM=${ninja}`, '-DCMAKE_BUILD_TYPE=Release', '-DBUILD_TESTING=OFF']);
   run(cmake, ['--build', build, '--parallel']);
-  for (const filename of ['game-core.mjs', 'game-core.wasm']) {
+  for (const filename of ['game-core.mjs', 'game-core.wasm', 'game-core-v4.mjs', 'game-core-v4.wasm']) {
     if (!existsSync(join(root, 'apps', 'web', 'public', 'wasm', filename))) {
       throw new Error(`Build did not produce ${filename}.`);
     }
