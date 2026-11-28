@@ -39,6 +39,7 @@
 | `timeout_option_id` | 升级时必填 | 指向本卡 `options[]` 中 `kind=abandon/decline` 的一项 | 首次超时的轻罚分支 |
 | `escalation_note` | 否 | `string \| null` | 超时后果的定性描述，不写数值 |
 | `options` | 是 | 1–4 项 | 负面必须有 `abandon`；正面必须有 `accept` 和 `decline` |
+| `vendor_request` | 否（仅 `kind=outsource`） | `{item_id, supplier_id, work_total}` | #122 应急外包冻结请求；`work_id` 取 pending 归属、`mode` 固定 emergency，资格/报价/产能/付款由 Vendor 内部函数负责 |
 
 ### 可用指标
 
