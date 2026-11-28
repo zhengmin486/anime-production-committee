@@ -120,6 +120,7 @@ export function validateCard(card, source) {
     return issues
   }
   if (card.schema_version !== CATALOG_SCHEMA_VERSION) fail('schema_version', '卡片 schema_version 必须为 1')
+  if (card.scope !== undefined && !['project', 'company'].includes(card.scope)) fail('scope', 'scope 只能是 project/company')
   if (!isText(card.id) || !/^[a-z0-9_]+$/.test(card.id)) fail('id', 'id 只允许小写字母、数字和下划线')
   if (!isText(card.name)) fail('name', '缺少 name')
   if (!CATEGORIES.includes(card.category)) fail('category', 'category 只能是 personnel/quality/budget/schedule')
@@ -156,6 +157,15 @@ export function validateCard(card, source) {
   if (!isText(card.description)) fail('description', '缺少 description')
 
   validateOptionList(card.options, 'options', card, fail)
+  // #123 裁决 A：公司级事件只能改资金与全体 core 状态，不得写项目制作状态。
+  if (card.scope === 'company') {
+    for (const option of (Array.isArray(card.options) ? card.options : [])) {
+      for (const effect of (Array.isArray(option?.effects) ? option.effects : [])) {
+        if (['quality', 'work_done'].includes(effect?.target)) fail('scope', '公司级事件不得写 quality/work_done')
+        if (effect?.target === 'funds' && effect.value > 0) fail('scope', '公司级事件不得正向加钱')
+      }
+    }
+  }
   validateEscalation(card, fail)
   const hasKind = (kind) => Array.isArray(card.options) && card.options.some((option) => option?.kind === kind)
   if (card.polarity === 'negative' && !hasKind('abandon')) fail('options', '负面事件必须有 abandon 选项')

@@ -585,8 +585,13 @@ npm run test:v4 && npm run audit:v4
 | 字段 | 写入点 | 唯一性 | 备注 |
 | --- | --- | --- | --- |
 | Staff 静态字段与 `signing_fee/weekly_salary` | initialize；hire_core 解包入册 | 唯一 | 不再使用 `project_fee` |
+<<<<<<< HEAD
 | `recruitment.pool/free_pool/pity/last_scout_week` | initialize；scout/hire_core/hire_temporary；advance_week 轮换与冷却 | Staff 域唯一 | M0 §14.13.1；free_pool 保存回池候选；dismiss_staff 只移名册不动池 |
 | `fatigue/morale` | advance_week 与事件效果 | 多写 + 代写 | P1-G2 |
+=======
+| `recruitment.pool/pity/last_scout_week` | initialize；scout/hire_core；advance_week 轮换 | Staff 域唯一 | M0 §14.13.1；dismiss_staff 只移名册不动池 |
+| `fatigue/morale` | advance_week；事件效果经 Staff::apply_condition | 领域 helper | P1-G2 已裁决方案 B |
+>>>>>>> 1390925 (feat(events): 公司级事件方案 A 与 P1-G2 owner helper（#123）)
 | `experience` | advance_week | 唯一 | 事件效果不包含 exp |
 | `assignment_work_id` | start_work/assign_staff；事件替换；交付/关闭释放 | 唯一 | INV-09/INV-27 |
 | `last_participation` | advance_week | 唯一 | INV-11 |
@@ -598,10 +603,15 @@ npm run test:v4 && npm run audit:v4
 | 立项静态字段与 `offer` 快照 | start_work；instantiate_work 仅内部夹具 | 唯一 | M0 命令 2 已实现 |
 | `investment/tv_service/extension/delivery` | start_work、购买电视、延期、关闭/到期 | 同一写入器族 | 委员会投资与交付状态 |
 | `plan.*` | set_work_plan | 唯一 | 周结算只读 |
+<<<<<<< HEAD
 | `items[].work_done` | advance_week 与事件效果 | 多写 + 代写 | P1-G2 |
 | `items[].quality` | advance_week 与事件效果 | 多写 + 代写 | P1-G2；六维取值 0..105 |
 | `items[].outsourceable/quality_weight_permille/core_aesthetic` | 蓝图实例化 | 唯一 | 随 Project 持久化；INV-30 校验权重 |
 | `items[].in_house_*/external_*` 贡献账本 | advance_week 的社内、临时与供应商生产 | 多写累加 | DEC-QUALITY-002；返工不回滚历史贡献 |
+=======
+| `items[].work_done` | advance_week；事件效果经 Project::apply_points_delta | 领域 helper | P1-G2 已裁决方案 B |
+| `items[].quality` | advance_week；事件效果经 Project::apply_quality_delta | 领域 helper | P1-G2 已裁决方案 B |
+>>>>>>> 1390925 (feat(events): 公司级事件方案 A 与 P1-G2 owner helper（#123）)
 | `items[].contributors` | advance_week | 唯一 | INV-12 |
 
 ### 10.5 Finance

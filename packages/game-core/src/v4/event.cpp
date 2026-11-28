@@ -237,6 +237,9 @@ bool parse_card(const Json& raw, Checker& checker, std::set<std::string>& ids, E
     if (!one_of(category, {"personnel", "quality", "budget", "schedule"})) {
         checker.fail(id, "category", "category 只能是 personnel/quality/budget/schedule");
     }
+    // #123: card-level scope affects validation and routing only, never persisted in pending.
+    const std::string card_scope = raw.value("scope", std::string("project"));
+    if (!one_of(card_scope, {"project", "company"})) checker.fail(id, "scope", "scope must be project/company");
     const std::string polarity = text_field(raw, "polarity");
     if (!one_of(polarity, {"negative", "positive"})) checker.fail(id, "polarity", "polarity 只能是 negative/positive");
     const std::string tier = text_field(raw, "tier");
@@ -309,8 +312,22 @@ bool parse_card(const Json& raw, Checker& checker, std::set<std::string>& ids, E
     if (tier == "major" && !once) checker.fail(id, "once_per_project", "重大事件必须 once_per_project=true");
     if (tier == "major" && cooldown != 0) checker.fail(id, "cooldown_weeks", "重大事件不能配冷却（同项目只触发一次）");
 
+    // #123 ruling A: company events may only touch funds and all-core morale/fatigue.
+    if (card_scope == "company") {
+        for (const auto& option : options) {
+            for (const auto& effect : option.effects) {
+                if (effect.target == "quality" || effect.target == "work_done") {
+                    checker.fail(id, "scope", "company event must not write quality/work_done");
+                }
+                if (effect.target == "funds" && effect.value > 0) {
+                    checker.fail(id, "scope", "company event must not add funds");
+                }
+            }
+        }
+    }
     out = EventSpec{id,
                     name,
+                    card_scope,
                     category,
                     polarity,
                     tier,
