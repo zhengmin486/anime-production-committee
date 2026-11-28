@@ -634,6 +634,16 @@
     ]
   },
   "optional_paths": {
+    "sign_outsourcing.finance": [
+      "category",
+      "entry_id",
+      "work_id"
+    ],
+    "state.events.pending[].options[].vendor_request": [
+      "item_id",
+      "supplier_id",
+      "work_total"
+    ],
     "state.events.pending[].escalation": [
       "description",
       "expires_weeks",
@@ -1080,7 +1090,8 @@
       "id",
       "kind",
       "label",
-      "risk_hint"
+      "risk_hint",
+      "vendor_request"
     ],
     "state.events.pending[].options[].effects[]": [
       "scope",
@@ -1510,9 +1521,13 @@
     ],
     "sign_outsourcing": [
       "contract_id",
+      "due_week",
       "fee_total",
+      "finance",
+      "item_id",
       "state",
-      "weekly_cap"
+      "weekly_cap",
+      "work_id"
     ],
     "start_work": [
       "committee_id",

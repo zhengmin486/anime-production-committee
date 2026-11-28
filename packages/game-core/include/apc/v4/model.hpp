@@ -200,6 +200,13 @@ struct EffectView {
     int value = 0;
 };
 
+// #122：pending 选项快照中的 Vendor 请求载荷；旧档缺字段按 null（无外包请求）处理。
+struct VendorRequestView {
+    std::string item_id;
+    std::string supplier_id;
+    int work_total = 0;
+};
+
 struct EventOptionView {
     std::string id;
     std::string label;
@@ -207,6 +214,7 @@ struct EventOptionView {
     std::string risk_hint;
     int cost = 0;
     std::vector<EffectView> effects;
+    std::optional<VendorRequestView> vendor_request;
 };
 
 // #121 / DEC-EVENT-003：一次升级的冻结快照。升级只替换本条 pending 的内容，

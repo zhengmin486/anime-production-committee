@@ -68,6 +68,18 @@ function validateOptionList(options, prefix, card, fail) {
       if (effect.target === 'funds' && effect.value > 0) fail(`${ep}.value`, '事件收入分类未定：funds 只能为负')
       if (effect.target === 'funds' && effect.value < -2000000) fail(`${ep}.value`, '单次扣款不能超过 2,000,000')
     })
+    // #122：vendor_request 只允许 kind=outsource，三项齐全；悬空引用在运行时按 Vendor 错误码拒绝。
+    if (option.vendor_request !== undefined && option.vendor_request !== null) {
+      if (option.kind !== 'outsource') fail(`${where}.vendor_request`, '只有 kind=outsource 的选项可配置 vendor_request')
+      else if (typeof option.vendor_request !== 'object' || Array.isArray(option.vendor_request)) {
+        fail(`${where}.vendor_request`, 'vendor_request 必须是对象或 null')
+      } else {
+        const vr = option.vendor_request
+        if (!isText(vr.item_id)) fail(`${where}.vendor_request.item_id`, '缺少 item_id')
+        if (!isText(vr.supplier_id)) fail(`${where}.vendor_request.supplier_id`, '缺少 supplier_id')
+        if (!isInt(vr.work_total) || vr.work_total <= 0) fail(`${where}.vendor_request.work_total`, 'work_total 必须是正整型工作量')
+      }
+    }
   })
   return options
 }
