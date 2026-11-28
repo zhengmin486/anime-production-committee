@@ -4,7 +4,7 @@ import type { Mode, Project, PrototypeData, Scale } from './model'
 import { Bar, Panel, Stat, signedYuan, yuan } from './bits'
 import { FinanceArchive } from './FinanceArchive'
 import type { V4GameState } from './v4Types'
-import { createCustomOfferV4, proposalActionV4, startWorkV4 } from '../services/gameV4'
+import { createCustomOfferV4, lockOfferV4, proposalActionV4, startWorkV4 } from '../services/gameV4'
 
 type Execute = (command: () => Promise<{ state: V4GameState }>) => Promise<boolean>
 
@@ -38,18 +38,23 @@ export function MarketOffers({ data, state, selectedId, onSelect, busy, execute 
     setPercent(10)
   }, [selected?.id])
 
-  const start = () => execute(() => startWorkV4(state, selected.id, mode, mode === 'committee' ? percent : 0, partners))
+  const start = () => selected ? execute(() => startWorkV4(state, selected.id, mode, mode === 'committee' ? percent : 0, partners)) : Promise.resolve(false)
+  const lock = () => selected ? execute(() => lockOfferV4(state, selected.id)) : Promise.resolve(false)
   const closed = state.company.status !== 'running'
   const blocked = selected?.blockedBy != null
   const draftUnavailable = selected?.origin === 'self_original' && selected.allowedModes.includes('committee') && selected.committeeCandidates.length === 0
   const proposal = state.market.proposal
+  const depositRate = selected?.offerSourceType === 'ip_visit' ? 100 : 50
+  const depositPreview = Math.floor((selected?.depositBasis ?? 0) * depositRate / 1000)
+  const lockActive = selected?.lockedUntil != null && state.company.week < selected.lockedUntil
+  const lockUnavailable = !selected || selected.origin === 'self_original' || selected.lockUsed === true || state.company.week >= (selected.expiresWeek ?? Number.POSITIVE_INFINITY)
 
   return <div className="proto-screen">
     <Panel eyebrow="OPPORTUNITY / 企划承接" title="市场企划与合作机会" marks={['confirmed']}
-      note="承接调用核心 start_work；只有核心成功后才消费企划、入账、立项并自动指定监督。">
+      note="锁定调用核心 lock_offer，承接调用核心 start_work；只有核心成功后才扣款、消费企划、入账、立项并自动指定监督。">
       <div className="market-offer-workspace">
         <div className="market-offer-selector" role="group" aria-label="企划列表">
-          {data.marketOffers.map((offer) => <button key={offer.id} className={offer.id === selected.id ? 'is-active' : ''} aria-pressed={offer.id === selected.id} onClick={() => onSelect(offer.id)}>
+          {data.marketOffers.map((offer) => <button key={offer.id} className={offer.id === selected?.id ? 'is-active' : ''} aria-pressed={offer.id === selected?.id} onClick={() => onSelect(offer.id)}>
             <span><strong>{offer.title}</strong><small>{offerOriginNames[offer.origin]} · {scaleNames[offer.scale]}</small></span>
             <b>{yuan(offer.budget)}</b>
           </button>)}
@@ -66,6 +71,8 @@ export function MarketOffers({ data, state, selectedId, onSelect, busy, execute 
             <div><dt>市场热度</dt><dd>{heatNames[selected.heat]}</dd></div>
             <div><dt>声望门槛</dt><dd>{selected.minReputation}</dd></div>
             <div><dt>当前条件</dt><dd>{selected.blockedBy ?? '可进入承接评估'}</dd></div>
+            <div><dt>自然失效</dt><dd>第 {selected.expiresWeek ?? '—'} 周</dd></div>
+            <div><dt>定金锁定</dt><dd>{lockActive ? `已锁定至第 ${selected.lockedUntil} 周` : selected.lockUsed ? '本次企划已使用过锁定' : `未锁定 · 预估定金 ${yuan(depositPreview)}`}</dd></div>
           </dl>
           <div className="filter-chips" role="group" aria-label="合作模式">
             {selected.allowedModes.map((item) => <button key={item} className={mode === item ? 'is-active' : ''} aria-pressed={mode === item} onClick={() => { setMode(item); setPartners([]) }}>{modeNames[item]}</button>)}
@@ -79,9 +86,12 @@ export function MarketOffers({ data, state, selectedId, onSelect, busy, execute 
               return <label key={id}><input type="checkbox" checked={partners.includes(id)} onChange={(event) => setPartners((current) => event.target.checked ? [...current, id] : current.filter((item) => item !== id))} />{partner?.name ?? id} · {partner?.channels.map((channel) => channelNames[channel]).join('/')}</label>
             })}</fieldset>
           </div>}
-          <button className="button primary" disabled={busy || closed || blocked || draftUnavailable || (mode === 'committee' && partners.length === 0)} onClick={start}>{busy ? '核心处理中…' : '承接企划（核心）'}</button>
-          <p className="disabled-reason">{closed ? '不可用：公司已关闭或结束。' : blocked ? `不可用：${selected.blockedBy}。` : draftUnavailable ? '不可用：核心原创草稿未提供委员会候选成员，承接路径尚未开放。' : mode === 'committee' && partners.length === 0 ? '不可用：委员会至少需要一名伙伴。' : '核心将校验声望、履历、蓝图、投资与监督人选，并原子提交立项。'}</p>
-          <p className="proto-footnote">承接是明确玩家操作；不会自动立项或自动分配其他员工。</p>
+          <div className="closing-actions">
+            <button className="button secondary" disabled={busy || closed || lockUnavailable || state.events.pending.length > 0} onClick={lock}>{busy ? '核心处理中…' : lockActive ? '企划已锁定' : '锁定企划（核心）'}</button>
+            <button className="button primary" disabled={busy || closed || blocked || draftUnavailable || (mode === 'committee' && partners.length === 0)} onClick={start}>{busy ? '核心处理中…' : '承接企划（核心）'}</button>
+          </div>
+          <p className="disabled-reason">{closed ? '不可用：公司已关闭或结束。' : state.events.pending.length > 0 ? '不可用：有待处理事件时，核心不允许锁定企划。' : lockUnavailable ? '不可用：原创草稿、已过期或已使用过锁定的企划不能重复锁定。' : blocked ? `不可用：${selected.blockedBy}。` : draftUnavailable ? '不可用：核心原创草稿未提供委员会候选成员，承接路径尚未开放。' : mode === 'committee' && partners.length === 0 ? '不可用：委员会至少需要一名伙伴。' : '核心将校验声望、履历、蓝图、投资与监督人选，并原子提交立项。'}</p>
+          <p className="proto-footnote">锁定调用核心 lock_offer：支付定金并保护两周，定金到期不退。承制模式不抵扣；委员会模式在锁定期内由核心按规则抵扣本次应付投资额。承接是明确玩家操作，不会自动立项或自动分配其他员工。</p>
         </article>}
       </div>
     </Panel>

@@ -104,6 +104,7 @@ it('未查看事件阻塞推进且须先查看，覆盖存档必须显式确认'
   mocks.store.game.events.pending.push({
     event_id: 'schedule_slip', name: '进度滑坡', work_id: 'work_01', triggered_week: 0,
     expires_week: null, cooldown_weeks: 0, once_per_project: false, viewed: false, options: [],
+    timeout_option_id: '', escalated: false, escalation: null,
   })
   mocks.store.saveConflict = true
   mocks.store.notice = '此浏览器已有存档，覆盖后旧存档不可恢复。'
@@ -127,6 +128,7 @@ it('已查看事件不再阻塞推进，现金不足的选项不可点击', asyn
     event_id: 'supplier_dunning', name: '外包催款', work_id: 'work_01', triggered_week: 0,
     expires_week: null, cooldown_weeks: 0, once_per_project: false, viewed: true,
     options: [{ id: 'settle', label: '先结清尾款', kind: 'abandon', risk_hint: '现金更紧', cost: 300000, effects: [] }],
+    timeout_option_id: '', escalated: false, escalation: null,
   })
   mocks.store.game = state
   render(<V4Workbench />)

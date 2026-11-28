@@ -17,7 +17,7 @@ export function loadGameV4(): Promise<V4Module> {
   if (!modulePromise) {
     modulePromise = (async () => {
       try {
-        const url = new URL(`${import.meta.env.BASE_URL}wasm/game-core-v4.mjs`, window.location.href)
+        const url = new URL(`${import.meta.env.BASE_URL}wasm/v4.mjs`, window.location.href)
         const { default: createGameCoreV4 } = await import(/* @vite-ignore */ url.href)
         const module: V4Module = await createGameCoreV4({ locateFile: (file: string) => new URL(file, url).href })
         for (const method of [...V4_METHODS, 'hash_state'] as const) {
@@ -79,6 +79,10 @@ export function startWorkV4(state: V4GameState, offerId: string, mode: 'contract
   return stateResponse('start_work', { state, offer_id: offerId, mode, ...(mode === 'committee' ? { percent, committee_partner_ids: committeePartnerIds } : {}) })
 }
 
+export function lockOfferV4(state: V4GameState, offerId: string): Promise<V4StateResponse & { offer_id?: string; deposit_paid?: number }> {
+  return stateResponse('lock_offer', { state, offer_id: offerId })
+}
+
 export function assignStaffV4(state: V4GameState, staffId: string, workId: string | null): Promise<V4StateResponse> {
   return stateResponse('assign_staff', { state, staff_id: staffId, work_id: workId })
 }
@@ -109,8 +113,20 @@ export function proposalActionV4(method: 'adopt_proposal' | 'reject_proposal', s
   return stateResponse(method, { state })
 }
 
-export function workActionV4(method: 'deliver_work' | 'buy_tv_service' | 'request_extension' | 'end_company' | 'finalize_delivery' | 'finalize_company', state: V4GameState, workId?: string): Promise<V4WorkActionResponse> {
-  return stateResponse(method, { state, ...(workId === undefined ? {} : { work_id: workId }) })
+export async function workActionV4(method: 'deliver_work' | 'abort_work' | 'buy_tv_service' | 'request_extension' | 'end_company' | 'finalize_delivery' | 'finalize_company', state: V4GameState, workId?: string): Promise<V4WorkActionResponse> {
+  const result = await stateResponse(method, { state, ...(workId === undefined ? {} : { work_id: workId }) }) as V4WorkActionResponse
+  if (method === 'deliver_work' || method === 'abort_work') {
+    const report = result.report ?? {}
+    const work = result.state.archive.works.find((item) => item.id === report.work_id) ?? result.state.works.find((item) => item.id === report.work_id)
+    const title = work ? ('offer' in work ? work.offer.name : work.name) : report.work_id ?? '作品'
+    const rating = typeof report.rating === 'string' ? `评级 ${report.rating}` : '未评级'
+    const revenue = typeof report.commercial_revenue === 'number' ? `商业收入 ¥${report.commercial_revenue.toLocaleString('zh-CN')}` : '无商业收入'
+    const net = typeof report.net_received === 'number' ? `净到账 ¥${report.net_received.toLocaleString('zh-CN')}` : '净到账以核心流水为准'
+    result.message = method === 'abort_work'
+      ? `${title} 已由核心中止结算：${rating}，${net}。`
+      : `${title} 已由核心交付并写入 Archive：${rating}，${revenue}，${net}。可在发行与市场 → 查看公司作品墙复核。`
+  }
+  return result
 }
 
 export async function hashStateV4(state: V4GameState): Promise<string> {

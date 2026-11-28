@@ -257,7 +257,7 @@ export default function PrototypeApp() {
           <button onClick={() => { setCompanyFocus('company'); setPanel('company') }} aria-label="查看公司声望"><span>声望</span><strong>{data.company.reputation}</strong></button>
           <button onClick={() => selectScene('studio')} aria-label="查看在制作品"><span>在制</span><strong>{data.projects.length}<small> 部</small></strong></button>
           <button onClick={() => { setWeekFocus('decisions'); setPanel('week') }} aria-label="查看待处理事项"><span>待处理</span><strong>{data.pendingEvents.length}<small> 项</small></strong></button>
-          <button onClick={() => openWeek(currentReceipt.state === 'settlement_rejected' ? 'receipt' : 'next')} aria-label="查看经营状态"><span>经营状态</span><strong>{state.company.status === 'running' ? (currentReceipt.state === 'settlement_rejected' ? '预检回滚' : '正常') : '关闭中'}</strong></button>
+          <button onClick={() => openWeek(currentReceipt.state === 'settlement_rejected' ? 'receipt' : 'next')} aria-label="查看经营状态"><span>经营状态</span><strong>{state.company.status === 'running' ? (currentReceipt.state === 'settlement_rejected' ? '预检回滚' : '正常') : state.company.status === 'ended' ? '已结束' : '关闭中'}</strong></button>
         </div>
       </div>
       <nav className="scene-nav" aria-label="场景切换">{sceneOrder.map((item, index) => {
@@ -272,7 +272,7 @@ export default function PrototypeApp() {
       <div className="scene-intro"><div><p className="eyebrow">{sceneMeta[scene].english} / SCENE 0{sceneOrder.indexOf(scene) + 1}</p><h2>{sceneMeta[scene].title}</h2></div><p>{sceneMeta[scene].description}</p><span className="keyboard-hint"><kbd>1</kbd>—<kbd>4</kbd> 切换场景</span></div>
       <div className="scene-layout">
         <SceneSidebar scene={scene} data={data} project={project} episodeIndex={episodeIndex} receipt={receipt} onSelectProject={selectProject} onSelectEpisode={selectEpisode} onAction={handleAction} />
-        <div className="scene-frame" role="region" aria-label={`${sceneMeta[scene].title}画面`}><AssetScene scene={scene} /></div>
+        <div className="scene-frame" role="region" aria-label={`${sceneMeta[scene].title}画面`}><AssetScene scene={scene} week={data.company.week} project={project} /></div>
       </div>
       <section className="transaction-bar" aria-label="事务中心">
         <div className="transaction-title"><p className="eyebrow">WEEKLY DESK</p><div><h3>事务中心</h3><span className={`transaction-state state-${receipt.state}`}>{weekStateNames[receipt.state]}</span></div></div>

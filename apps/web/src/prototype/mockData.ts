@@ -364,6 +364,7 @@ export const prototypeData: PrototypeData = {
         description: '第 7 集两张关键原画与「分镜与原画」阶段的演出构想不一致，作画监督要求返工；该集原画 49 / 95 尚未达到 900‰ 最低交付，中割已经被依赖卡住。',
         signals: ['第 7 集原画连续两周产出低于计划（-4、-6）', '陈砚疲劳 74 / 士气 58', '第 7 集是当前项目内定向目标，产能被它占用'],
         deadlineWeek: 19,
+        viewed: false,
         options: [
           { id: 'o1', label: '本周返工', cost: 0, gain: '质量 +2，避免返工累积到完成母版阶段', risk: 'medium', riskNote: '第 7 集原画进度再落后约一周，第 8 集拿不到作画人手', fits: '工期压力可以承受时' },
           { id: 'o2', label: '推迟到第 21 周集中返工', cost: 12_000, gain: '保住本周产出', risk: 'high', riskNote: '返工压力累积到动画与作画检查，若届时疲劳未缓解损失更大', fits: '只在本周绝不能延期时' },
@@ -460,10 +461,10 @@ export const prototypeData: PrototypeData = {
   ],
 
   marketOffers: [
-    { id: 'm1', title: '深夜食堂的季节', source: 'manga', scale: 'tv', origin: 'market', budget: 2_400_000, durationWeeks: 26, minReputation: 55, heat: 'warm', hook: '原作稳定，作画需求高，正好撞上当前的作画缺口', blockedBy: '核心作画产能不足' },
-    { id: 'm2', title: '转生成路由器', source: 'light_novel', scale: 'short', origin: 'market', budget: 620_000, durationWeeks: 8, minReputation: 40, heat: 'hot', hook: '短平快，能在第 26 周前回款', blockedBy: null },
-    { id: 'm3', title: '雾港·前夜', source: 'original', scale: 'ova', origin: 'self_original', budget: 900_000, durationWeeks: 12, minReputation: 50, heat: 'warm', hook: '系列认知可继承，商业基础比新 IP 稳', blockedBy: '原创必须采用委员会模式' },
-    { id: 'm4', title: '《夜行》番外（员工提案）', source: 'original', scale: 'short', origin: 'staff_proposal', budget: 380_000, durationWeeks: 6, minReputation: 0, heat: 'cold', hook: '周慕提出，可作为团队练手', blockedBy: '提案槽位只有一个' },
+    { id: 'm1', title: '深夜食堂的季节', source: 'manga', scale: 'tv', origin: 'market', budget: 2_400_000, durationWeeks: 26, minReputation: 55, heat: 'warm', hook: '原作稳定，作画需求高，正好撞上当前的作画缺口', blockedBy: '核心作画产能不足', allowedModes: ['contract', 'committee'], committeeCandidates: ['r1', 'r2'] },
+    { id: 'm2', title: '转生成路由器', source: 'light_novel', scale: 'short', origin: 'market', budget: 620_000, durationWeeks: 8, minReputation: 40, heat: 'hot', hook: '短平快，能在第 26 周前回款', blockedBy: null, allowedModes: ['contract', 'committee'], committeeCandidates: ['r3', 'r4'] },
+    { id: 'm3', title: '雾港·前夜', source: 'original', scale: 'ova', origin: 'self_original', budget: 900_000, durationWeeks: 12, minReputation: 50, heat: 'warm', hook: '系列认知可继承，商业基础比新 IP 稳', blockedBy: '原创必须采用委员会模式', allowedModes: ['committee'], committeeCandidates: ['r1'] },
+    { id: 'm4', title: '《夜行》番外（员工提案）', source: 'original', scale: 'short', origin: 'staff_proposal', budget: 380_000, durationWeeks: 6, minReputation: 0, heat: 'cold', hook: '周慕提出，可作为团队练手', blockedBy: '提案槽位只有一个', allowedModes: ['contract'], committeeCandidates: [] },
   ],
 
   relationships: [
@@ -478,4 +479,5 @@ export const prototypeData: PrototypeData = {
     { id: 'h2', title: '纸飞机同盟', source: 'original', scale: 'ova', endWeek: 3, quality: 61, commercial: 44, profit: -180_000, rating: 'C', note: '首部委员会原创，投资本金亏损' },
     { id: 'h3', title: '通勤星座', source: 'light_novel', scale: 'short', endWeek: 5, quality: 70, commercial: 62, profit: 96_000, rating: 'B', note: '短篇试水，回款稳定' },
   ],
+  pendingEvents: [],
 }

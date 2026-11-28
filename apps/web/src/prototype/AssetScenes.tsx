@@ -1,4 +1,6 @@
 
+import type { Project } from './model'
+
 export type MainScene = 'office' | 'studio' | 'meeting' | 'market'
 export type SceneAction = 'company' | 'work' | 'week' | 'finance' | 'market' | 'release' | 'archive' | 'performance'
 
@@ -16,16 +18,17 @@ function StudioScene() {
   </div>
 }
 
-function MeetingScene() {
+function MeetingScene({ week, project }: { week: number; project?: Project }) {
+  const completion = project?.completion ?? 0
   return <div className="asset-scene scene-meeting">
     <div className="meeting-wall" />
     <div className="meeting-window"><i /><i /><i /><i /><i /></div>
     <div className="meeting-presentation" role="img" aria-label="全景落地窗中央的投影幕布，展示柱形图、饼状图和折线图报表">
       <div className="meeting-screen-surface">
-        <div className="meeting-screen-heading"><span>COMMITTEE / W19</span><strong>项目进度总览</strong></div>
+        <div className="meeting-screen-heading"><span>COMMITTEE / W{week}</span><strong>项目进度总览</strong></div>
         <div className="meeting-charts">
           <div className="meeting-chart">
-            <div><span>柱形图</span><strong>+18%</strong></div>
+            <div><span>质量</span><strong>{project?.quality ?? '—'}</strong></div>
             <svg viewBox="0 0 120 72" aria-hidden="true">
               <path className="chart-grid" d="M12 10V62H114M12 36H114M12 10H114" />
               <rect className="bar-muted" x="24" y="36" width="15" height="26" />
@@ -34,11 +37,11 @@ function MeetingScene() {
             </svg>
           </div>
           <div className="meeting-chart">
-            <div><span>饼状图</span><strong>52%</strong></div>
-            <div className="meeting-pie"><i>完成</i></div>
+            <div><span>完成度</span><strong>{project ? `${completion}%` : '—'}</strong></div>
+            <div className="meeting-pie" style={{ background: `conic-gradient(#d47a59 0 ${completion}%, #587980 ${completion}% 100%)` }}><i>{project ? '核心进度' : '暂无项目'}</i></div>
           </div>
           <div className="meeting-chart">
-            <div><span>折线图</span><strong>W19</strong></div>
+            <div><span>经营周</span><strong>W{week}</strong></div>
             <svg viewBox="0 0 120 72" aria-hidden="true">
               <path className="chart-grid" d="M12 10V62H114M12 36H114M12 62H114" />
               <path className="chart-line" d="M16 50L38 38L60 43L82 22L104 16" />
@@ -77,9 +80,9 @@ function MarketScene() {
   </div>
 }
 
-export function AssetScene({ scene }: { scene: MainScene }) {
+export function AssetScene({ scene, week, project }: { scene: MainScene; week: number; project?: Project }) {
   if (scene === 'office') return <OfficeScene />
   if (scene === 'studio') return <StudioScene />
-  if (scene === 'meeting') return <MeetingScene />
+  if (scene === 'meeting') return <MeetingScene week={week} project={project} />
   return <MarketScene />
 }

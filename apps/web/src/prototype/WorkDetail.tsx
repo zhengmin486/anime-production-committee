@@ -28,6 +28,7 @@ export function WorkDetail({ project, data, state, busy, execute, onBack, focus,
 }) {
   const { company, staff, allocations, suppliers, outsourcing, ledger } = data
   const [expandedItems, setExpandedItems] = useState<string[]>([])
+  const [confirmAbort, setConfirmAbort] = useState(false)
   const episode: Episode = project.episodes.find((item) => item.index === episodeIndex) ?? project.episodes[0]
   const allItems = [...project.commonItems, ...project.episodes.flatMap((item) => item.workItems)]
   const itemOf = (key: string) => allItems.find((item) => item.key === key)
@@ -61,7 +62,8 @@ export function WorkDetail({ project, data, state, busy, execute, onBack, focus,
         </dl>
         <Bar value={project.completion} tone="lead" />
         <div className="closing-actions"><button className="button primary" disabled={busy || !deliverable || coreProject.status !== 'producing' || state.company.status !== 'running'} onClick={() => execute(() => workActionV4('deliver_work', state, project.id))}>{busy ? '核心处理中…' : '交付整部作品'}</button><span>{deliverable ? '全部门槛已达标，可执行核心交付。' : '不可用：尚有交付门槛未达标，核心会拒绝交付。'}</span></div>
-        {project.mode === 'committee' && <div className="closing-actions"><button className="button secondary" disabled={busy || !!coreProject.tv_service || state.company.status !== 'running'} onClick={() => execute(() => workActionV4('buy_tv_service', state, project.id))}>购买电视服务</button><button className="button secondary" disabled={busy || !!coreProject.extension.used || state.company.status !== 'running'} onClick={() => execute(() => workActionV4('request_extension', state, project.id))}>申请延期（4 周）</button><button className="button secondary" disabled title="核心尚未冻结中止扣罚与履历结构">中止作品（未实现）</button></div>}
+        {project.mode === 'committee' && <div className="closing-actions"><button className="button secondary" disabled={busy || !!coreProject.tv_service || state.company.status !== 'running'} onClick={() => execute(() => workActionV4('buy_tv_service', state, project.id))}>购买电视服务</button><button className="button secondary" disabled={busy || !!coreProject.extension.used || state.company.status !== 'running'} onClick={() => execute(() => workActionV4('request_extension', state, project.id))}>申请延期（4 周）</button></div>}
+        <div className="closing-actions"><button className="button secondary" disabled={busy || coreProject.status !== 'producing' || state.company.status !== 'running'} onClick={() => { if (confirmAbort) void execute(() => workActionV4('abort_work', state, project.id)); else setConfirmAbort(true) }}>{confirmAbort ? '再次点击确认中止（核心）' : '中止作品（核心）'}</button><span>{confirmAbort ? '中止会按核心规则结算扣罚与声望，并立即移出在制项目。' : '中止是明确的不可逆经营动作，需要二次确认。'}</span></div>
         {project.focusLabel && <p className="proto-inline-note">项目内定向：{project.focusLabel}——每个在制项目至多一个定向目标，不额外花钱，代价是其他单集/阶段的机会成本；不提供逐工作项指派。</p>}
         {project.series && <p className="proto-inline-note">系列关系：{project.series.parentTitle} · {project.series.relation}——{project.series.carried}。</p>}
       </Panel>
@@ -180,7 +182,7 @@ export function WorkDetail({ project, data, state, busy, execute, onBack, focus,
               </tr>
             })}</tbody>
           </table>
-          <p className="proto-footnote">核心员工每周严格归属一个项目；调配请在办公室员工详情中明确操作。外包当前仅保存计划，尚未生成任务或费用。</p>
+          <p className="proto-footnote">核心员工每周严格归属一个项目；调配请在办公室员工详情中明确操作。本页尚未接入外包签约命令，计划中的外包策略当前只由核心保存。</p>
         </Panel>
       </section>
     </div>

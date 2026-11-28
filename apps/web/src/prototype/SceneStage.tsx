@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
 import { ArrowUpRight, BriefcaseBusiness, CalendarDays, ChevronRight, Clapperboard, Coins, DoorOpen, Flag, Megaphone, MonitorPlay, PackageOpen, Users, WalletCards, X } from 'lucide-react'
-import { deliveredEpisodes, projectCompletion, projectWork, weekStateNames } from './model'
+import { weekStateNames } from './model'
 import type { Project, PrototypeData, WeeklyReceipt } from './model'
 import { PixelRoom } from './PixelScenes'
 import { yuan } from './bits'
@@ -8,6 +8,9 @@ import { yuan } from './bits'
 export type Scene = 'office' | 'studio' | 'meeting' | 'market'
 
 export const sceneNames: Record<Scene, string> = { office: '办公室', studio: '工作室', meeting: '会议室', market: '发行与市场' }
+const projectCompletion = (project: Project) => project.completion
+const projectWork = (project: Project) => project.work
+const deliveredEpisodes = (project: Project) => project.deliveredEpisodeCount
 const sceneNotes: Record<Scene, string> = {
   office: '经营中枢 · 看清全局，再决定把人和钱投向哪里',
   studio: '制作现场 · 作品 → 单集 → 六阶段 → 工作项',
@@ -56,7 +59,7 @@ export function SceneStage({ scene, data, project, receipt, selectedHotspotId, o
   const focus = scene === 'studio' ? project : data.projects.find((item) => item.episodes.some((episode) => episode.isFocus)) ?? data.projects[0]
   const focusEpisode = focus.episodes.find((episode) => episode.isFocus) ?? focus.episodes.find((episode) => episode.status === 'producing') ?? focus.episodes[0]
   const completion = projectCompletion(focus)
-  const cash = receipt.crisis?.cashAfterSettle ?? receipt.closing?.cash ?? data.company.cash
+  const cash = receipt.rejected?.cash ?? receipt.closing?.cash ?? data.company.cash
   const activeOutsource = data.outsourcing.filter((task) => task.status !== 'delivered')
   const allocatedCount = data.allocations.filter((item) => item.projectId !== null).length
   const departureWarnings = data.staff.filter((item) => item.departureWarning).length
@@ -82,7 +85,7 @@ export function SceneStage({ scene, data, project, receipt, selectedHotspotId, o
         facts: [
           { label: '完成度', value: `${completion}%` },
           { label: '已交付', value: `${deliveredEpisodes(focus)} / ${focus.episodeCount} 集` },
-          { label: '计划差距', value: `${completion - focus.plannedCompletion >= 0 ? '+' : ''}${completion - focus.plannedCompletion} 点` },
+          { label: '计划差距', value: focus.plannedCompletion === null ? '核心未提供' : `${completion - focus.plannedCompletion >= 0 ? '+' : ''}${completion - focus.plannedCompletion} 点` },
         ],
         actionLabel: '查看作品详情', onAction: () => onOpenProject(focus.id),
       },
@@ -94,8 +97,8 @@ export function SceneStage({ scene, data, project, receipt, selectedHotspotId, o
         description: '公司只有一个现金池；项目账只解释现金归因，不形成独立钱包。周回执记录变化，不让界面自行结算。',
         facts: [
           { label: '当前现金', value: yuan(cash) },
-          { label: '下周承诺', value: yuan(data.company.committedNextWeek) },
-          { label: '现金覆盖', value: `${data.company.runwayWeeks} 周` },
+          { label: '下周承诺', value: data.company.committedNextWeek === null ? '核心预检' : yuan(data.company.committedNextWeek) },
+          { label: '现金覆盖', value: data.company.runwayWeeks === null ? '核心判定' : `${data.company.runwayWeeks} 周` },
         ],
         actionLabel: '查看公司账本', onAction: () => scrollTo('company-ledger'),
       },
@@ -300,7 +303,7 @@ export function SceneStage({ scene, data, project, receipt, selectedHotspotId, o
       {hotspots.map((hotspot) => <Hotspot key={hotspot.id} hotspot={hotspot} selected={hotspot.id === selectedHotspotId} onSelect={onSelectHotspot} />)}
       <div className="scene-bottomline"><p>{sceneNotes[scene]}</p><span><ArrowUpRight size={14} />点击发光定位点，查看设施与经营动作</span></div>
       <div className="scene-receipts" aria-label="经营窗口快照">{data.receipts.map((item) => <button key={item.week} className={item.week === receipt.week ? 'is-active' : ''} onClick={() => onSelectWeek(item.week)}><span>W{item.week}</span><span className={`status-dot status-${item.state}`} />{weekStateNames[item.state]}</button>)}</div>
-      {receipt.state === 'cash_crisis' && <div className="crisis-ticker"><strong>资金危机</strong> 本周停止生产 · 不自动借款 · 自救期限第 {receipt.crisis?.deadlineWeek} 周前</div>}
+      {receipt.state === 'settlement_rejected' && <div className="crisis-ticker"><strong>结算回滚</strong> 本周未提交 · 不自动借款 · 缺口 {yuan(receipt.rejected?.shortfall ?? 0)}</div>}
       {receipt.state === 'closing' && <div className="crisis-ticker closing"><strong>关闭中</strong> 停止周推进 · 仅允许达标结清与经营总结</div>}
     </section>
     {selected && <section className="scene-context" id="scene-context-panel" aria-label={`${selected.label}情境信息`} aria-live="polite">
@@ -313,7 +316,7 @@ export function SceneStage({ scene, data, project, receipt, selectedHotspotId, o
 }
 
 export function SceneSummary({ scene, data, project, receipt }: { scene: Scene; data: PrototypeData; project: Project; receipt: WeeklyReceipt }) {
-  const cash = receipt.crisis?.cashAfterSettle ?? receipt.closing?.cash ?? data.company.cash
+  const cash = receipt.rejected?.cash ?? receipt.closing?.cash ?? data.company.cash
   const facts = scene === 'office' ? [
     { label: '在制作品', value: `${data.projects.length} 部`, hint: `${data.projects.reduce((sum, item) => sum + deliveredEpisodes(item), 0)} 集已交付` },
     { label: '公司现金', value: `¥${cash.toLocaleString('zh-CN')}`, hint: '全公司唯一现金池' },

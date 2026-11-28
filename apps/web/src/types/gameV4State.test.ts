@@ -125,6 +125,7 @@ describe('v4 GameState 关键不变式', () => {
     event.events.pending.push({
       event_id: 'schedule_slip', name: '进度滑坡', work_id: 'missing', triggered_week: 0,
       expires_week: null, cooldown_weeks: 0, once_per_project: false, viewed: false, options: [],
+      timeout_option_id: '', escalated: false, escalation: null,
     })
     expect(isV4GameState(event)).toBe(false)
   })
@@ -232,6 +233,21 @@ describe('v4 GameState 关键不变式', () => {
     const unstarted = structuredClone(valid)
     unstarted.works[0].common.items[0].work_done = 0
     expect(isV4GameState(unstarted)).toBe(false)
+  })
+
+  it('接受核心事件升级快照与空阶段效果', () => {
+    const value = withProject()
+    const option = {
+      id: 'accept', label: '按现状推进', kind: 'abandon', risk_hint: '质量缺口留到成片', cost: 0,
+      effects: [{ scope: 'instant', target: 'morale', stage: '', value: -3 }],
+    }
+    value.events.pending.push({
+      event_id: 'key_cut_rework', name: '关键镜头返修', work_id: 'work_01', triggered_week: 1,
+      expires_week: null, cooldown_weeks: 6, once_per_project: false, viewed: false, options: [option],
+      timeout_option_id: '', escalated: false,
+      escalation: { description: '返修升级', expires_weeks: 2, triggered_week: 2, options: [option], timeout_option_id: 'accept' },
+    })
+    expect(isV4GameState(value)).toBe(true)
   })
 
   it('质量维度接受 105 并拒绝 106', () => {

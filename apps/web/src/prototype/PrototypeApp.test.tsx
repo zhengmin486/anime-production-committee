@@ -26,6 +26,7 @@ vi.mock('../services/gameV4', async (importOriginal) => {
     loadGameV4: async () => core,
     initializeGameV4: (seed: number) => invoke('initialize_game', { seed }),
     startWorkV4: (state: V4GameState, offerId: string, mode: 'contract' | 'committee', percent = 0, committeePartnerIds: string[] = []) => invoke('start_work', { state, offer_id: offerId, mode, ...(mode === 'committee' ? { percent, committee_partner_ids: committeePartnerIds } : {}) }),
+    lockOfferV4: (state: V4GameState, offerId: string) => invoke('lock_offer', { state, offer_id: offerId }),
     assignStaffV4: (state: V4GameState, staffId: string, workId: string | null) => invoke('assign_staff', { state, staff_id: staffId, work_id: workId }),
     setWorkPlanV4: (state: V4GameState, workId: string, plan: Record<string, unknown>) => invoke('set_work_plan', { state, work_id: workId, plan }),
     advanceWeekV4: (state: V4GameState) => invoke('advance_week', { state }),
@@ -136,6 +137,20 @@ describe('v4 四场景接入', () => {
     expect(within(drawer).getByText('林监督')).toBeVisible()
     expect(within(drawer).getByRole('button', { name: '交付整部作品' })).toBeDisabled()
     expect(within(drawer).queryByRole('button', { name: /交付第.*集/ })).not.toBeInTheDocument()
+  })
+
+  it('锁定企划由核心扣定金，承接另行结算并显示锁定状态', async () => {
+    const user = userEvent.setup()
+    await renderApp()
+    await openScene(user, '发行与市场')
+    await user.click(within(actionPanel()).getByRole('button', { name: /企划承接/ }))
+    const drawer = screen.getByRole('dialog', { name: '市场企划' })
+    await user.click(within(drawer).getByRole('button', { name: '锁定企划（核心）' }))
+    await waitFor(() => expect(within(drawer).getByRole('button', { name: '企划已锁定' })).toBeDisabled())
+    expect(within(drawer).getByText(/已锁定至第 2 周/)).toBeVisible()
+    expect(screen.getByRole('button', { name: '查看公司现金' })).not.toHaveTextContent('¥2,000,000')
+    await user.click(within(drawer).getByRole('button', { name: '承接企划（核心）' }))
+    await waitFor(() => expect(screen.getByRole('button', { name: '查看公司现金' })).toHaveTextContent('¥3,140,000'))
   })
 
   it('计划修改和人员调配调用核心，成功后才更新界面', async () => {
@@ -254,7 +269,7 @@ describe('v4 四场景接入', () => {
   })
 
   it('生产入口保持隔离，源码不再把 Mock 当作运行状态', () => {
-    expect(mainSource).toMatch(/get\('view'\) === 'prototype'/)
+    expect(mainSource).toMatch(/view === 'prototype'/)
     expect(mainSource).toMatch(/lazy\(\(\) => import\('\.\/prototype\/PrototypeApp'\)\)/)
     expect(mainSource).toContain('<App />')
     expect(appSource).toContain('useV4Game()')

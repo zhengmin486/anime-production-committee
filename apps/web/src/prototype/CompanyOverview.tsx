@@ -128,7 +128,7 @@ export function CompanyOverview({ data, state, busy, execute, onOpen, selection,
           <dl className="proto-stats proto-stats-tight">
             <Stat label="在制作品 / 单集" value={`${projects.length} 部 · ${projects.reduce((sum, project) => sum + project.episodeCount, 0)} 集`} hint="不设固定项目槽位与数量上限" />
             <Stat label="已发生项目切换" value={`${switched.length} 人已切换`} hint="核心按上周参与记录识别；调配由玩家明确操作" />
-            <Stat label="供应商与外包" value="核心尚未开放" hint="计划可保存外包策略，但当前不生成供应商任务或费用" />
+            <Stat label="供应商与外包" value="本页未接入" hint="核心已有外包签约命令；当前四场景页面只展示计划字段，不伪造合同或费用" />
           </dl>
           <ul className="conflict-list">{projects.flatMap((project) => project.conflicts.map((text) => <li key={`${project.id}-${text}`}><span>{project.title}</span>{text}</li>))}</ul>
           <p className="proto-footnote">并行经营的约束来自核心人员归属、资金、工作项依赖与期限；界面不额外编制管理负荷或供应商产能。</p>

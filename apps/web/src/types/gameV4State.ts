@@ -218,6 +218,14 @@ export interface V4EventOption {
   effects: V4EventEffect[]
 }
 
+export interface V4EventEscalation {
+  description: string
+  expires_weeks: number
+  triggered_week: number
+  options: V4EventOption[]
+  timeout_option_id: string
+}
+
 export interface V4PendingEvent {
   event_id: string
   name: string
@@ -228,6 +236,9 @@ export interface V4PendingEvent {
   once_per_project: boolean
   viewed: boolean
   options: V4EventOption[]
+  timeout_option_id: string
+  escalated: boolean
+  escalation: V4EventEscalation | null
 }
 
 export interface V4WorkEventState {
@@ -406,18 +417,26 @@ const isV4Finance = (value: unknown): value is V4Finance => exactFields(value, [
   && isObjectArray(value.loans) && isV4Solvency(value.solvency)
 
 const isV4EventEffect = (value: unknown): value is V4EventEffect => exactFields(value, ['scope', 'target', 'stage', 'value'])
-  && isText(value.scope) && isText(value.target) && isText(value.stage) && signed(value.value)
+  && isText(value.scope) && isText(value.target) && typeof value.stage === 'string' && signed(value.value)
 
 const isV4EventOption = (value: unknown): value is V4EventOption => exactFields(value,
   ['id', 'label', 'kind', 'risk_hint', 'cost', 'effects'])
   && isText(value.id) && isText(value.label) && isText(value.kind) && isText(value.risk_hint)
   && signed(value.cost) && arrayOf(value.effects, isV4EventEffect)
 
+const isV4EventEscalation = (value: unknown): value is V4EventEscalation => exactFields(value,
+  ['description', 'expires_weeks', 'triggered_week', 'options', 'timeout_option_id'])
+  && isText(value.description) && integer(value.expires_weeks) && integer(value.triggered_week)
+  && arrayOf(value.options, isV4EventOption) && typeof value.timeout_option_id === 'string'
+
 const isV4PendingEvent = (value: unknown): value is V4PendingEvent => exactFields(value,
-  ['event_id', 'name', 'work_id', 'triggered_week', 'expires_week', 'cooldown_weeks', 'once_per_project', 'viewed', 'options'])
+  ['event_id', 'name', 'work_id', 'triggered_week', 'expires_week', 'cooldown_weeks', 'once_per_project', 'viewed', 'options',
+    'timeout_option_id', 'escalated', 'escalation'])
   && isText(value.event_id) && isText(value.name) && isText(value.work_id) && integer(value.triggered_week)
   && nullableInteger(value.expires_week) && integer(value.cooldown_weeks) && typeof value.once_per_project === 'boolean'
   && typeof value.viewed === 'boolean' && arrayOf(value.options, isV4EventOption)
+  && typeof value.timeout_option_id === 'string' && typeof value.escalated === 'boolean' && nullableObject(value.escalation)
+  && (value.escalation === null || isV4EventEscalation(value.escalation))
 
 const isV4WorkEventState = (value: unknown): value is V4WorkEventState => exactFields(value, ['cooldowns', 'major_seen'])
   && isRecord(value.cooldowns) && Object.values(value.cooldowns).every((entry) => integer(entry)) && arrayOf(value.major_seen, isText)

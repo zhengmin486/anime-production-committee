@@ -136,7 +136,7 @@ function adaptReceipt(state: V4GameState, report?: V4WeekReport): WeeklyReceipt 
     return {
       projectId: work.work_id, title: project?.offer.name ?? work.work_id, episodeIndex: episode?.index ?? null,
       stage: project?.episodes.flatMap((entry) => entry.stages).find((entry) => entry.items.some((candidate) => candidate.id === item.item_id))?.key ?? null,
-      itemKey: source?.key ?? item.item_id, workDelta: item.points, qualityDelta: item.quality_gain,
+      itemKey: source?.key ?? item.item_id, itemId: item.item_id, workDelta: item.points, qualityDelta: item.quality_gain,
       detail: `核心结算 ${item.points} 工作点`, reason: '由 v4 核心计划冻结、人员能力、依赖与本周状态结算',
     }
   })) ?? []
@@ -149,6 +149,16 @@ function adaptReceipt(state: V4GameState, report?: V4WeekReport): WeeklyReceipt 
     pendingProjectIds: state.works.map((work) => work.id), allowedActions: state.company.status === 'ended' ? ['生成经营总结'] : ['逐部结清待交付作品'],
     blockedActions: ['推进周次', '修改人员与计划', '承接新企划'],
   } : null
+  const eventOutcomes = report?.events.expired?.map((entry) => `事件 ${entry.event_id} 已到期，核心自动执行选项 ${entry.option_id}。`) ?? []
+  const settlementLines = report?.settlements.map((entry) => {
+    const workId = typeof entry.work_id === 'string' ? entry.work_id : '未知作品'
+    const archived = state.archive.works.find((work) => work.id === workId)
+    const status = typeof entry.status === 'string' ? entry.status : typeof entry.end_reason === 'string' ? entry.end_reason : '已结算'
+    const rating = typeof entry.rating === 'string' ? `评级 ${entry.rating}` : '评级 —'
+    const revenue = typeof entry.commercial_revenue === 'number' ? `商业收入 ¥${entry.commercial_revenue.toLocaleString('zh-CN')}` : '商业收入 —'
+    const net = typeof entry.net_received === 'number' ? `净到账 ¥${entry.net_received.toLocaleString('zh-CN')}` : '净到账 —'
+    return `${archived?.name ?? workId}：${status}，${rating}，${revenue}，${net}。`
+  }) ?? []
   return {
     week: state.company.week, state: closing ? 'closing' : event ? 'event_pending' : 'normal',
     stateNote: closing ? `核心状态：${state.company.status}${state.company.end_reason ? `（${state.company.end_reason}）` : ''}` : event ? '事件由 v4 核心按项目维护；查看与处理是两个独立动作。' : '核心状态正常。',
@@ -159,7 +169,7 @@ function adaptReceipt(state: V4GameState, report?: V4WeekReport): WeeklyReceipt 
       { category: 'production', label: '制作费', amount: -(report.funds.costs?.production ?? 0) },
     ] satisfies WeeklyReceipt['costLines']).filter((line) => line.amount !== 0) : [],
     projectLines, staffLines, mustDecide: [], autoExecuted: ['持续计划按核心冻结快照执行', '人员每周严格归属一个项目'],
-    reportOnly: ['流水与 Archive 只展示核心事实'], nextFocus: closing ? ['逐部结清作品并生成核心经营总结'] : report?.settlements.length ? ['查看核心交付结算与 Archive'] : event ? ['处理待议事件'] : ['检查计划与人员归属后推进一周'], event,
+    reportOnly: ['流水与 Archive 只展示核心事实'], nextFocus: closing ? ['逐部结清作品并生成核心经营总结'] : report?.settlements.length ? ['查看核心交付结算与 Archive'] : event ? ['处理待议事件'] : ['检查计划与人员归属后推进一周'], event, eventOutcomes, settlements: settlementLines,
   }
 }
 
@@ -177,6 +187,8 @@ export function adaptV4State(state: V4GameState, receipts: WeeklyReceipt[] = [])
     heat: state.market.heat[offer.genre]?.level === 'high' ? 'hot' : state.market.heat[offer.genre]?.level === 'low' ? 'cold' : 'warm',
     hook: `${offer.genre} · 目标质量 ${offer.target_quality} · ${offer.episode_count} 集`, blockedBy: state.company.reputation < offer.min_reputation ? `声望不足（需要 ${offer.min_reputation}）` : null,
     allowedModes: offer.allowed_modes as Mode[], committeeCandidates: offer.committee_candidates,
+    expiresWeek: offer.expires_week, lockedUntil: offer.locked_until ?? null, lockUsed: offer.lock_used ?? false,
+    depositPaid: offer.deposit_paid ?? 0, depositBasis: offer.deposit_basis ?? 0, offerSourceType: offer.offer_source_type ?? 'market',
   }))
   const history: WorkRecord[] = state.archive.works.map((work) => ({
     id: work.id, title: work.name, source: work.source, scale: work.scale, endWeek: work.end_week, quality: work.quality_score,

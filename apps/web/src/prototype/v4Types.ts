@@ -2,7 +2,7 @@ export type V4Ability = 'planning' | 'direction' | 'drawing' | 'animation' | 'ma
 export type V4Dimension = 'story' | 'direction' | 'drawing' | 'animation' | 'art' | 'sound'
 export type V4Stage = 'content_design' | 'storyboard_key_animation' | 'animation' | 'art_visual' | 'photography_editing' | 'sound_delivery'
 export type V4Mode = 'contract' | 'committee'
-export type V4Source = 'manga' | 'light_novel' | 'game' | 'original' | 'publisher' | 'studio'
+export type V4Source = 'manga' | 'light_novel' | 'game' | 'original' | 'publisher' | 'studio' | 'market'
 export type V4Scale = 'ova' | 'short' | 'tv' | 'movie'
 export type V4Channel = 'bd' | 'publisher' | 'toy' | 'music' | 'tv_broadcast' | 'domestic_streaming' | 'overseas' | 'merchandise' | 'bd_dvd' | 'tv' | 'streaming' | 'publishing'
 
@@ -66,6 +66,12 @@ export interface V4Offer {
   commercial_potential: number
   development_fee?: number
   draft_status?: string
+  expires_week?: number
+  locked_until?: number | null
+  lock_used?: boolean
+  deposit_paid?: number
+  deposit_basis?: number
+  offer_source_type?: string
 }
 
 export interface V4CommitteeMember {
@@ -246,7 +252,7 @@ export interface V4WorkActionResponse extends V4StateResponse { report?: Record<
 export const V4_METHODS = [
   'initialize_game', 'start_work', 'create_custom_offer', 'adopt_proposal', 'reject_proposal',
   'assign_staff', 'set_work_plan', 'deliver_work', 'abort_work', 'buy_tv_service', 'request_extension',
-  'advance_week', 'view_event', 'resolve_event', 'end_company', 'finalize_delivery', 'finalize_company',
+  'advance_week', 'view_event', 'resolve_event', 'lock_offer', 'end_company', 'finalize_delivery', 'finalize_company',
 ] as const
 export type V4Method = typeof V4_METHODS[number]
 

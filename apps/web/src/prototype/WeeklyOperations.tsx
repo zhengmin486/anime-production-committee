@@ -134,13 +134,19 @@ export function WeeklyOperations({ data, state, onOpenProject, initialWeek, onWe
       </li>)}</ul>}
     </Panel>
 
+    {((receipt.eventOutcomes?.length ?? 0) > 0 || (receipt.settlements?.length ?? 0) > 0) && <Panel eyebrow="CORE OUTCOME / 核心自动结果" title="本周自动执行与交付结算" marks={['confirmed']}
+      note="以下内容来自 advance_week 的核心周报；事件到期默认分支与期限交付不会在前端模拟。">
+      {(receipt.eventOutcomes?.length ?? 0) > 0 && <><h3 className="sub-heading">事件到期结果</h3><ul className="quiet-list">{receipt.eventOutcomes?.map((line) => <li key={line}>{line}</li>)}</ul></>}
+      {(receipt.settlements?.length ?? 0) > 0 && <><h3 className="sub-heading">作品结算结果</h3><ul className="quiet-list">{receipt.settlements?.map((line) => <li key={line}>{line}</li>)}</ul></>}
+    </Panel>}
+
     <div className="proto-two-col">
       <Panel eyebrow="PRODUCTION / 本周各项目做了什么" title="产出与原因" marks={['confirmed']}
         note="一次推进，所有项目在同一核心事务中结算；失败时整周回滚。">
         {receipt.projectLines.length === 0 ? <p className="proto-inline-note"><FileText size={16} aria-hidden="true" /> 本周没有项目产出。</p> :
           <ul className="week-projects">{receipt.projectLines.map((line) => {
             const item = itemOf(line.projectId, line.itemKey)
-            return <li key={`${line.projectId}-${line.itemKey}`}>
+            return <li key={line.itemId ?? `${line.projectId}-${line.episodeIndex ?? 'common'}-${line.stage ?? 'none'}-${line.itemKey}`}>
               <div className="week-project-head"><button className="link-button" onClick={() => onOpenProject(line.projectId)}>{line.title}</button><span className="chip">{line.episodeIndex === null ? '公共制作' : `第 ${line.episodeIndex} 集`}</span>{line.stage && <span className="chip">{episodeStageShortNames[line.stage]}</span>}{item && <span className="chip chip-item">{item.name}</span>}</div>
               <p className="week-deltas">工作量 <strong>{signedPoint(line.workDelta)}</strong> · 质量 <strong>{signedPoint(line.qualityDelta)}</strong></p><p className="week-detail">{line.detail}</p><p className="week-reason">原因：{line.reason}</p>
             </li>
@@ -169,7 +175,7 @@ export function WeeklyOperations({ data, state, onOpenProject, initialWeek, onWe
         aside={<p className="proto-since">归属：{data.projects.find((project) => project.id === event.projectId)?.title ?? '—'} · {event.deadlineWeek === null ? '无期限' : `第 ${event.deadlineWeek} 周前`}</p>}
         note={event.description}>
         {data.pendingEvents.length > 1 && <div className="filter-chips" role="group" aria-label="待处理事件选择">{data.pendingEvents.map((item) => <button key={item.id} className={item.id === event.id ? 'is-active' : ''} onClick={() => setEventId(item.id)}>{item.title}</button>)}</div>}
-        <ul className="signal-list">{event.signals.map((signal) => <li key={signal}>{signal}</li>)}</ul>
+        <ul className="signal-list">{event.signals.map((signal, index) => <li key={`${signal}-${index}`}>{signal}</li>)}</ul>
         <div className="proto-table-wrap"><table className="proto-table event-options">
           <thead><tr><th>选择</th><th>选项</th><th>确定代价</th><th>核心效果快照</th><th>风险</th><th>选项类型</th></tr></thead>
           <tbody>{event.options.map((option) => <tr key={option.id} className={selectedOption === option.id ? 'is-selected' : undefined}>
@@ -183,6 +189,6 @@ export function WeeklyOperations({ data, state, onOpenProject, initialWeek, onWe
         <p className="proto-footnote">查看后允许推进周；若到期仍未处理，核心按冻结的默认分支自动执行。</p>
       </Panel> : <Panel eyebrow="EVENT / 制作异常" title="本周没有需要处理的事件" marks={['confirmed']}><p className="proto-inline-note"><FileText size={16} aria-hidden="true" /> 普通周只呈现经营回执。</p></Panel>}
     </section>
-    <p className="proto-legend">规则来源：v4 C++ 核心。外包、加班、中止及部分委员会取整能力尚未实现，本页不会将它们伪装为可玩。</p>
+    <p className="proto-legend">规则来源：v4 C++ 核心。外包与加班计划字段当前只保存；本页未接入招聘与外包签约，不会将它们伪装为可玩。中止作品已在作品详情中接入核心命令。</p>
   </div>
 }

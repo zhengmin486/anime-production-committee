@@ -4,7 +4,7 @@
 export type EpisodeStage = 'content_design' | 'storyboard_key_animation' | 'animation' | 'art_visual' | 'photography_editing' | 'sound_delivery'
 export type Role = 'director' | 'scriptwriter' | 'animation_director' | 'key_animator' | 'animator' | 'production_manager' | 'postproduction'
 export type Ability = 'planning' | 'direction' | 'drawing' | 'animation' | 'management' | 'postproduction'
-export type Source = 'manga' | 'light_novel' | 'game' | 'original' | 'publisher' | 'studio'
+export type Source = 'manga' | 'light_novel' | 'game' | 'original' | 'publisher' | 'studio' | 'market'
 export type Scale = 'ova' | 'short' | 'tv' | 'movie'
 export type Mode = 'contract' | 'committee'
 export type Channel = 'bd' | 'publisher' | 'toy' | 'music' | 'tv_broadcast' | 'domestic_streaming' | 'overseas' | 'merchandise' | 'bd_dvd' | 'tv' | 'streaming' | 'publishing'
@@ -32,7 +32,7 @@ export const roleNames: Record<Role, string> = {
 export const abilityNames: Record<Ability, string> = {
   planning: '企划', direction: '演出', drawing: '作画', animation: '动画', management: '管理', postproduction: '后期',
 }
-export const sourceNames: Record<Source, string> = { manga: '漫画改编', light_novel: '轻小说改编', game: '游戏改编', original: '原创', publisher: '出版委托', studio: '制作所企划' }
+export const sourceNames: Record<Source, string> = { manga: '漫画改编', light_novel: '轻小说改编', game: '游戏改编', original: '原创', publisher: '出版委托', studio: '制作所企划', market: '市场企划' }
 export const scaleNames: Record<Scale, string> = { ova: 'OVA', short: '短篇', tv: '电视动画', movie: '剧场版' }
 export const modeNames: Record<Mode, string> = { contract: '承制', committee: '制作委员会' }
 export const channelNames: Record<Channel, string> = { bd: 'BD', publisher: '出版', toy: '玩具', music: '音乐', tv_broadcast: '电视', domestic_streaming: '国内配信', overseas: '海外', merchandise: '周边', bd_dvd: 'BD/DVD', tv: '电视', streaming: '配信', publishing: '出版' }
@@ -249,6 +249,7 @@ export interface ProjectWeekLine {
   episodeIndex: number | null
   stage: EpisodeStage | null
   itemKey: string | null
+  itemId?: string
   workDelta: number
   qualityDelta: number
   detail: string
@@ -337,6 +338,8 @@ export interface WeeklyReceipt {
   reportOnly: string[]
   nextFocus: string[]
   event: EventCard | null
+  eventOutcomes?: string[]
+  settlements?: string[]
 }
 
 export interface MarketOffer {
@@ -353,6 +356,12 @@ export interface MarketOffer {
   blockedBy: string | null
   allowedModes: Mode[]
   committeeCandidates: string[]
+  expiresWeek?: number
+  lockedUntil?: number | null
+  lockUsed?: boolean
+  depositPaid?: number
+  depositBasis?: number
+  offerSourceType?: string
 }
 
 export const offerOriginNames: Record<MarketOffer['origin'], string> = {
