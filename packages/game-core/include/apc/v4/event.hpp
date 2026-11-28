@@ -53,6 +53,9 @@ struct EscalationSpec {
 struct EventSpec {
     std::string id;
     std::string name;
+    // #123：内容层作用范围（project/company）。只用于内容校验与执行路由，
+    // 不进入 PendingEvent 持久化形状；work_id 仍是来源项目。
+    std::string scope = "project";
     std::string category;    // personnel / quality / budget / schedule
     std::string polarity;    // negative / positive
     std::string tier;        // normal / major

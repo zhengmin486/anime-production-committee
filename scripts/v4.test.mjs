@@ -4048,6 +4048,51 @@ test('#122 旧存档兼容：缺 vendor_request 的 pending 快照 round-trip �
   const blocked = call('resolve_event', { state, work_id: 'work_01', event_id: 'nope', option_id: 'ok' })
   assert.ok(blocked.error)
 })
+test('#123 内容校验：company 事件只允许资金负向与全员工状态，不写项目制作', () => {
+  const base = {
+    schema_version: 1, id: 'company_fixture', name: '公司事件', category: 'budget',
+    polarity: 'negative', tier: 'normal', tag: 'fixture', stages: [],
+    priority: 10, cooldown_weeks: 0, once_per_project: false,
+    trigger: { metric: 'funds', op: '<=', threshold: 100 }, random_weight: 0,
+    expires_weeks: 0, description: '夹具',
+  }
+  const validate = (card) => ok('validate_event_catalog',
+    { source: 'fixture.json', catalog: { schema_version: 1, cards: [card] } })
+  const options = [{ id: 'a', label: '承担', kind: 'abandon', cost: 0,
+    effects: [{ scope: 'instant', target: 'morale', value: -3 },
+              { scope: 'instant', target: 'funds', value: -1000 }] }]
+  assert.equal(validate({ ...base, scope: 'company', options }).ok, true)
+  assert.equal(validate({ ...base, scope: 'project', options }).ok, true)
+  assert.equal(validate({ ...base, options }).ok, true, '缺 scope 默认 project')
+  assert.ok(validate({ ...base, scope: 'nope', options }).issues.some((i) => i.field === 'scope'))
+  const badQuality = [{ id: 'a', label: 'x', kind: 'abandon', cost: 0,
+    effects: [{ scope: 'instant', target: 'quality', value: -1 }] }]
+  assert.ok(validate({ ...base, scope: 'company', options: badQuality }).issues.some((i) => i.field === 'scope'))
+  const badIncome = [{ id: 'a', label: 'x', kind: 'abandon', cost: 0,
+    effects: [{ scope: 'instant', target: 'funds', value: 100 }] }]
+  assert.ok(validate({ ...base, scope: 'company', options: badIncome }).issues.some((i) => i.field === 'scope'))
+})
+
+test('#123 P1-G2：事件效果经领域 helper 写入，玩家可见结果与旧路径一致', () => {
+  const run = () => {
+    let state = setupTiny(17)
+    state = assign(state, 'staff_dir', 'work_01')
+    state.events.pending.push({
+      event_id: 'effect_fixture', name: '效果夹具', work_id: 'work_01',
+      triggered_week: 0, expires_week: null, cooldown_weeks: 0,
+      once_per_project: false, viewed: true,
+      options: [{ id: 'a', label: '承担', kind: 'abandon', cost: 0, risk_hint: '',
+        effects: [{ scope: 'instant', target: 'morale', value: -5 },
+                  { scope: 'instant', target: 'fatigue', value: 7 }] }]
+    })
+    return ok('resolve_event', { state, work_id: 'work_01', event_id: 'effect_fixture', option_id: 'a' }).state
+  }
+  const first = run()
+  const second = run()
+  assert.equal(ok('hash_state', { state: first }).hash, ok('hash_state', { state: second }).hash)
+  const dir = first.staff.find((m) => m.id === 'staff_dir')
+  assert.ok(dir.fatigue >= 7 && dir.morale <= 100 - 5, '经 Staff helper 钳制写入')
+})
 // ---------------- INV-27 监督岗位 ----------------
 
 function startedContract(offerId = 'offer_01', seed = 7) {

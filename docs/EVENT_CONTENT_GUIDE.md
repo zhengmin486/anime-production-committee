@@ -35,6 +35,7 @@
 | `trigger` | 是 | `{metric, op, threshold}` | 见下表 |
 | `random_weight` | 是 | 0–100 | 0 表示只靠表现触发；>0 才进随机池 |
 | `expires_weeks` | 是 | 0–8 | 处理期限；正面机会必须 0 |
+| `scope` | 否 | `project`（默认）/ `company` | #123 公司级事件；仅作用于资金负向与全体 core 的士气/疲劳，不写项目制作状态，不进 pending 形状 |
 | `escalation` | 否 | `null` 或 `{description, expires_weeks: 2, options[], timeout_option_id}` | 一次升级载荷；仅 `expires_weeks>0` 的 `major` 事件可配，详见 [限时升级语义](EVENT_ESCALATION.md) |
 | `timeout_option_id` | 升级时必填 | 指向本卡 `options[]` 中 `kind=abandon/decline` 的一项 | 首次超时的轻罚分支 |
 | `escalation_note` | 否 | `string \| null` | 超时后果的定性描述，不写数值 |
