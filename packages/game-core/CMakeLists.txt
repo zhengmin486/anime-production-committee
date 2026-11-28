@@ -25,8 +25,7 @@ else()
     target_compile_options(game_core PRIVATE -Wall -Wextra -Wpedantic)
 endif()
 
-# v4 target architecture (M1 onward): compiled alongside v3; production entry switches at M6.
-# This target ensures v4 sources compile; shipped WASM remains v3 until M6.
+# v4 target architecture (M6): compiled alongside v3; the prototype uses v4 WASM.
 add_library(game_core_v4 STATIC
     src/v4/model.cpp
     src/v4/kernel.cpp
@@ -64,6 +63,24 @@ if(EMSCRIPTEN)
     get_filename_component(APC_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../.." ABSOLUTE)
     set_target_properties(game_core_wasm PROPERTIES
         OUTPUT_NAME "game-core"
+        SUFFIX ".mjs"
+        RUNTIME_OUTPUT_DIRECTORY "${APC_ROOT}/apps/web/public/wasm"
+    )
+    target_compile_options(game_core_v4 PUBLIC -fexceptions)
+    add_executable(game_core_v4_wasm bindings/v4_bindings.cpp)
+    target_link_libraries(game_core_v4_wasm PRIVATE game_core_v4)
+    target_link_options(game_core_v4_wasm PRIVATE
+        --bind --no-entry -fexceptions
+        -sDISABLE_EXCEPTION_CATCHING=0
+        -sMODULARIZE=1
+        -sEXPORT_ES6=1
+        -sEXPORT_NAME=createGameCoreV4
+        -sENVIRONMENT=web,node
+        -sALLOW_MEMORY_GROWTH=1
+        -sFILESYSTEM=0
+    )
+    set_target_properties(game_core_v4_wasm PROPERTIES
+        OUTPUT_NAME "game-core-v4"
         SUFFIX ".mjs"
         RUNTIME_OUTPUT_DIRECTORY "${APC_ROOT}/apps/web/public/wasm"
     )

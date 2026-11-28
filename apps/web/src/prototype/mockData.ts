@@ -1,4 +1,5 @@
-import type { Ability, EpisodeStage, PrototypeData, WorkItem } from './model'
+import { EPISODE_STAGES, sumWork } from './model'
+import type { Ability, Episode, EpisodeStage, Project, PrototypeData, WorkItem, WorkState, WorkSummary } from './model'
 
 const ab = (planning: number, direction: number, drawing: number, animation: number, management: number, postproduction: number) => ({
   planning, direction, drawing, animation, management, postproduction,
@@ -38,8 +39,23 @@ const EPISODE_ITEM_SPECS: ItemSpec[] = [
 const FULL = EPISODE_ITEM_SPECS.map(() => 1000)
 const EMPTY = EPISODE_ITEM_SPECS.map(() => 0)
 
+const withStates = (items: Array<Omit<WorkItem, 'state'>>): WorkItem[] => {
+  const byKey = new Map(items.map((item) => [item.key, item]))
+  const stateOf = (item: Omit<WorkItem, 'state'>, visiting = new Set<string>()): WorkState => {
+    if (item.deps.some((dep) => {
+      if (visiting.has(dep)) return true
+      const source = byKey.get(dep)
+      return source !== undefined && stateOf(source, new Set([...visiting, dep])) !== 'delivered' && stateOf(source, new Set([...visiting, dep])) !== 'completed'
+    })) return 'blocked'
+    const reached = item.workDone * 1000 >= item.deliverAt * item.workTotal
+    if (reached) return item.workDone >= item.workTotal ? 'completed' : 'delivered'
+    return item.workDone > 0 ? 'active' : 'ready'
+  }
+  return items.map((item) => ({ ...item, state: stateOf(item) }))
+}
+
 /* rates 为每个工作项完成占 workTotal 的千分比，只用于生成样本。 */
-const ep = (prefix: string, rates: number[]): WorkItem[] => EPISODE_ITEM_SPECS.map((spec, index) => ({
+const ep = (prefix: string, rates: number[]): WorkItem[] => withStates(EPISODE_ITEM_SPECS.map((spec, index) => ({
   key: `${prefix}:${spec.key}`,
   name: spec.name,
   stage: spec.stage,
@@ -47,9 +63,10 @@ const ep = (prefix: string, rates: number[]): WorkItem[] => EPISODE_ITEM_SPECS.m
   workTotal: spec.workTotal,
   workDone: Math.round(spec.workTotal * rates[index] / 1000),
   deliverAt: spec.deliverAt,
+  deliverPoints: Math.round(spec.workTotal * spec.deliverAt / 1000),
   isGate: spec.isGate,
   deps: spec.deps.map((dep) => (dep.startsWith('common:') ? dep : `${prefix}:${dep}`)),
-}))
+})))
 
 const COMMON_ITEM_SPECS: Array<{ key: string; name: string; ability: Ability; deliverAt: number; deps: string[] }> = [
   { key: 'series_composition', name: '系列构成', ability: 'planning', deliverAt: 850, deps: [] },
@@ -60,7 +77,7 @@ const COMMON_ITEM_SPECS: Array<{ key: string; name: string; ability: Ability; de
   { key: 'op_ed', name: 'OP/ED', ability: 'postproduction', deliverAt: 800, deps: [] },
 ]
 
-const common = (totals: number[], rates: number[]): WorkItem[] => COMMON_ITEM_SPECS.map((spec, index) => ({
+const common = (totals: number[], rates: number[]): WorkItem[] => withStates(COMMON_ITEM_SPECS.map((spec, index) => ({
   key: `common:${spec.key}`,
   name: spec.name,
   stage: null,
@@ -68,11 +85,34 @@ const common = (totals: number[], rates: number[]): WorkItem[] => COMMON_ITEM_SP
   workTotal: totals[index],
   workDone: Math.round(totals[index] * rates[index] / 1000),
   deliverAt: spec.deliverAt,
+  deliverPoints: Math.round(totals[index] * spec.deliverAt / 1000),
   isGate: false,
   deps: spec.deps,
-}))
+})))
 
 const doneCommon = [1000, 1000, 1000, 1000, 1000, 1000]
+
+type EpisodeFixture = Omit<Episode, 'work' | 'stages'>
+type ProjectFixture = Omit<Project, 'work' | 'commonWork' | 'completion' | 'deliveredEpisodeCount' | 'episodes'> & { episodes: EpisodeFixture[] }
+
+const makeEpisode = (episode: EpisodeFixture): Episode => ({
+  ...episode,
+  work: sumWork(episode.workItems),
+  stages: Object.fromEntries(EPISODE_STAGES.map((stage) => [stage, sumWork(episode.workItems.filter((item) => item.stage === stage))])) as Record<EpisodeStage, WorkSummary>,
+})
+
+const makeProject = (project: ProjectFixture): Project => {
+  const episodes = project.episodes.map(makeEpisode)
+  const work = sumWork([...project.commonItems, ...episodes.flatMap((episode) => episode.workItems)])
+  return {
+    ...project,
+    episodes,
+    work,
+    commonWork: sumWork(project.commonItems),
+    completion: work.percent,
+    deliveredEpisodeCount: episodes.filter((episode) => episode.status === 'delivered').length,
+  }
+}
 
 /* 全部为静态样本数值，用于验证信息层级是否读得懂，不是平衡后的正式参数。 */
 export const prototypeData: PrototypeData = {
@@ -85,7 +125,7 @@ export const prototypeData: PrototypeData = {
     weeklyFixed: { salary: 186_000, operations: 92_000 },
     reputation: 58,
     runwayWeeks: 2,
-    headline: '三部作品同时在制，作画产能吃紧；第 16 周的资金危机已解除，但现金余量只剩两周。',
+    headline: '三部作品同时在制，作画产能吃紧；第 16 周结算已回滚，第 17 周投资到账后恢复正常经营。',
   },
 
   staff: [
@@ -96,6 +136,15 @@ export const prototypeData: PrototypeData = {
     { id: 's5', name: '何茵', role: 'postproduction', employment: 'core', abilities: ab(20, 34, 26, 30, 24, 76), specialty: 'postproduction', fatigue: 44, morale: 70, weeklySalary: 26_000, projectFee: 0, departureWarning: false, statusNote: '本周归属《小满》完成母版，交付后下周可重新分配' },
     { id: 's6', name: '周慕', role: 'production_manager', employment: 'core', abilities: ab(56, 38, 26, 28, 72, 30), specialty: 'management', fatigue: 66, morale: 61, weeklySalary: 30_000, projectFee: 0, departureWarning: true, statusNote: '本周只能归一个项目，另两部的排产冲突要靠玩家下周重新分配解决' },
     { id: 's7', name: '白鹭', role: 'scriptwriter', employment: 'temporary', abilities: ab(64, 46, 22, 18, 20, 16), specialty: 'planning', fatigue: 35, morale: 78, weeklySalary: 0, projectFee: 90_000, departureWarning: false, statusNote: '按项目计酬，本周归《夜行电车》；临时员工的跨项目调度属于另一套资源规则' },
+  ],
+
+  facilities: [
+    { id: 'f1', name: '制作工位', kind: 'workspace', status: 'occupied', statusLabel: '使用中', detail: '12 / 16 个工位', note: '当前供三部作品共用；工位数量不是项目槽位，也不限制并行项目数。', actionLabel: '查看制作现场' },
+    { id: 'f2', name: '剪辑室', kind: 'editing', status: 'available', statusLabel: '可预约', detail: '1 间 · 2 个操作位', note: '《小满》本周使用后期操作位，其他时段可预约。', actionLabel: '查看作品发行' },
+    { id: 'f3', name: '会议室', kind: 'meeting', status: 'available', statusLabel: '可使用', detail: '1 间 · 6 个席位', note: '用于待决议题、企划与合作决策；没有事件时不会强制开会。', actionLabel: '进入会议室' },
+    { id: 'f4', name: '资料柜', kind: 'archive', status: 'available', statusLabel: '可查阅', detail: '已交付作品 3 部', note: '只收录已经交付的作品，在制项目不进入 Archive。', actionLabel: '查看公司作品墙' },
+    { id: 'f5', name: '接待柜台', kind: 'reception', status: 'occupied', statusLabel: '接待中', detail: '本周 2 个市场企划', note: '企划详情、预算与承接条件在同一处查看。', actionLabel: '查看市场企划' },
+    { id: 'f6', name: '培训室', kind: 'training', status: 'locked', statusLabel: '未解锁', detail: '需要先完成 M3 人才培养', note: '当前 F1 原型不开放培训操作。', actionLabel: null, lockedReason: 'M3 人才培养阶段尚未开放' },
   ],
 
   allocations: [
@@ -122,11 +171,11 @@ export const prototypeData: PrototypeData = {
   ],
 
   projects: [
-    {
+    makeProject({
       id: 'p1', title: '雾港信使 II', source: 'manga', scale: 'tv', mode: 'committee', status: 'producing',
       startWeek: 8, deadlineWeek: 34, episodeCount: 12, focusLabel: '第 7 集 · 分镜与原画', plannedCompletion: 66,
       commonItems: common([60, 85, 70, 30, 45, 35], doneCommon),
-      episodes: [
+      episodes: ([
         { index: 1, title: '归港的信', status: 'delivered', targetWeek: 14, isFocus: false, workItems: ep('ep1', FULL), note: '第 14 周主动交付，质量 76' },
         { index: 2, title: '潮汐表', status: 'delivered', targetWeek: 15, isFocus: false, workItems: ep('ep2', FULL), note: '第 15 周交付，中割外包一次返工' },
         { index: 3, title: '无人应答的灯塔', status: 'delivered', targetWeek: 16, isFocus: false, workItems: ep('ep3', FULL), note: '第 16 周交付，背景提前完成' },
@@ -151,7 +200,7 @@ export const prototypeData: PrototypeData = {
         { index: 10, title: '断频', status: 'not_started', targetWeek: 27, isFocus: false, workItems: ep('ep10', EMPTY), note: '按持续方针排在第 7 集之后' },
         { index: 11, title: '岸上的灯', status: 'not_started', targetWeek: 29, isFocus: false, workItems: ep('ep11', EMPTY), note: '未开始' },
         { index: 12, title: '信使的代价', status: 'not_started', targetWeek: 31, isFocus: false, workItems: ep('ep12', EMPTY), note: '未开始，距作品截止仅 3 周缓冲' },
-      ],
+      ] as EpisodeFixture[]).map(makeEpisode),
       quality: 74, audienceExpectation: 71, commercialPotential: 66,
       plan: { effort: 'focused', priority: 'progress', outsource: 'gap', rush: 'conditional', sinceWeek: 15 },
       planGaps: [
@@ -178,12 +227,12 @@ export const prototypeData: PrototypeData = {
       },
       series: { parentTitle: '雾港信使', relation: '续作', carried: '受众认知与合作关系继承，制作质量不继承' },
       marks: ['confirmed', 'sample'],
-    },
-    {
+    }),
+    makeProject({
       id: 'p2', title: '夜行电车', source: 'light_novel', scale: 'ova', mode: 'contract', status: 'producing',
       startWeek: 13, deadlineWeek: 29, episodeCount: 3, focusLabel: null, plannedCompletion: 38,
       commonItems: common([40, 60, 50, 25, 35, 25], [1000, 1000, 800, 700, 0, 0]),
-      episodes: [
+      episodes: ([
         {
           index: 1, title: '末班车的乘客', status: 'producing', targetWeek: 24, isFocus: false,
           workItems: ep('ep1', [1000, 1000, 1000, 1000, 900, 600, 300, 700, 0, 0, 0, 0, 0, 0]),
@@ -195,7 +244,7 @@ export const prototypeData: PrototypeData = {
           note: '演出构想已达标，分镜做到 33 / 55',
         },
         { index: 3, title: '终点站不在地图上', status: 'not_started', targetWeek: 28, isFocus: false, workItems: ep('ep3', EMPTY), note: '未开始，距作品截止只有 1 周缓冲' },
-      ],
+      ] as EpisodeFixture[]).map(makeEpisode),
       quality: 68, audienceExpectation: 59, commercialPotential: 52,
       plan: { effort: 'standard', priority: 'progress', outsource: 'gap', rush: 'off', sinceWeek: 13 },
       planGaps: [
@@ -215,18 +264,18 @@ export const prototypeData: PrototypeData = {
       },
       series: null,
       marks: ['confirmed'],
-    },
-    {
+    }),
+    makeProject({
       id: 'p3', title: '小满', source: 'original', scale: 'short', mode: 'committee', status: 'producing',
       startWeek: 10, deadlineWeek: 22, episodeCount: 1, focusLabel: '第 1 集 · 声音与最终交付', plannedCompletion: 90,
       commonItems: common([25, 40, 30, 15, 30, 20], doneCommon),
-      episodes: [
+      episodes: ([
         {
           index: 1, title: '小满', status: 'producing', targetWeek: 19, isFocus: true,
           workItems: ep('ep1', [1000, 1000, 1000, 1000, 1000, 1000, 1000, 1000, 1000, 900, 700, 600, 300, 0]),
           note: '门槛项「完成母版」0 / 12，需 1000‰；它未达标，本周交付按钮不可用',
         },
-      ],
+      ] as EpisodeFixture[]).map(makeEpisode),
       quality: 79, audienceExpectation: 52, commercialPotential: 45,
       plan: { effort: 'standard', priority: 'quality', outsource: 'off', rush: 'off', sinceWeek: 10 },
       planGaps: [{ label: '声音与最终交付', planned: '第 18 周完成', actual: '预计第 19 周完成', reason: '藤森色彩排期顺延一天，音响调整只做到 9 / 30' }],
@@ -244,7 +293,7 @@ export const prototypeData: PrototypeData = {
       },
       series: null,
       marks: ['confirmed', 'sample'],
-    },
+    }),
   ],
 
   ledger: [
@@ -264,7 +313,7 @@ export const prototypeData: PrototypeData = {
       week: 18,
       state: 'event_pending',
       stateNote: '本周结算已提交。有一张事件卡等待处理，另有 3 项属于玩家专属决定；持续方针没有打断。',
-      crisis: null,
+      rejected: null,
       closing: null,
       headline: '《小满》只差完成母版，第 7 集原画缺口成为本周唯一硬约束。',
       cashDelta: -16_000,
@@ -315,6 +364,7 @@ export const prototypeData: PrototypeData = {
         description: '第 7 集两张关键原画与「分镜与原画」阶段的演出构想不一致，作画监督要求返工；该集原画 49 / 95 尚未达到 900‰ 最低交付，中割已经被依赖卡住。',
         signals: ['第 7 集原画连续两周产出低于计划（-4、-6）', '陈砚疲劳 74 / 士气 58', '第 7 集是当前项目内定向目标，产能被它占用'],
         deadlineWeek: 19,
+        viewed: false,
         options: [
           { id: 'o1', label: '本周返工', cost: 0, gain: '质量 +2，避免返工累积到完成母版阶段', risk: 'medium', riskNote: '第 7 集原画进度再落后约一周，第 8 集拿不到作画人手', fits: '工期压力可以承受时' },
           { id: 'o2', label: '推迟到第 21 周集中返工', cost: 12_000, gain: '保住本周产出', risk: 'high', riskNote: '返工压力累积到动画与作画检查，若届时疲劳未缓解损失更大', fits: '只在本周绝不能延期时' },
@@ -331,9 +381,9 @@ export const prototypeData: PrototypeData = {
       week: 17,
       state: 'normal',
       stateNote: '正常经营周：只有 1 项需要玩家决定，其余由持续方针自动推进。',
-      crisis: null,
+      rejected: null,
       closing: null,
-      headline: '委员会首期投资到账，资金危机解除；第 6 集达到最低交付。',
+      headline: '委员会首期投资到账，恢复正常经营；第 6 集达到最低交付。',
       cashDelta: 900_000,
       costLines: [
         { category: 'investment', label: '《雾港II》委员会首期投资', amount: 1_300_000 },
@@ -357,57 +407,45 @@ export const prototypeData: PrototypeData = {
         { id: 'd17', projectId: 'p1', kind: 'delivery', label: '《雾港II》第 6 集是否本周交付', detail: '门槛项「完成母版」已达 1000‰；主动交付后该集立即停止生产，不再投入工作量或提升质量。', options: ['本周交付第 6 集', '继续打磨到 100% 再交付'] },
       ],
       autoExecuted: ['三部作品持续方针均沿用上周，未打断。', '《夜行电车》第 2 集脚本按方针继续，未要求确认。'],
-      reportOnly: ['《小满》音乐 demo 到位，质量 +1。', '资金危机解除：偿付能力恢复，回到正常经营。'],
+      reportOnly: ['《小满》音乐 demo 到位，质量 +1。', '第 16 周回滚没有改变公司状态；本周刚性支出预检通过。'],
       nextFocus: ['第 7 集原画产能缺口开始成形。'],
       event: null,
     },
     {
       week: 16,
-      state: 'cash_crisis',
-      stateNote: '强制费用预检失败，周结算没有提交任何项目推进。公司进入限时资金危机：不自动借款、不自动追加投资，也没有立即破产。',
-      crisis: {
-        deadlineWeek: 19,
-        cashAfterSettle: 96_000,
-        forcedNextWeek: 412_000,
-        waysOut: [
-          '融资：向冬青社预支《雾港II》第二期合同款（需付息）',
-          '解雇或终止临时人员续约（省 ¥34,000 / 周）',
-          '终止或延期一个项目',
-          '调整计划与人员归属，把投入强度降为「保守」',
-          '交付已达标作品：《小满》第 1 集门槛项未达标，本周不可用',
-          '推进周数：危机期间周数照常前进',
-        ],
+      state: 'settlement_rejected',
+      stateNote: '刚性支出预检失败，本周结算已完整回滚：周数、项目、人员和现金均未改变。首版没有限时资金危机、紧急融资或负数现金。',
+      rejected: {
+        cash: 96_000,
+        requiredNextWeek: 412_000,
+        shortfall: 316_000,
+        reason: '工资与运营等刚性支出无法由当前现金覆盖。',
       },
       closing: null,
-      headline: '工资与运营照付，但下周强制支出比现金多 ¥316,000。',
-      cashDelta: -278_000,
-      costLines: [
-        { category: 'salary', label: '工资（危机期间继续计提）', amount: -186_000 },
-        { category: 'operations', label: '运营（危机期间继续计提）', amount: -92_000 },
-      ],
+      headline: '下周刚性支出比现金多 ¥316,000，本周推进未提交。',
+      cashDelta: 0,
+      costLines: [],
       projectLines: [],
-      staffLines: [
-        { staffId: 's3', name: '苏未', fatigueDelta: -4, moraleDelta: -9, note: '危机周不生产，士气下降' },
-      ],
+      staffLines: [],
       mustDecide: [
-        { id: 'd16', projectId: null, kind: 'new_commitment', label: '危机期限内怎么恢复偿付能力', detail: '缺口 ¥316,000（下周强制支出 412,000 − 现金 96,000）。危机期间禁止立项、签外包、招聘和新增项目支出；允许的自救动作见下。', options: ['融资：向冬青社预支第二期合同款', '终止《夜行电车》延期一周并调整人员归属', '推进周数，等第 17 周委员会首期投资 ¥1,300,000 到账'] },
+        { id: 'd16', projectId: null, kind: 'new_commitment', label: '预检失败后只能调整承诺或结束经营', detail: '首版不提供紧急融资，也不允许现金为负。可以撤销未执行承诺、调整下周计划，或发起关闭流程；系统不会自动借款。', options: ['撤销尚未执行的新增项目承诺', '调整下周计划后重新预检', '发起公司关闭流程'] },
       ],
-      autoExecuted: ['危机期间制作费不计提，所有项目本周工作量为 0，系统没有自动生产。'],
-      reportOnly: ['周数照常推进：第 16 周 → 第 17 周。', '现金允许暂时为负，负数表示欠付，不自动借款。'],
-      nextFocus: ['第 17 周：委员会首期投资到账即可解除危机。', '第 19 周：危机期限届满仍未覆盖强制费用将进入破产结算。'],
+      autoExecuted: ['周推进事务已回滚，没有生成制作费、项目产出或员工状态变化。'],
+      reportOnly: ['经营周仍停留在第 16 周，没有进入第 17 周。', '现金保持 ¥96,000，项目账不形成独立钱包。'],
+      nextFocus: ['调整承诺后重新预检；预检再次失败将进入破产关闭流程。'],
       event: null,
     },
     {
       week: 19,
       state: 'closing',
-      stateNote: '假设第 19 周仍未恢复偿付能力：公司进入关闭流程，不再推进经营周；只能结清待交付项目并生成经营总结。',
-      crisis: null,
+      stateNote: '假设第 19 周发起周推进时刚性支出预检再次失败：该次推进回滚，并立即进入破产关闭流程；不存在等到期限届满才处理的危机周。',
+      rejected: null,
       closing: {
         reason: 'bankrupt', cash: 96_000, pendingProjectIds: ['p1', 'p2', 'p3'],
         allowedActions: ['结清已经达到最低交付门槛的作品或单集', '生成经营总结'],
         blockedActions: ['推进经营周', '立项、招聘、签约外包或新增项目支出', '自动借款或自动追加投资'],
       },
-      headline: '危机期限届满，经营动作停止；待交付作品进入公司关闭交付。',
+      headline: '刚性支出预检失败，公司进入关闭流程；待交付作品进入关闭交付。',
       cashDelta: 0,
       costLines: [],
       projectLines: [],
@@ -423,14 +461,14 @@ export const prototypeData: PrototypeData = {
   ],
 
   marketOffers: [
-    { id: 'm1', title: '深夜食堂的季节', source: 'manga', scale: 'tv', origin: 'market', budget: 2_400_000, durationWeeks: 26, minReputation: 55, heat: 'warm', hook: '原作稳定，作画需求高，正好撞上当前的作画缺口', blockedBy: '核心作画产能不足' },
-    { id: 'm2', title: '转生成路由器', source: 'light_novel', scale: 'short', origin: 'market', budget: 620_000, durationWeeks: 8, minReputation: 40, heat: 'hot', hook: '短平快，能在第 26 周前回款', blockedBy: null },
-    { id: 'm3', title: '雾港·前夜', source: 'original', scale: 'ova', origin: 'self_original', budget: 900_000, durationWeeks: 12, minReputation: 50, heat: 'warm', hook: '系列认知可继承，商业基础比新 IP 稳', blockedBy: '原创必须采用委员会模式' },
-    { id: 'm4', title: '《夜行》番外（员工提案）', source: 'original', scale: 'short', origin: 'staff_proposal', budget: 380_000, durationWeeks: 6, minReputation: 0, heat: 'cold', hook: '周慕提出，可作为团队练手', blockedBy: '提案槽位只有一个' },
+    { id: 'm1', title: '深夜食堂的季节', source: 'manga', scale: 'tv', origin: 'market', budget: 2_400_000, durationWeeks: 26, minReputation: 55, heat: 'warm', hook: '原作稳定，作画需求高，正好撞上当前的作画缺口', blockedBy: '核心作画产能不足', allowedModes: ['contract', 'committee'], committeeCandidates: ['r1', 'r2'] },
+    { id: 'm2', title: '转生成路由器', source: 'light_novel', scale: 'short', origin: 'market', budget: 620_000, durationWeeks: 8, minReputation: 40, heat: 'hot', hook: '短平快，能在第 26 周前回款', blockedBy: null, allowedModes: ['contract', 'committee'], committeeCandidates: ['r3', 'r4'] },
+    { id: 'm3', title: '雾港·前夜', source: 'original', scale: 'ova', origin: 'self_original', budget: 900_000, durationWeeks: 12, minReputation: 50, heat: 'warm', hook: '系列认知可继承，商业基础比新 IP 稳', blockedBy: '原创必须采用委员会模式', allowedModes: ['committee'], committeeCandidates: ['r1'] },
+    { id: 'm4', title: '《夜行》番外（员工提案）', source: 'original', scale: 'short', origin: 'staff_proposal', budget: 380_000, durationWeeks: 6, minReputation: 0, heat: 'cold', hook: '周慕提出，可作为团队练手', blockedBy: '提案槽位只有一个', allowedModes: ['contract'], committeeCandidates: [] },
   ],
 
   relationships: [
-    { id: 'r1', name: '冬青社', kind: 'publisher', since: 6, strength: 72, lastProject: 'p1', note: '《雾港》原作版权方，续作由其引荐；资金危机期间的融资对象' },
+    { id: 'r1', name: '冬青社', kind: 'publisher', since: 6, strength: 72, lastProject: 'p1', note: '《雾港》原作版权方，续作由其引荐；首版不提供紧急融资操作' },
     { id: 'r2', name: '星野周边', kind: 'toy', since: 11, strength: 55, lastProject: 'p1', note: '要求第 20 周前看到角色设计定稿' },
     { id: 'r3', name: '潮汐唱片', kind: 'music', since: 9, strength: 61, lastProject: 'p3', note: '已连续合作两部，愿意小额跟投' },
     { id: 'r4', name: '第四电视台', kind: 'tv_broadcast', since: 2, strength: 38, lastProject: 'p3', note: '首次合作，档期尚未确认' },
@@ -441,4 +479,5 @@ export const prototypeData: PrototypeData = {
     { id: 'h2', title: '纸飞机同盟', source: 'original', scale: 'ova', endWeek: 3, quality: 61, commercial: 44, profit: -180_000, rating: 'C', note: '首部委员会原创，投资本金亏损' },
     { id: 'h3', title: '通勤星座', source: 'light_novel', scale: 'short', endWeek: 5, quality: 70, commercial: 62, profit: 96_000, rating: 'B', note: '短篇试水，回款稳定' },
   ],
+  pendingEvents: [],
 }

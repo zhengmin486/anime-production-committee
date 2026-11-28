@@ -359,59 +359,164 @@ test('读取临近截止的合法边界存档并强制违约交付结算', async
   } finally { await context.close() }
 })
 
-test('原型事件可确认并回显样本结果，切换周次不写入状态', async () => {
+async function readyPrototype(page) {
+  await page.goto(`${baseUrl}/?view=prototype`)
+  await page.getByRole('heading', { name: /新动画工作室/ }).waitFor()
+  await page.getByRole('button', { name: '查看公司现金', exact: true }).filter({ hasText: '¥2,000,000' }).waitFor()
+}
+
+async function openPrototypeScene(page, name) {
+  const navigation = page.getByRole('navigation', { name: '场景切换' })
+  await navigation.getByRole('button', { name: new RegExp(name) }).click()
+  await page.getByRole('heading', { name, exact: true }).waitFor()
+}
+
+async function openPrototypeAction(page, label) {
+  await page.getByRole('region', { name: '场景交互选项' }).getByRole('button', { name: new RegExp(label) }).click()
+}
+
+async function waitForPrototypeWeek(page, week) {
+  await page.getByRole('button', { name: '查看经营周', exact: true })
+    .filter({ hasText: new RegExp(`经营周\\s*${week}(?:\\D|$)`) }).waitFor()
+}
+
+test('四场景入口加载真实 v4 WASM，侧栏切换不推进周次且无资源错误', async () => {
   const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } })
   try {
     const page = await context.newPage()
     const errors = []
+    const failedResponses = []
     page.on('pageerror', (error) => errors.push(error.message))
-    await page.goto(`${baseUrl}/index.html?view=prototype`)
-    await page.getByRole('button', { name: '每周经营', exact: true }).click()
-    await page.getByRole('radio', { name: '选择本周返工' }).check()
-    await page.getByRole('button', { name: '确认处理（原型）' }).click()
-    const result = page.getByRole('region', { name: '事件处理结果' })
-    assert.match(await result.textContent(), /样本结果：本周返工，质量 \+2/)
-    await page.screenshot({ path: resolve(screenshots, 'prototype-event-resolved.png'), fullPage: true, animations: 'disabled' })
-    await page.getByRole('button', { name: /第 17 周/ }).click()
-    await page.getByRole('button', { name: /第 18 周/ }).click()
-    assert.match(await page.getByRole('region', { name: '事件处理结果' }).textContent(), /样本结果：本周返工，质量 \+2/)
+    page.on('console', (message) => { if (message.type() === 'error') errors.push(message.text()) })
+    page.on('response', (response) => { if (response.status() >= 400) failedResponses.push(`${response.status()} ${response.url()}`) })
+    const wasmResponse = page.waitForResponse((response) => response.url().endsWith('/wasm/v4.wasm'))
+    await readyPrototype(page)
+    const response = await wasmResponse
+    assert.match(response.headers()['content-type'], /application\/wasm/)
+    assert.deepEqual([...((await response.body()).subarray(0, 4))], [0, 97, 115, 109])
+
+    const navigation = page.getByRole('navigation', { name: '场景切换' })
+    for (const name of ['办公室', '制作现场', '会议室', '发行与市场']) {
+      const trigger = navigation.getByRole('button', { name: new RegExp(name) })
+      await trigger.click()
+      await page.getByRole('heading', { name, exact: true }).waitFor()
+      assert.equal(await trigger.getAttribute('aria-current'), 'page')
+      const frame = page.getByRole('region', { name: `${name}画面` })
+      await frame.getByRole('img').first().waitFor({ state: 'visible' })
+      assert.equal(await frame.getByRole('button').count(), 0)
+      assert.match(await page.getByRole('button', { name: '查看经营周', exact: true }).textContent(), /经营周\s*0/)
+    }
+    await page.screenshot({ path: resolve(screenshots, 'prototype-v4-scenes.png'), fullPage: true, animations: 'disabled' })
     assert.deepEqual(errors, [])
+    assert.deepEqual(failedResponses, [])
   } finally { await context.close() }
 })
 
-test('原型关闭中禁止推进，仅预览达标结清与总结', async () => {
+test('真实 v4 招聘、锁定承接、周推进与事件确认均提交核心状态', async () => {
   const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } })
   try {
     const page = await context.newPage()
-    await page.goto(`${baseUrl}/index.html?view=prototype`)
-    await page.getByRole('button', { name: '每周经营', exact: true }).click()
-    await page.getByRole('button', { name: /第 19 周/ }).click()
-    assert.equal(await page.getByRole('button', { name: '推进本周', exact: true }).isDisabled(), true)
-    await page.getByRole('button', { name: '预览待交付结清' }).click()
-    assert.match(await page.getByRole('region', { name: '待交付结清预览' }).textContent(), /第 6 集可关闭交付/)
-    await page.getByRole('button', { name: '预览经营总结' }).click()
-    assert.match(await page.getByRole('region', { name: '经营总结预览' }).textContent(), /核心 calculate_result/)
-    await page.screenshot({ path: resolve(screenshots, 'prototype-closing.png'), fullPage: true, animations: 'disabled' })
+    const errors = []
+    const failedResponses = []
+    page.on('pageerror', (error) => errors.push(error.message))
+    page.on('console', (message) => { if (message.type() === 'error') errors.push(message.text()) })
+    page.on('response', (response) => { if (response.status() >= 400) failedResponses.push(`${response.status()} ${response.url()}`) })
+    await readyPrototype(page)
+
+    await openPrototypeScene(page, '办公室')
+    await openPrototypeAction(page, '查看员工与设施')
+    let drawer = page.getByRole('dialog', { name: '公司详情' })
+    const beforeCandidates = await drawer.getByRole('button', { name: '签约核心' }).count()
+    await drawer.getByRole('button', { name: '本周招募' }).click()
+    await page.waitForFunction((count) => [...document.querySelectorAll('button')].filter((button) => button.textContent === '签约核心').length === count + 1, beforeCandidates)
+    await drawer.getByRole('button', { name: '签约核心' }).first().click()
+    await page.waitForFunction((count) => [...document.querySelectorAll('button')].filter((button) => button.textContent === '签约核心').length === count, beforeCandidates)
+    const hired = drawer.getByRole('button', { name: /查看员工/ }).last()
+    const hiredName = (await hired.getAttribute('aria-label')).replace('查看员工 ', '')
+    await hired.click()
+    await drawer.getByRole('button', { name: '解雇核心员工' }).click()
+    await drawer.getByRole('button', { name: '再次点击确认解雇' }).click()
+    await drawer.getByRole('button', { name: `查看员工 ${hiredName}` }).waitFor({ state: 'hidden' })
+    await drawer.getByRole('button', { name: '关闭详情' }).click()
+
+    await openPrototypeScene(page, '发行与市场')
+    await openPrototypeAction(page, '企划承接')
+    drawer = page.getByRole('dialog', { name: '市场企划' })
+    await drawer.getByRole('button', { name: '锁定企划（核心）' }).click()
+    await drawer.getByRole('button', { name: '企划已锁定' }).waitFor({ state: 'visible' })
+    assert.equal(await drawer.getByRole('button', { name: '企划已锁定' }).isDisabled(), true)
+    await drawer.getByRole('button', { name: '承接企划（核心）' }).click()
+    await page.getByRole('button', { name: '查看在制作品', exact: true }).filter({ hasText: '1' }).waitFor()
+    await drawer.getByRole('button', { name: '关闭详情' }).click()
+
+    await openPrototypeScene(page, '会议室')
+    await openPrototypeAction(page, '打开周经营')
+    drawer = page.getByRole('dialog', { name: '每周经营' })
+    for (let week = 1; week <= 6; week += 1) {
+      await drawer.getByRole('button', { name: '推进本周', exact: true }).click()
+      await waitForPrototypeWeek(page, week)
+    }
+    await drawer.getByRole('heading', { name: /电视台探班/ }).waitFor()
+    const advance = drawer.getByRole('button', { name: '推进本周', exact: true })
+    const option = drawer.getByRole('radio', { name: '选择婉拒，专注制作' })
+    assert.equal(await advance.isDisabled(), true)
+    assert.equal(await option.isDisabled(), true)
+    const cash = await page.getByRole('button', { name: '查看公司现金', exact: true }).textContent()
+    await drawer.getByRole('button', { name: '查看事件（核心）' }).click()
+    await page.waitForFunction(() => [...document.querySelectorAll('input[type="radio"]')].some((input) => !input.disabled))
+    assert.equal(await page.getByRole('button', { name: '查看公司现金', exact: true }).textContent(), cash)
+    assert.equal(await advance.isEnabled(), true)
+    await option.check()
+    await drawer.getByRole('button', { name: '确认处理（核心）' }).click()
+    await drawer.getByRole('heading', { name: /电视台探班/ }).waitFor({ state: 'hidden' })
+    assert.equal(await page.getByRole('button', { name: '查看公司现金', exact: true }).textContent(), cash)
+    await waitForPrototypeWeek(page, 6)
+    await page.screenshot({ path: resolve(screenshots, 'prototype-v4-event.png'), fullPage: true, animations: 'disabled' })
+    assert.deepEqual(errors, [])
+    assert.deepEqual(failedResponses, [])
   } finally { await context.close() }
 })
 
-test('原型财务筛选与 Archive 可操作，375px 无横向溢出', async () => {
+test('v4 WASM 加载失败不显示 Mock，恢复资源后重载可真实初始化', async () => {
+  const context = await browser.newContext()
+  try {
+    const page = await context.newPage()
+    const pattern = '**/wasm/v4.mjs*'
+    await page.route(pattern, (route) => route.abort('failed'))
+    await page.goto(`${baseUrl}/?view=prototype`)
+    await page.getByRole('alert').filter({ hasText: 'LOAD_FAILED：v4 规则核心加载失败' }).waitFor()
+    assert.equal(await page.getByRole('heading', { name: /新动画工作室/ }).count(), 0)
+    await page.unroute(pattern)
+    await page.reload()
+    await page.getByRole('heading', { name: /新动画工作室/ }).waitFor()
+    await page.getByRole('button', { name: '查看公司现金', exact: true }).filter({ hasText: '¥2,000,000' }).waitFor()
+  } finally { await context.close() }
+})
+
+test('真实空 Archive、发行与业绩面板只读核心数据，375px 四场景无横向溢出', async () => {
   const context = await browser.newContext({ viewport: { width: 375, height: 1000 } })
   try {
     const page = await context.newPage()
-    await page.goto(`${baseUrl}/index.html?view=prototype`)
-    const finance = page.getByRole('region', { name: '公司现金流水与项目归因' })
-    await finance.getByRole('combobox', { name: '周次' }).selectOption('18')
-    await finance.getByRole('combobox', { name: '归因' }).selectOption('p1')
-    assert.equal(await finance.getByRole('table', { name: '公司现金流水' }).getByRole('row').count(), 3)
-    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true)
-    await finance.scrollIntoViewIfNeeded()
-    await page.screenshot({ path: resolve(screenshots, 'prototype-finance-375.png'), fullPage: true, animations: 'disabled' })
-    const archive = page.getByRole('region', { name: '作品 Archive 与经营历史' })
-    assert.equal(await archive.getByRole('listitem').count(), 3)
-    assert.equal(await archive.getByText('雾港信使 II', { exact: true }).count(), 0)
-    await archive.scrollIntoViewIfNeeded()
-    await page.screenshot({ path: resolve(screenshots, 'prototype-archive-375.png'), fullPage: true, animations: 'disabled' })
+    await readyPrototype(page)
+    await openPrototypeScene(page, '发行与市场')
+    await openPrototypeAction(page, '查看公司作品墙')
+    let drawer = page.getByRole('dialog', { name: '作品 Archive' })
+    await drawer.getByText(/Archive 尚为空/).waitFor()
+    await drawer.getByRole('button', { name: '关闭详情' }).click()
+    await openPrototypeAction(page, '作品发行')
+    drawer = page.getByRole('dialog', { name: '作品发行' })
+    await drawer.getByText(/当前筛选下没有作品/).waitFor()
+    await drawer.getByRole('button', { name: '关闭详情' }).click()
+    await openPrototypeAction(page, '查看业绩看板')
+    drawer = page.getByRole('dialog', { name: '业绩与历史' })
+    await drawer.getByRole('region', { name: '收入、声望与历史成绩' }).waitFor()
+    assert.match(await drawer.getByRole('region', { name: '收入、声望与历史成绩' }).textContent(), /核心流水流入/)
+    await drawer.getByRole('button', { name: '关闭详情' }).click()
+    for (const name of ['办公室', '制作现场', '会议室', '发行与市场']) {
+      await openPrototypeScene(page, name)
+      assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true)
+    }
+    await page.screenshot({ path: resolve(screenshots, 'prototype-v4-market-375.png'), fullPage: true, animations: 'disabled' })
   } finally { await context.close() }
 })
 
