@@ -357,12 +357,19 @@ static Json options_to_json(const std::vector<EventOptionView>& options) {
                                    {"stage", effect.stage},
                                    {"value", effect.value}});
         }
+        Json vendor_request = Json(nullptr);
+        if (option.vendor_request.has_value()) {
+            vendor_request = Json{{"item_id", option.vendor_request->item_id},
+                                  {"supplier_id", option.vendor_request->supplier_id},
+                                  {"work_total", option.vendor_request->work_total}};
+        }
         out.push_back(Json{{"id", option.id},
                            {"label", option.label},
                            {"kind", option.kind},
                            {"risk_hint", option.risk_hint},
                            {"cost", option.cost},
-                           {"effects", effects}});
+                           {"effects", effects},
+                           {"vendor_request", vendor_request}});
     }
     return out;
 }
@@ -423,6 +430,15 @@ static std::vector<EventOptionView> options_from_json(const Json& raw) {
                     effect.value("stage", std::string{}),
                     effect.value("value", 0)});
             }
+        }
+        // #122：旧档缺 vendor_request 按 null（无外包请求）处理，不改变其他字段。
+        if (option.contains("vendor_request") && option.at("vendor_request").is_object()) {
+            const auto& raw_vendor = option.at("vendor_request");
+            VendorRequestView request;
+            request.item_id = raw_vendor.value("item_id", std::string{});
+            request.supplier_id = raw_vendor.value("supplier_id", std::string{});
+            request.work_total = raw_vendor.value("work_total", 0);
+            view.vendor_request = std::move(request);
         }
         out.push_back(std::move(view));
     }
