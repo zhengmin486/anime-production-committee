@@ -362,7 +362,7 @@ test('读取临近截止的合法边界存档并强制违约交付结算', async
 async function readyPrototype(page) {
   await page.goto(`${baseUrl}/?view=prototype`)
   await page.getByRole('heading', { name: /新动画工作室/ }).waitFor()
-  await page.getByRole('button', { name: '查看公司现金', exact: true }).filter({ hasText: '¥2,000,000' }).waitFor()
+  await page.getByRole('button', { name: '查看公司现金', exact: true }).filter({ hasText: '¥14,000,000' }).waitFor()
 }
 
 async function openPrototypeScene(page, name) {
@@ -426,6 +426,10 @@ test('真实 v4 招聘、锁定承接、周推进与事件确认均提交核心�
     await openPrototypeScene(page, '办公室')
     await openPrototypeAction(page, '查看员工与设施')
     let drawer = page.getByRole('dialog', { name: '公司详情' })
+    await drawer.getByRole('button', { name: '查看员工 周摄影' }).click()
+    await drawer.getByRole('button', { name: '解雇核心员工' }).click()
+    await drawer.getByRole('button', { name: '再次点击确认解雇' }).click()
+    await drawer.getByRole('button', { name: '查看员工 周摄影' }).waitFor({ state: 'hidden' })
     const beforeCandidates = await drawer.getByRole('button', { name: '签约核心' }).count()
     await drawer.getByRole('button', { name: '本周招募' }).click()
     await page.waitForFunction((count) => [...document.querySelectorAll('button')].filter((button) => button.textContent === '签约核心').length === count + 1, beforeCandidates)
@@ -489,7 +493,7 @@ test('v4 WASM 加载失败不显示 Mock，恢复资源后重载可真实初始�
     await page.unroute(pattern)
     await page.reload()
     await page.getByRole('heading', { name: /新动画工作室/ }).waitFor()
-    await page.getByRole('button', { name: '查看公司现金', exact: true }).filter({ hasText: '¥2,000,000' }).waitFor()
+    await page.getByRole('button', { name: '查看公司现金', exact: true }).filter({ hasText: '¥14,000,000' }).waitFor()
   } finally { await context.close() }
 })
 
