@@ -4060,9 +4060,131 @@ std::string hire_temporary(const std::string& input) {
     }
 }
 
-// M0 命令 9：sign_outsourcing(work_id, item_id, supplier_id, work_total, mode)。
-// weekly_cap 按 DEC-VENDOR-003 冻结公式推导；due_week 是本次实现补的推导（DECISION_LOG 已登记），
-// 目的只有一个——让"供应商拖到项目结束才失败"变成"拖到自己的窗口就失败"，否则 reliability 没有威慑力。
+Json sign_outsource_internal(GameState& state, const std::string& work_id, const std::string& item_id,
+                             const std::string& supplier_id, std::int64_t requested, const std::string& mode) {
+    Project* work = find_work(state, work_id);
+    if (work == nullptr) return error_body("NOT_FOUND", "项目不存在");
+    if (work->status != "producing") return error_body("INVALID_PHASE", "项目必须处于 producing");
+    WorkItem* item = find_item(*work, item_id);
+    if (item == nullptr) return error_body("NOT_FOUND", "工作项不存在或不属于该项目");
+    const auto contract_episode = episode_id_of(*work, item_id);
+    if (!contract_episode || !item->outsourceable || item->is_gate) {
+        return error_body("INVALID_INPUT", "只有可外包的 episode 非门槛工作项可以外包");
+    }
+    if (item->complete()) return error_body("INVALID_PHASE", "工作项已完成");
+    if (requested <= 0 || requested > item->remaining()) {
+        return error_body("INVALID_INPUT", "work_total 必须在 1..剩余工作量之间");
+    }
+    if (!kernel::is_unlocked(*work, *item)) {
+        return error_body("DEPENDENCY_UNMET", "上游工作项尚未达到交付门槛");
+    }
+    const Json* supplier = find_supplier(state, supplier_id);
+    if (supplier == nullptr) return error_body("NOT_FOUND", "供应商不存在");
+    if (state.company.week < supplier->at("unlocked_week").get<int>()) {
+        return error_body("NOT_FOUND", "供应商尚未解锁");
+    }
+    bool specialty_ok = false;
+    for (const auto& specialty : supplier->at("specialties")) {
+        if (specialty.is_string() && specialty.get<std::string>() == item->ability) specialty_ok = true;
+    }
+    if (!specialty_ok) return error_body("INVALID_INPUT", "供应商专业与工作项能力不匹配");
+    if (mode != "normal" && mode != "emergency") {
+        return error_body("INVALID_INPUT", "mode 必须是 normal 或 emergency");
+    }
+
+    const std::int64_t capacity = supplier->at("capacity_per_week").get<std::int64_t>();
+    std::int64_t used = 0;
+    std::int64_t reserved_remaining = 0;
+    for (const auto& contract : state.contracts) {
+        if (!contract.is_object() || contract.value("status", std::string{}) != "active") continue;
+        if (contract.value("work_id", std::string{}) == work_id && contract.value("item_id", std::string{}) == item_id) {
+            const auto remaining = contract.at("work_total").get<std::int64_t>() -
+                                   contract.at("work_done").get<std::int64_t>();
+            if (!archive_add(reserved_remaining, remaining)) {
+                return error_body("INVALID_INPUT", "工作项预留量溢出");
+            }
+        }
+        if (contract.value("supplier_id", std::string{}) == supplier_id &&
+            !archive_add(used, contract.at("weekly_cap").get<std::int64_t>())) {
+            return error_body("INVALID_INPUT", "供应商产能占用溢出");
+        }
+    }
+    const std::int64_t item_room = item->work_total - item->work_done - reserved_remaining;
+    if (requested > item_room) return error_body("CAPACITY_EXCEEDED", "工作项剩余可外包工作量不足");
+    const std::int64_t available = capacity - used;
+    if (available <= 0) return error_body("CAPACITY_EXCEEDED", "供应商本周产能已排满");
+
+    const int speed_mult = mode == "emergency" ? kOutsourceModeEmergencySpeed : kOutsourceModeNormalSpeed;
+    const int price_mult = mode == "emergency" ? kOutsourceModeEmergencyPrice : kOutsourceModeNormalPrice;
+    std::int64_t base_cap = 0;
+    std::int64_t mode_cap = 0;
+    std::int64_t fee_total = 0;
+    if (!checked_multiply_divide(capacity, supplier->at("speed").get<std::int64_t>(), 100, base_cap) ||
+        !checked_multiply_divide(std::max<std::int64_t>(1, base_cap), speed_mult, 100, mode_cap) ||
+        !checked_multiply_divide(requested, supplier->at("price_per_unit").get<std::int64_t>(), 1, fee_total) ||
+        !checked_multiply_divide(fee_total, price_mult, 100, fee_total)) {
+        return error_body("INVALID_INPUT", "外包报价或产能计算溢出");
+    }
+    const std::int64_t weekly_cap = std::min({available, requested, std::max<std::int64_t>(1, mode_cap)});
+    if (weekly_cap <= 0) return error_body("CAPACITY_EXCEEDED", "供应商本周产能不足一份合同");
+    if (state.finance.balance < fee_total) return error_body("INSUFFICIENT_FUNDS", "现金不足：外包签约费不够");
+
+    const std::int64_t weeks_needed = (requested + weekly_cap - 1) / weekly_cap;
+    const std::int64_t buffer = mode == "emergency" ? (weeks_needed * 15 + 99) / 100
+                                                     : (weeks_needed + 3) / 4 + 1;
+    const std::int64_t remaining_weeks = work->deadline_week - state.company.week;
+    if (remaining_weeks < weeks_needed) {
+        return error_body("INVALID_INPUT", "项目剩余周数不足以完成这份外包，避免签下必定违约的合同");
+    }
+    const std::int64_t due_week = std::min<std::int64_t>(
+        {kMaxWeek, work->deadline_week, static_cast<std::int64_t>(state.company.week) + weeks_needed + buffer});
+
+    std::string contract_id =
+        "oc_" + hex32(kernel::hash_text(supplier_id + "|" + item_id + "|" + std::to_string(state.company.week)));
+    for (int suffix = 1; ; ++suffix) {
+        bool taken = false;
+        for (const auto& contract : state.contracts) {
+            if (contract.is_object() && contract.value("id", std::string{}) == contract_id) taken = true;
+        }
+        if (!taken) break;
+        contract_id = "oc_" + hex32(kernel::hash_text(supplier_id + "|" + item_id + "|" +
+                                                      std::to_string(state.company.week) + "|" +
+                                                      std::to_string(suffix)));
+    }
+
+    const int week = state.company.week;
+    const std::string entry_id = "w" + std::to_string(week) + ".outsourcing." + contract_id;
+    state.contracts.push_back(Json{{"id", contract_id},
+                                   {"supplier_id", supplier_id},
+                                   {"work_id", work_id},
+                                   {"episode_id", Json(*contract_episode)},
+                                   {"item_id", item_id},
+                                   {"ability", item->ability},
+                                   {"mode", mode},
+                                   {"work_total", requested},
+                                   {"work_done", 0},
+                                   {"weekly_cap", weekly_cap},
+                                   {"fee_total", fee_total},
+                                   {"fee_paid", fee_total},
+                                   {"signed_week", week},
+                                   {"due_week", due_week},
+                                   {"status", "active"}});
+    if (fee_total > 0) {
+        state.finance.entries.push_back(LedgerEntry{
+            entry_id, week, work_id, "outsourcing", -fee_total, supplier_id, "outsourcing_prepaid"});
+        state.finance.balance -= fee_total;
+    }
+
+    const auto errors = validate(state);
+    if (!errors.empty()) return error_body("INTERNAL_ERROR", "签约后状态非法: " + errors.front());
+    return Json{{"contract_id", contract_id},
+                {"work_id", work->id},
+                {"item_id", item->id},
+                {"fee_total", fee_total},
+                {"weekly_cap", weekly_cap},
+                {"due_week", due_week},
+                {"finance", Json{{"category", "outsourcing"}, {"work_id", work->id}, {"entry_id", entry_id}}}};
+}
 std::string sign_outsourcing(const std::string& input) {
     try {
         const Json request = Json::parse(input);
@@ -4080,142 +4202,20 @@ std::string sign_outsourcing(const std::string& input) {
             request.at("work_total").get<std::int64_t>() > std::numeric_limits<int>::max()) {
             return encode(error_body("INVALID_INPUT", "work_total 必须是正整型工作量"));
         }
-        const std::string work_id = request.at("work_id").get<std::string>();
-        const std::string item_id = request.at("item_id").get<std::string>();
-        const std::string supplier_id = request.at("supplier_id").get<std::string>();
-        const std::string mode = request.at("mode").get<std::string>();
-        const std::int64_t work_total = request.at("work_total").get<std::int64_t>();
-        if (mode != "normal" && mode != "emergency") {
-            return encode(error_body("INVALID_INPUT", "mode 只能是 normal 或 emergency"));
-        }
-
-        Project* work = find_work(state, work_id);
-        if (work == nullptr) return encode(error_body("NOT_FOUND", "项目不存在"));
-        if (work->status != "producing") return encode(error_body("INVALID_PHASE", "项目必须处于 producing"));
-        WorkItem* item = find_item(*work, item_id);
-        if (item == nullptr) return encode(error_body("NOT_FOUND", "工作项不存在"));
-        if (!item->outsourceable || item->is_gate) {
-            return encode(error_body("INVALID_INPUT", "只有可外包的 episode 非门槛工作项可以外包"));
-        }
-        if (item->complete()) return encode(error_body("INVALID_PHASE", "工作项已完成"));
-        if (work_total <= 0 || work_total > item->remaining()) {
-            return encode(error_body("INVALID_INPUT", "work_total 必须在 1..剩余工作量之间"));
-        }
-        if (!kernel::is_unlocked(*work, *item)) {
-            return encode(error_body("DEPENDENCY_UNMET", "上游工作项尚未达到交付门槛"));
-        }
-        const Json* supplier = find_supplier(state, supplier_id);
-        if (supplier == nullptr) return encode(error_body("NOT_FOUND", "供应商不存在"));
-        if (state.company.week < supplier->at("unlocked_week").get<int>()) {
-            return encode(error_body("NOT_FOUND", "供应商尚未解锁"));
-        }
-        bool specialty_ok = false;
-        for (const auto& specialty : supplier->at("specialties")) {
-            if (specialty.is_string() && specialty.get<std::string>() == item->ability) specialty_ok = true;
-        }
-        if (!specialty_ok) return encode(error_body("INVALID_INPUT", "供应商专业与工作项能力不匹配"));
-
-        const std::int64_t capacity = supplier->at("capacity_per_week").get<std::int64_t>();
-        std::int64_t used = 0;
-        std::int64_t reserved_remaining = 0;
-        for (const auto& contract : state.contracts) {
-            if (!contract.is_object() || contract.value("status", std::string{}) != "active") continue;
-            if (contract.value("work_id", std::string{}) == work_id && contract.value("item_id", std::string{}) == item_id) {
-                const auto remaining = contract.at("work_total").get<std::int64_t>() -
-                                       contract.at("work_done").get<std::int64_t>();
-                if (!archive_add(reserved_remaining, remaining)) {
-                    return encode(error_body("INVALID_INPUT", "工作项预留量溢出"));
-                }
-            }
-            if (contract.value("supplier_id", std::string{}) == supplier_id &&
-                !archive_add(used, contract.at("weekly_cap").get<std::int64_t>())) {
-                return encode(error_body("INVALID_INPUT", "供应商产能占用溢出"));
-            }
-        }
-        const std::int64_t item_room = item->work_total - item->work_done - reserved_remaining;
-        if (work_total > item_room) return encode(error_body("CAPACITY_EXCEEDED", "工作项剩余可外包工作量不足"));
-        const std::int64_t available = capacity - used;
-        if (available <= 0) return encode(error_body("CAPACITY_EXCEEDED", "供应商本周产能已排满"));
-
-        const int speed_mult = mode == "emergency" ? kOutsourceModeEmergencySpeed : kOutsourceModeNormalSpeed;
-        const int price_mult = mode == "emergency" ? kOutsourceModeEmergencyPrice : kOutsourceModeNormalPrice;
-        std::int64_t base_cap = 0;
-        std::int64_t mode_cap = 0;
-        std::int64_t fee_total = 0;
-        if (!checked_multiply_divide(capacity, supplier->at("speed").get<std::int64_t>(), 100, base_cap) ||
-            !checked_multiply_divide(std::max<std::int64_t>(1, base_cap), speed_mult, 100, mode_cap) ||
-            !checked_multiply_divide(work_total, supplier->at("price_per_unit").get<std::int64_t>(), 1, fee_total) ||
-            !checked_multiply_divide(fee_total, price_mult, 100, fee_total)) {
-            return encode(error_body("INVALID_INPUT", "外包报价或产能计算溢出"));
-        }
-        const std::int64_t weekly_cap = std::min({available, work_total, std::max<std::int64_t>(1, mode_cap)});
-        if (weekly_cap <= 0) return encode(error_body("CAPACITY_EXCEEDED", "供应商本周产能不足一份合同"));
-
-        if (state.finance.balance < fee_total) return encode(error_body("INSUFFICIENT_FUNDS", "现金不足：外包签约费不够"));
-
-        // due_week：最少 N 周完成 + 模式相关缓冲，再被项目截止周与第 520 周封顶。
-        // normal 缓冲 ceil(N*0.25)+1 给排期波动，emergency 只给 ceil(N*0.15)——加急买的是速度不是余地。
-        const std::int64_t weeks_needed = (work_total + weekly_cap - 1) / weekly_cap;
-        const std::int64_t buffer = mode == "emergency" ? (weeks_needed * 15 + 99) / 100
-                                                       : (weeks_needed + 3) / 4 + 1;
-        const std::int64_t remaining_weeks = work->deadline_week - state.company.week;
-        if (remaining_weeks < weeks_needed) {
-            return encode(error_body("INVALID_INPUT", "项目剩余周数不足以完成这份外包，避免签下必定违约的合同"));
-        }
-        const std::int64_t due_week = std::min<std::int64_t>(
-            {kMaxWeek, work->deadline_week, state.company.week + weeks_needed + buffer});
-
-        // 合同 id 用内容哈希派生，重复时加序号，避免依赖数组长度（合同会被结项删除）。
-        std::string contract_id =
-            "oc_" + hex32(kernel::hash_text(supplier_id + "|" + item_id + "|" + std::to_string(state.company.week)));
-        for (int suffix = 1; ; ++suffix) {
-            bool taken = false;
-            for (const auto& contract : state.contracts) {
-                if (contract.is_object() && contract.value("id", std::string{}) == contract_id) taken = true;
-            }
-            if (!taken) break;
-            contract_id = "oc_" + hex32(kernel::hash_text(supplier_id + "|" + item_id + "|" +
-                                                  std::to_string(state.company.week) + "|" +
-                                                  std::to_string(suffix)));
-        }
-
-        const std::optional<std::string> contract_episode = episode_id_of(*work, item_id);
-        state.contracts.push_back(Json{{"id", contract_id},
-                                       {"supplier_id", supplier_id},
-                                       {"work_id", work_id},
-                                       {"episode_id", contract_episode ? Json(*contract_episode) : Json(nullptr)},
-                                       {"item_id", item_id},
-                                       {"ability", item->ability},
-                                       {"mode", mode},
-                                       {"work_total", work_total},
-                                       {"work_done", 0},
-                                       {"weekly_cap", weekly_cap},
-                                       {"fee_total", fee_total},
-                                       {"fee_paid", fee_total},
-                                       {"signed_week", state.company.week},
-                                       {"due_week", due_week},
-                                       {"status", "active"}});
-        if (fee_total > 0) {
-            state.finance.entries.push_back(LedgerEntry{
-                "w" + std::to_string(state.company.week) + ".outsourcing." + contract_id + ".sign",
-                state.company.week, work_id, "outsourcing", -fee_total, std::nullopt, supplier_id});
-            state.finance.balance -= fee_total;
-        }
-
-        const auto errors = validate(state);
-        if (!errors.empty()) return encode(error_body("INTERNAL_ERROR", "签约后状态非法: " + errors.front()));
-        return encode(Json{{"state", state},
-                           {"contract_id", contract_id},
-                           {"weekly_cap", weekly_cap},
-                           {"due_week", due_week},
-                           {"fee_total", fee_total}});
+        Json result = sign_outsource_internal(state, request.at("work_id").get<std::string>(),
+                                              request.at("item_id").get<std::string>(),
+                                              request.at("supplier_id").get<std::string>(),
+                                              request.at("work_total").get<std::int64_t>(),
+                                              request.at("mode").get<std::string>());
+        if (result.contains("error")) return encode(result);
+        result["state"] = state;
+        return encode(result);
     } catch (const Json::exception&) {
         return encode(error_body("INVALID_INPUT", "JSON 或字段类型无效"));
     } catch (...) {
         return encode(error_body("INTERNAL_ERROR", "内部错误"));
     }
 }
-
 // M0 命令 7：dismiss_staff(staff_id)。移出名册+清空归属，不预付遣散费；
 // 解雇后 core ≥ 1；监督须先原子替换，无合格替补则关键岗位锁定（§14.8）。
 std::string dismiss_staff(const std::string& input) {
@@ -5463,14 +5463,24 @@ std::string resolve_event(const std::string& input) {
         const std::string message = resolution.pending->name.empty() ? event_id : resolution.pending->name;
 
         const int week = state.company.week;
-        if (!apply_event_option(state, *resolution.pending, *resolution.option, week, false)) {
+        Json vendor_receipt = Json(nullptr);
+        if (resolution.option->vendor_request.has_value()) {
+            // #122：Event 固定 emergency，共用 Vendor 内部签约；失败时不移除 pending、不改状态。
+            const auto& request = *resolution.option->vendor_request;
+            Json signing_result = sign_outsource_internal(state, owner_id, request.item_id, request.supplier_id,
+                                                  static_cast<std::int64_t>(request.work_total), "emergency");
+            if (signing_result.contains("error")) return encode(signing_result);
+            vendor_receipt = std::move(signing_result);
+        } else if (!apply_event_option(state, *resolution.pending, *resolution.option, week, false)) {
             return encode(error_body("NOT_FOUND", "事件归属项目不存在"));
         }
         state.events.pending.erase(state.events.pending.begin() + static_cast<std::ptrdiff_t>(index));
 
         const auto post_errors = validate(state);
         if (!post_errors.empty()) return encode(error_body("INTERNAL_ERROR", "处理后状态非法: " + post_errors.front()));
-        return encode(Json{{"state", state}, {"message", "已处理「" + message + "」"}});
+        Json receipt = Json{{"state", state}, {"message", "已处理「" + message + "」"}};
+        if (!vendor_receipt.is_null()) receipt["vendor"] = std::move(vendor_receipt);
+        return encode(receipt);
     } catch (const Json::exception&) {
         return encode(error_body("INVALID_INPUT", "JSON 或字段类型无效"));
     } catch (...) {

@@ -4,13 +4,13 @@
 export type EpisodeStage = 'content_design' | 'storyboard_key_animation' | 'animation' | 'art_visual' | 'photography_editing' | 'sound_delivery'
 export type Role = 'director' | 'scriptwriter' | 'animation_director' | 'key_animator' | 'animator' | 'production_manager' | 'postproduction'
 export type Ability = 'planning' | 'direction' | 'drawing' | 'animation' | 'management' | 'postproduction'
-export type Source = 'manga' | 'light_novel' | 'game' | 'original'
+export type Source = 'manga' | 'light_novel' | 'game' | 'original' | 'publisher' | 'studio' | 'market'
 export type Scale = 'ova' | 'short' | 'tv' | 'movie'
 export type Mode = 'contract' | 'committee'
-export type Channel = 'bd' | 'publisher' | 'toy' | 'music' | 'tv_broadcast'
+export type Channel = 'bd' | 'publisher' | 'toy' | 'music' | 'tv_broadcast' | 'domestic_streaming' | 'overseas' | 'merchandise' | 'bd_dvd' | 'tv' | 'streaming' | 'publishing'
 export type Effort = 'conservative' | 'standard' | 'focused'
-export type Priority = 'quality' | 'progress' | 'cost'
-export type OutsourcePolicy = 'off' | 'gap' | 'active'
+export type Priority = 'quality' | 'progress' | 'cost' | 'schedule'
+export type OutsourcePolicy = 'off' | 'gap' | 'active' | 'gap_fill' | 'aggressive' | 'none'
 export type RiskLevel = 'low' | 'medium' | 'high'
 export type Mark = 'confirmed' | 'proposal' | 'pending' | 'sample'
 
@@ -32,13 +32,13 @@ export const roleNames: Record<Role, string> = {
 export const abilityNames: Record<Ability, string> = {
   planning: '企划', direction: '演出', drawing: '作画', animation: '动画', management: '管理', postproduction: '后期',
 }
-export const sourceNames: Record<Source, string> = { manga: '漫画改编', light_novel: '轻小说改编', game: '游戏改编', original: '原创' }
+export const sourceNames: Record<Source, string> = { manga: '漫画改编', light_novel: '轻小说改编', game: '游戏改编', original: '原创', publisher: '出版委托', studio: '制作所企划', market: '市场企划' }
 export const scaleNames: Record<Scale, string> = { ova: 'OVA', short: '短篇', tv: '电视动画', movie: '剧场版' }
 export const modeNames: Record<Mode, string> = { contract: '承制', committee: '制作委员会' }
-export const channelNames: Record<Channel, string> = { bd: 'BD', publisher: '出版', toy: '玩具', music: '音乐', tv_broadcast: '电视' }
+export const channelNames: Record<Channel, string> = { bd: 'BD', publisher: '出版', toy: '玩具', music: '音乐', tv_broadcast: '电视', domestic_streaming: '国内配信', overseas: '海外', merchandise: '周边', bd_dvd: 'BD/DVD', tv: '电视', streaming: '配信', publishing: '出版' }
 export const effortNames: Record<Effort, string> = { conservative: '保守', standard: '标准', focused: '集中' }
-export const priorityNames: Record<Priority, string> = { quality: '质量', progress: '进度', cost: '成本' }
-export const outsourceNames: Record<OutsourcePolicy, string> = { off: '不主动外包', gap: '按缺口补充', active: '积极外包' }
+export const priorityNames: Record<Priority, string> = { quality: '质量', progress: '进度', schedule: '进度', cost: '成本' }
+export const outsourceNames: Record<OutsourcePolicy, string> = { off: '不主动外包', none: '不主动外包', gap: '按缺口补充', gap_fill: '按缺口补充', active: '积极外包', aggressive: '积极外包' }
 export const riskNames: Record<RiskLevel, string> = { low: '低', medium: '中', high: '高' }
 export const markNames: Record<Mark, string> = { confirmed: '已确认', proposal: '设计建议', pending: '待细化参数', sample: '原型样本' }
 
@@ -47,10 +47,10 @@ export interface Company {
   week: number
   totalWeeks: number
   cash: number
-  committedNextWeek: number
+  committedNextWeek: number | null
   weeklyFixed: { salary: number; operations: number }
   reputation: number
-  runwayWeeks: number
+  runwayWeeks: number | null
   headline: string
 }
 
@@ -107,6 +107,13 @@ export interface OutsourceTask {
 /* 工作项是唯一的生产原子（DEC-PROD-003）。口径与 docs/BLUEPRINT_SPEC.md 一致：
    当前 v0.5 runtime 为 70 工作点/人周；deliverAt 是占 workTotal 的千分比门槛；
    delivered ⇔ workDone × 1000 ≥ deliverAt × workTotal。 */
+export type WorkState = 'blocked' | 'ready' | 'active' | 'delivered' | 'completed'
+export interface WorkSummary {
+  done: number
+  total: number
+  percent: number
+}
+
 export interface WorkItem {
   key: string
   name: string
@@ -115,8 +122,10 @@ export interface WorkItem {
   workTotal: number
   workDone: number
   deliverAt: number
+  deliverPoints: number
   isGate: boolean
   deps: string[]
+  state: WorkState
 }
 
 /* 每集固定六阶段；status 只描述该集整体：
@@ -128,6 +137,8 @@ export interface Episode {
   targetWeek: number
   isFocus: boolean
   workItems: WorkItem[]
+  work: WorkSummary
+  stages: Record<EpisodeStage, WorkSummary>
   note: string
 }
 
@@ -135,8 +146,11 @@ export const episodeStatusNames: Record<Episode['status'], string> = {
   not_started: '未开始', producing: '制作中', min_delivered: '可主动交付', delivered: '已交付',
 }
 
-export const isDelivered = (item: WorkItem) => item.workDone * 1000 >= item.deliverAt * item.workTotal
-export const sumWork = (items: WorkItem[]) => items.reduce((acc, item) => ({ done: acc.done + item.workDone, total: acc.total + item.workTotal }), { done: 0, total: 0 })
+export const sumWork = (items: WorkItem[]): WorkSummary => {
+  const done = items.reduce((sum, item) => sum + item.workDone, 0)
+  const total = items.reduce((sum, item) => sum + item.workTotal, 0)
+  return { done, total, percent: total === 0 ? 0 : Math.round(done / total * 100) }
+}
 export const itemsByStage = (items: WorkItem[], stage: EpisodeStage) => items.filter((item) => item.stage === stage)
 
 export interface PlanSetting {
@@ -158,7 +172,7 @@ export interface CommitteeMember {
   id: string
   name: string
   channel: Channel
-  investPercent: number
+  investPercent: number | null
   since: number
 }
 
@@ -190,12 +204,16 @@ export interface Project {
   startWeek: number
   deadlineWeek: number
   episodeCount: number
+  deliveredEpisodeCount: number
+  work: WorkSummary
+  commonWork: WorkSummary
+  completion: number
   commonItems: WorkItem[]
   episodes: Episode[]
   focusLabel: string | null
-  plannedCompletion: number
+  plannedCompletion: number | null
   quality: number
-  audienceExpectation: number
+  audienceExpectation: number | null
   commercialPotential: number
   plan: PlanSetting
   planGaps: PlanGap[]
@@ -207,14 +225,6 @@ export interface Project {
   series: { parentTitle: string; relation: string; carried: string } | null
   marks: Mark[]
 }
-
-/* 完成度一律由工作点推导，避免界面数字与实际工作项脱节。 */
-export const projectWork = (project: Project) => sumWork([...project.commonItems, ...project.episodes.flatMap((episode) => episode.workItems)])
-export const projectCompletion = (project: Project) => {
-  const work = projectWork(project)
-  return work.total === 0 ? 0 : Math.round(work.done / work.total * 100)
-}
-export const deliveredEpisodes = (project: Project) => project.episodes.filter((episode) => episode.status === 'delivered').length
 
 export type LedgerCategory = 'contract' | 'investment' | 'commercial' | 'salary' | 'operations' | 'production' | 'temporary' | 'outsourcing' | 'event' | 'extension' | 'penalty' | 'development' | 'distribution'
 
@@ -239,6 +249,7 @@ export interface ProjectWeekLine {
   episodeIndex: number | null
   stage: EpisodeStage | null
   itemKey: string | null
+  itemId?: string
   workDelta: number
   qualityDelta: number
   detail: string
@@ -288,12 +299,13 @@ export interface EventCard {
   signals: string[]
   options: EventOption[]
   outcomes: Record<string, string>
-  deadlineWeek: number
+  deadlineWeek: number | null
+  viewed: boolean
 }
 
-/* 正常、事件、危机与关闭中的操作差异必须可辨认；关闭中沿用 M0 已冻结的结清边界。 */
-export type WeekState = 'normal' | 'event_pending' | 'cash_crisis' | 'closing'
-export const weekStateNames: Record<WeekState, string> = { normal: '正常经营', event_pending: '事件待处理', cash_crisis: '限时资金危机', closing: '关闭中' }
+/* 正常、事件待处理、周结算回滚与关闭中的操作差异必须可辨认。 */
+export type WeekState = 'normal' | 'event_pending' | 'settlement_rejected' | 'closing'
+export const weekStateNames: Record<WeekState, string> = { normal: '正常经营', event_pending: '事件待处理', settlement_rejected: '周结算已回滚', closing: '关闭中' }
 
 export interface CompanyClosing {
   reason: 'bankrupt' | 'voluntary'
@@ -303,18 +315,18 @@ export interface CompanyClosing {
   blockedActions: string[]
 }
 
-export interface CashCrisis {
-  deadlineWeek: number
-  cashAfterSettle: number
-  forcedNextWeek: number
-  waysOut: string[]
+export interface RejectedSettlement {
+  cash: number
+  requiredNextWeek: number
+  shortfall: number
+  reason: string
 }
 
 export interface WeeklyReceipt {
   week: number
   state: WeekState
   stateNote: string
-  crisis: CashCrisis | null
+  rejected: RejectedSettlement | null
   closing: CompanyClosing | null
   headline: string
   cashDelta: number
@@ -326,6 +338,8 @@ export interface WeeklyReceipt {
   reportOnly: string[]
   nextFocus: string[]
   event: EventCard | null
+  eventOutcomes?: string[]
+  settlements?: string[]
 }
 
 export interface MarketOffer {
@@ -340,6 +354,14 @@ export interface MarketOffer {
   heat: 'cold' | 'warm' | 'hot'
   hook: string
   blockedBy: string | null
+  allowedModes: Mode[]
+  committeeCandidates: string[]
+  expiresWeek?: number
+  lockedUntil?: number | null
+  lockUsed?: boolean
+  depositPaid?: number
+  depositBasis?: number
+  offerSourceType?: string
 }
 
 export const offerOriginNames: Record<MarketOffer['origin'], string> = {
@@ -370,8 +392,21 @@ export interface WorkRecord {
   note: string
 }
 
+export interface Facility {
+  id: string
+  name: string
+  kind: 'workspace' | 'editing' | 'meeting' | 'archive' | 'reception' | 'training'
+  status: 'available' | 'occupied' | 'maintenance' | 'locked'
+  statusLabel: string
+  detail: string
+  note: string
+  actionLabel: string | null
+  lockedReason?: string
+}
+
 export interface PrototypeData {
   company: Company
+  facilities: Facility[]
   staff: Staff[]
   allocations: Allocation[]
   suppliers: Supplier[]
@@ -382,4 +417,5 @@ export interface PrototypeData {
   marketOffers: MarketOffer[]
   relationships: PartnerRelationship[]
   history: WorkRecord[]
+  pendingEvents: EventCard[]
 }

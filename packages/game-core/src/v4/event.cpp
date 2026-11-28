@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <limits>
 #include <set>
 #include <string>
 #include <vector>
@@ -86,6 +87,26 @@ std::vector<OptionSpec> parse_options(const Json& raw, const char* key, const st
         }
         if (option.cost < 0 || option.cost > 2000000) {
             checker.fail(id, where + ".cost", "cost 必须在 0..2,000,000");
+        }
+        // #122：只有 kind=outsource 的选项可以带 vendor_request，且三项必须齐全。
+        if (raw_option.contains("vendor_request") && !raw_option.at("vendor_request").is_null()) {
+            if (option.kind != "outsource") {
+                checker.fail(id, where + ".vendor_request", "只有 kind=outsource 的选项可配置 vendor_request");
+            } else if (!raw_option.at("vendor_request").is_object()) {
+                checker.fail(id, where + ".vendor_request", "vendor_request 必须是对象或 null");
+            } else {
+                const auto& raw_vendor = raw_option.at("vendor_request");
+                VendorRequestSpec request;
+                request.item_id = text_field(raw_vendor, "item_id");
+                request.supplier_id = text_field(raw_vendor, "supplier_id");
+                request.work_total = int_field(raw_vendor, "work_total", 0);
+                if (request.item_id.empty()) checker.fail(id, where + ".vendor_request.item_id", "缺少 item_id");
+                if (request.supplier_id.empty()) checker.fail(id, where + ".vendor_request.supplier_id", "缺少 supplier_id");
+                if (request.work_total <= 0 || request.work_total > std::numeric_limits<int>::max()) {
+                    checker.fail(id, where + ".vendor_request.work_total", "work_total 必须是正整型工作量");
+                }
+                option.vendor_request = std::move(request);
+            }
         }
         if (raw_option.contains("effects")) {
             if (!raw_option.at("effects").is_array()) {
@@ -494,6 +515,11 @@ PendingEvent build_instance(const EventSpec& spec, const std::string& work_id, i
         for (const auto& effect : option.effects) {
             view.effects.push_back(EffectView{effect.scope, effect.target, effect.stage, effect.value});
         }
+        if (option.vendor_request.has_value()) {
+            view.vendor_request = VendorRequestView{option.vendor_request->item_id,
+                                                    option.vendor_request->supplier_id,
+                                                    option.vendor_request->work_total};
+        }
         event.options.push_back(std::move(view));
     }
     if (spec.escalation.has_value()) {
@@ -510,6 +536,11 @@ PendingEvent build_instance(const EventSpec& spec, const std::string& work_id, i
             view.cost = option.cost;
             for (const auto& effect : option.effects) {
                 view.effects.push_back(EffectView{effect.scope, effect.target, effect.stage, effect.value});
+            }
+            if (option.vendor_request.has_value()) {
+                view.vendor_request = VendorRequestView{option.vendor_request->item_id,
+                                                        option.vendor_request->supplier_id,
+                                                        option.vendor_request->work_total};
             }
             snapshot.options.push_back(std::move(view));
         }
@@ -580,11 +611,16 @@ Resolution inspect(const GameState& state, const std::string& work_id, const std
         result.message = "选项不存在";
         return result;
     }
-    if (result.option->kind == "outsource" || result.option->kind == "extension") {
+    // #122：带 vendor_request 的 outsource 选项走真实 Vendor 内部签约；
+    // 不带载荷的 outsource 与 extension 仍不可用，不演变为隐式自动签约。
+    if (result.option->kind == "extension" ||
+        (result.option->kind == "outsource" && !result.option->vendor_request.has_value())) {
         result.code = "MODE_NOT_ALLOWED";
-        result.message = "供应商外包与延期尚未接入，该选项不可用";
+        result.message = "供应商外包载荷缺失或延期尚未接入，该选项不可用";
         return result;
     }
+    // #122：外包费用由 Vendor 全额预付并校验，这里不能只按 option.cost 放行。
+    if (result.option->vendor_request.has_value()) return result;
     if (result.option->cost > state.finance.balance) {
         result.code = "INSUFFICIENT_FUNDS";
         result.message = "现金不足以支付该选项";

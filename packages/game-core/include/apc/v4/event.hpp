@@ -23,6 +23,14 @@ struct EffectSpec {
     int value = 0;
 };
 
+// #122：事件应急外包的冻结请求载荷。work_id 取 pending 归属、mode 固定 emergency，
+// 两者都不在内容卡中重复传参；资格/报价/产能/付款由 Vendor 域内部函数负责。
+struct VendorRequestSpec {
+    std::string item_id;
+    std::string supplier_id;
+    int work_total = 0;
+};
+
 struct OptionSpec {
     std::string id;
     std::string label;
@@ -30,6 +38,7 @@ struct OptionSpec {
     std::string risk_hint;
     int cost = 0;
     std::vector<EffectSpec> effects;
+    std::optional<VendorRequestSpec> vendor_request;
 };
 
 // #121 / DEC-EVENT-003：一次升级的内容载荷。expires_weeks 冻结为 2，

@@ -119,16 +119,56 @@ describe('v4 GameState 关键不变式', () => {
     expect(isV4GameState(JSON.parse(JSON.stringify(state())))).toBe(true)
   })
 
-  it('接受同一项目同时保留多条待处理事件', () => {
+  it('不同项目可同时有待处理事件，但同一项目最多一个', () => {
     const value = withProject()
     const option = {
       id: 'accept', label: '接受', kind: 'accept', risk_hint: '无额外风险', cost: 0,
-      effects: [{ scope: 'instant', target: 'morale', stage: '', value: 6 }],
+      effects: [{ scope: 'instant', target: 'morale', stage: '', value: 6 }], vendor_request: null,
     }
     value.events.pending.push(
-      { event_id: 'animator_exhaustion', name: '疲劳', work_id: 'work_01', triggered_week: 4, expires_week: null, cooldown_weeks: 0, once_per_project: false, viewed: false, options: [option] },
-      { event_id: 'station_visit', name: '探班', work_id: 'work_01', triggered_week: 4, expires_week: null, cooldown_weeks: 0, once_per_project: false, viewed: false, options: [option] },
+      { event_id: 'animator_exhaustion', name: '疲劳', work_id: 'work_01', triggered_week: 4, expires_week: null, cooldown_weeks: 0, once_per_project: false, viewed: false, options: [option], timeout_option_id: '', escalated: false, escalation: null },
+      { event_id: 'station_visit', name: '探班', work_id: 'work_01', triggered_week: 4, expires_week: null, cooldown_weeks: 0, once_per_project: false, viewed: false, options: [option], timeout_option_id: '', escalated: false, escalation: null },
     )
+    expect(isV4GameState(value)).toBe(false)
+
+    value.works.push(JSON.parse(JSON.stringify(project()).replaceAll('work_01', 'work_02')) as V4Project)
+    value.events.pending[1].work_id = 'work_02'
+    expect(isV4GameState(value)).toBe(true)
+  })
+
+  it('接受事件选项的应急外包请求、旧选项缺省与完整载荷校验', () => {
+    const value = withProject()
+    value.suppliers.push({ id: 'supplier_draw' })
+    value.events.pending.push({
+      event_id: 'vendor_emergency', name: '应急外包', work_id: 'work_01', triggered_week: 0,
+      expires_week: null, cooldown_weeks: 0, once_per_project: false, viewed: false,
+      options: [{
+        id: 'accept', label: '签约', kind: 'accept', risk_hint: '', cost: 0, effects: [],
+        vendor_request: { item_id: 'work_01.common.series_comp', supplier_id: 'supplier_draw', work_total: 10 },
+      }],
+      timeout_option_id: '', escalated: false, escalation: null,
+    })
+    expect(isV4GameState(value)).toBe(true)
+
+    value.events.pending[0].options[0].vendor_request!.work_total = 0
+    expect(isV4GameState(value)).toBe(false)
+
+    value.events.pending[0].options[0].vendor_request!.work_total = 10
+    delete (value.events.pending[0].options[0] as Partial<V4GameState['events']['pending'][number]['options'][number]>).vendor_request
+    expect(isV4GameState(value)).toBe(true)
+  })
+
+  it('接受缺少升级字段的旧 pending 快照', () => {
+    const value = withProject()
+    value.events.pending.push({
+      event_id: 'schedule_slip', name: '进度滑坡', work_id: 'work_01', triggered_week: 0,
+      expires_week: null, cooldown_weeks: 0, once_per_project: false, viewed: false,
+      options: [{ id: 'abandon', label: '放弃', kind: 'abandon', risk_hint: '', cost: 0, effects: [] }],
+      timeout_option_id: '', escalated: false, escalation: null,
+    })
+    delete (value.events.pending[0] as Partial<V4GameState['events']['pending'][number]>).timeout_option_id
+    delete (value.events.pending[0] as Partial<V4GameState['events']['pending'][number]>).escalated
+    delete (value.events.pending[0] as Partial<V4GameState['events']['pending'][number]>).escalation
     expect(isV4GameState(value)).toBe(true)
   })
 
@@ -147,6 +187,7 @@ describe('v4 GameState 关键不变式', () => {
     event.events.pending.push({
       event_id: 'schedule_slip', name: '进度滑坡', work_id: 'missing', triggered_week: 0,
       expires_week: null, cooldown_weeks: 0, once_per_project: false, viewed: false, options: [],
+      timeout_option_id: '', escalated: false, escalation: null,
     })
     expect(isV4GameState(event)).toBe(false)
   })
@@ -289,6 +330,21 @@ describe('v4 GameState 关键不变式', () => {
     const unstarted = structuredClone(valid)
     unstarted.works[0].common.items[0].work_done = 0
     expect(isV4GameState(unstarted)).toBe(false)
+  })
+
+  it('接受核心事件升级快照与空阶段效果', () => {
+    const value = withProject()
+    const option = {
+      id: 'accept', label: '按现状推进', kind: 'abandon', risk_hint: '质量缺口留到成片', cost: 0,
+      effects: [{ scope: 'instant', target: 'morale', stage: '', value: -3 }], vendor_request: null,
+    }
+    value.events.pending.push({
+      event_id: 'key_cut_rework', name: '关键镜头返修', work_id: 'work_01', triggered_week: 1,
+      expires_week: null, cooldown_weeks: 6, once_per_project: false, viewed: false, options: [option],
+      timeout_option_id: '', escalated: false,
+      escalation: { description: '返修升级', expires_weeks: 2, triggered_week: 2, options: [option], timeout_option_id: 'accept' },
+    })
+    expect(isV4GameState(value)).toBe(true)
   })
 
   it('质量维度接受 105 并拒绝 106', () => {

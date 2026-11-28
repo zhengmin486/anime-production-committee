@@ -3894,6 +3894,160 @@ test('#121 非法升级快照原子拒绝：不推进、不扣款、哈希不变
   assert.equal('state' in failed, false)
   assert.equal(ok('hash_state', { state }).hash, before)
 })
+// #122：把事件选项改造成「应急外包」冻结快照；work_id 取 pending 归属、mode 由 Event 固定 emergency。
+function vendorEvent(state, workId, item, supplierId = 'supplier_douga', workTotal = 20) {
+  findItem(state, workId, 'ep01.script').work_done = findItem(state, workId, 'ep01.script').work_total
+  findItem(state, workId, 'ep01.storyboard').work_done = findItem(state, workId, 'ep01.storyboard').work_total
+  state.events.pending.push({
+    event_id: 'vendor_fixture',
+    name: '应急外包夹具',
+    work_id: workId,
+    triggered_week: state.company.week,
+    expires_week: null,
+    cooldown_weeks: 0,
+    once_per_project: false,
+    viewed: true,
+    options: [{
+      id: 'hire', label: '应急外包', kind: 'outsource', cost: 0, risk_hint: '', effects: [],
+      vendor_request: { item_id: item.id, supplier_id: supplierId, work_total: workTotal }
+    }]
+  })
+  return state
+}
+test('#122 内容校验：vendor_request 只允许 outsource 且字段齐全，旧卡无载荷仍合法', () => {
+  const card = {
+    schema_version: 1, id: 'fixture_vendor', name: '夹具', category: 'quality',
+    polarity: 'negative', tier: 'normal', tag: 'fixture', stages: ['animation'],
+    priority: 10, cooldown_weeks: 0, once_per_project: false,
+    trigger: { metric: 'max_fatigue', op: '>=', threshold: 50 }, random_weight: 0,
+    expires_weeks: 0, description: '夹具',
+    options: [{ id: 'out', label: '外包', kind: 'outsource', cost: 0, effects: [] },
+             { id: 'drop', label: '放弃', kind: 'abandon', cost: 0, effects: [] }]
+  }
+  const validate = (cards) => ok('validate_event_catalog', { source: 'fixture.json', catalog: { schema_version: 1, cards } })
+  assert.equal(validate([card]).ok, true)
+  const withVendor = validate([{ ...card, options: [
+    { ...card.options[0], vendor_request: { item_id: 'x', supplier_id: 'y', work_total: 10 } },
+    card.options[1]
+  ] }])
+  assert.equal(withVendor.ok, true, JSON.stringify(withVendor.issues))
+  const wrongKind = validate([{ ...card, options: [{ ...card.options[0], kind: 'accept', vendor_request:
+    { item_id: 'x', supplier_id: 'y', work_total: 10 } }] }])
+  assert.ok(wrongKind.issues.some((issue) => issue.field.includes('vendor_request')), JSON.stringify(wrongKind.issues))
+  assert.ok(validate([{ ...card, options: [{ ...card.options[0], vendor_request:
+    { item_id: '', supplier_id: 'y', work_total: 10 } }] }]).issues.some((issue) => issue.field.includes('item_id')))
+})
+
+test('#122 正常签约：resolve_event 调真实 Vendor 内部函数，回执含合同/费用/产能/Finance', () => {
+  let state = setupTiny(11)
+  state.company.week = 12
+  const item = findItem(state, 'work_01', 'ep01.inbetween')
+  state = vendorEvent(state, 'work_01', item)
+  const before = state.finance.balance
+  const result = ok('resolve_event', { state, work_id: 'work_01', event_id: 'vendor_fixture', option_id: 'hire' })
+  assert.equal(result.state.events.pending.length, 0)
+  assert.equal(result.state.contracts.length, 1)
+  assert.equal(result.state.contracts[0].mode, 'emergency')
+  assert.equal(result.state.contracts[0].item_id, item.id)
+  assert.ok(result.vendor.fee_total > 0)
+  assert.ok(result.vendor.weekly_cap > 0)
+  assert.ok(result.vendor.due_week >= 12)
+  assert.equal(result.vendor.finance.category, 'outsourcing')
+  assert.equal(result.vendor.finance.work_id, 'work_01')
+  assert.equal(before - result.state.finance.balance, result.vendor.fee_total)
+  const entry = result.state.finance.entries.find((e) => e.id === result.vendor.finance.entry_id)
+  assert.equal(entry.amount, -result.vendor.fee_total)
+})
+
+test('#122 专业不匹配：INVALID_INPUT 原子拒绝，pending 保留', () => {
+  let state = setupTiny(11)
+  state.company.week = 12
+  const item = findItem(state, 'work_01', 'ep01.inbetween')
+  state = vendorEvent(state, 'work_01', item, 'supplier_genga')
+  const before = ok('hash_state', { state }).hash
+  const failed = call('resolve_event', { state, work_id: 'work_01', event_id: 'vendor_fixture', option_id: 'hire' })
+  assert.equal(failed.error.code, 'INVALID_INPUT')
+  assert.equal('state' in failed, false)
+  assert.equal(ok('hash_state', { state }).hash, before)
+  assert.equal(state.events.pending.length, 1)
+})
+
+test('#122 无产能/无现金：CAPACITY_EXCEEDED 与 INSUFFICIENT_FUNDS 均原子', () => {
+  const build = () => {
+    let state = setupTiny(11)
+    state.company.week = 12
+    const item = findItem(state, 'work_01', 'ep01.inbetween')
+    return vendorEvent(state, 'work_01', item)
+  }
+  let busy = build()
+  const busyItem = findItem(busy, 'work_01', 'ep01.inbetween')
+  busy = ok('sign_outsourcing', {
+    state: busy, work_id: 'work_01', item_id: busyItem.id, supplier_id: 'supplier_douga', work_total: 100, mode: 'normal'
+  }).state
+  const noCapacity = call('resolve_event', { state: busy, work_id: 'work_01', event_id: 'vendor_fixture', option_id: 'hire' })
+  assert.equal(noCapacity.error.code, 'CAPACITY_EXCEEDED')
+  assert.equal(busy.events.pending.length, 1)
+  const poor = build()
+  const poorSum = poor.finance.entries.reduce((sum, entry) => sum + entry.amount, 0)
+  poor.finance.opening_funds = -poorSum
+  poor.finance.balance = 0
+  const noCash = call('resolve_event', { state: poor, work_id: 'work_01', event_id: 'vendor_fixture', option_id: 'hire' })
+  assert.equal(noCash.error.code, 'INSUFFICIENT_FUNDS')
+  assert.equal(poor.events.pending.length, 1)
+  assert.equal(poor.contracts.length, 0)
+})
+
+test('#122 重复处理与多项目隔离：只移除目标 pending，二次调用 NOT_FOUND', () => {
+  let state = setupTiny(11)
+  state.company.week = 12
+  state = addIdleSupervisor(state)
+  state = ok('instantiate_work', { state, blueprint: tiny, work_id: 'work_b', duration_weeks: 26 }).state
+  const itemA = findItem(state, 'work_01', 'ep01.inbetween')
+  const itemB = findItem(state, 'work_b', 'ep01.inbetween')
+  findItem(state, 'work_b', 'ep01.script').work_done = findItem(state, 'work_b', 'ep01.script').work_total
+  findItem(state, 'work_b', 'ep01.storyboard').work_done = findItem(state, 'work_b', 'ep01.storyboard').work_total
+  state = vendorEvent(state, 'work_01', itemA)
+  state.events.pending.push({ event_id: 'other_pending', name: '其他项目', work_id: 'work_b',
+    triggered_week: 12, expires_week: null, cooldown_weeks: 0, once_per_project: false, viewed: true,
+    options: [{ id: 'ok', label: '确认', kind: 'accept', cost: 0, effects: [] }] })
+  const otherBefore = structuredClone(state.events.pending.find((e) => e.work_id === 'work_b'))
+  const first = ok('resolve_event', { state, work_id: 'work_01', event_id: 'vendor_fixture', option_id: 'hire' })
+  assert.equal(first.state.events.pending.length, 1)
+  const otherAfter = first.state.events.pending[0]
+  assert.equal(otherAfter.event_id, otherBefore.event_id)
+  assert.equal(otherAfter.work_id, otherBefore.work_id)
+  assert.equal(otherAfter.viewed, otherBefore.viewed)
+  assert.equal(otherAfter.options.length, otherBefore.options.length)
+  assert.equal(otherAfter.options[0].id, otherBefore.options[0].id)
+  // 新增的 vendor_request 字段对旧选项恒为 null，不改变既有语义。
+  assert.equal(otherAfter.options[0].vendor_request, null)
+  const again = call('resolve_event', { state: first.state, work_id: 'work_01', event_id: 'vendor_fixture', option_id: 'hire' })
+  assert.equal(again.error.code, 'NOT_FOUND')
+})
+
+test('#122 同 seed 重放：vendor_request 签约结果与状态哈希一致', () => {
+  const run = () => {
+    let state = setupTiny(11)
+    state.company.week = 12
+    const item = findItem(state, 'work_01', 'ep01.inbetween')
+    state = vendorEvent(state, 'work_01', item)
+    const result = ok('resolve_event', { state, work_id: 'work_01', event_id: 'vendor_fixture', option_id: 'hire' })
+    return { hash: ok('hash_state', { state: result.state }).hash, vendor: result.vendor }
+  }
+  assert.deepEqual(run(), run())
+})
+
+test('#122 旧存档兼容：缺 vendor_request 的 pending 快照 round-trip 哈希稳定', () => {
+  let state = setupTiny(11)
+  state.events.pending.push({ event_id: 'legacy', name: '旧事件', work_id: 'work_01',
+    triggered_week: 0, expires_week: null, cooldown_weeks: 0, once_per_project: false, viewed: true,
+    options: [{ id: 'ok', label: '确认', kind: 'accept', cost: 0, effects: [] }] })
+  const roundTrip = JSON.parse(JSON.stringify(state))
+  assert.equal(ok('hash_state', { state: roundTrip }).hash, ok('hash_state', { state }).hash)
+  assert.equal('vendor_request' in roundTrip.events.pending[0].options[0], false)
+  const blocked = call('resolve_event', { state, work_id: 'work_01', event_id: 'nope', option_id: 'ok' })
+  assert.ok(blocked.error)
+})
 // ---------------- INV-27 监督岗位 ----------------
 
 function startedContract(offerId = 'offer_01', seed = 7) {
